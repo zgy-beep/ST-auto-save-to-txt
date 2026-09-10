@@ -1,17 +1,21 @@
 /**
  * SillyTavern 小说连载阅读扩展样式表
- * 极简优雅、融入酒馆原生主题、保障文字高对比度与自适应排版
+ * 极简优雅、100% 贴合酒馆原生抽屉边距与主题
  */
 
+/* 移除自定义 margin-bottom，严格与酒馆原生抽屉间距保持 1:1 一致 */
 #auto-save-to-txt-settings {
-    margin-bottom: 10px;
+    margin: 0;
 }
 
 #auto-save-to-txt-settings .inline-drawer-content {
+    padding: 10px 6px;
+}
+
+.novel-drawer-inner {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 10px 6px;
 }
 
 /* 状态提示卡片 */
