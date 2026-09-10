@@ -80,7 +80,7 @@ async function runTests() {
         const content1 = fs.readFileSync(filePath1, 'utf8');
         assert(content1.includes('第 1 节 · 青云道长') && content1.includes('山风拂面'), '测试 1.2: 小说章节格式规范正确');
 
-        // 测试 2: 防重检测（重复提交相同段落应跳过）
+        // 测试 2: 防重检测
         const res2 = await router.dispatch('POST', '/append', testPayload1);
         assert(res2.status === 200 && res2.data.skipped === true, '测试 2: 重复段落成功防重跳过');
 

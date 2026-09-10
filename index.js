@@ -1,10 +1,12 @@
 /**
  * SillyTavern 聊天小说连载阅读扩展 (Novel Reader Stream)
  * 
- * 专为沉浸式阅读打造：
+ * 核心特性：
+ * - 白名单 + 黑名单双重标签过滤引擎：
+ *   1. 【白名单】：指定提取正文标签块（如 <story>...</story>），留空则整篇全保留。
+ *   2. 【黑名单】：在已提取的正文中，支持继续深度剔除指定的子标签块（如 <status>、<ooc> 等）。
  * - 每次 AI 回复自动编排为规范小说章节追加写入 TXT。
- * - 支持自定义剔除预设包裹标签（如 <status>、<memory> 等）。
- * - 支持纯前端一键导出整本排版小说，零服务端门槛。
+ * - 纯前端一键导出整本排版小说，零服务端门槛。
  */
 
 import { getContext, extension_settings as ext_settings_raw } from '../../../extensions.js';
@@ -39,8 +41,9 @@ const DEFAULT_SETTINGS = {
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered',    // 章节标题样式: 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
-    indent_paragraphs: true,      // 自动段落首行空两格（中文小说排版）
-    exclude_tags: 'status,memory,details,variables,analysis', // 需排除的预设包裹标签块
+    indent_paragraphs: true,      // 自动段落首行空两格（中文小说规范排版）
+    include_tags: '',             // 【白名单】：指定正文标签（留空代表整篇保留；填入如 story 则只提取 <story>...</story>）
+    exclude_tags: 'status,memory,details,variables,analysis,ooc', // 【黑名单】：需剔除的标签块内容
 };
 
 let lastSavedSignature = {
@@ -64,7 +67,7 @@ function getSettings() {
 }
 
 /**
- * 智能小说正文净化与排版
+ * 智能小说正文排版与双重标签清洗引擎
  * @param {string} rawText 原始文本
  * @param {object} settings 当前设置
  */
@@ -72,35 +75,71 @@ function cleanNovelText(rawText, settings = {}) {
     if (!rawText || typeof rawText !== 'string') return '';
     let text = rawText;
 
-    // 1. 静默剔除 DeepSeek 等模型的 <think> 思考过程
-    text = text.replace(/<think[^>]*>[\s\S]*?<\/think>/gi, '');
-
-    // 2. 剔除自定义的预设包裹标签块（例如 <status>...</status>、<memory>...</memory> 等）
-    const excludeInput = (typeof settings.exclude_tags === 'string') ? settings.exclude_tags : DEFAULT_SETTINGS.exclude_tags;
-    if (excludeInput && excludeInput.trim()) {
-        const tags = excludeInput
-            .split(/[,，\s]+/) // 支持中英文逗号、空格分隔
-            .map(t => t.trim().replace(/^<|>$/g, '')) // 容错处理：即使输入了 <status> 也自动提取出 status
+    // ─────────────────────────────────────────────────────────────
+    // 阶段一【白名单模式】：如果配置了指定正文标签，优先提取标签内的正文
+    // ─────────────────────────────────────────────────────────────
+    const includeInput = (typeof settings.include_tags === 'string') ? settings.include_tags.trim() : '';
+    if (includeInput) {
+        const includeTags = includeInput
+            .split(/[,，\s]+/)
+            .map(t => t.trim().replace(/^<|>$/g, ''))
             .filter(Boolean);
 
-        for (const tag of tags) {
-            // 安全转义正则保留字
+        if (includeTags.length > 0) {
+            const extractedParts = [];
+            for (const tag of includeTags) {
+                const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const tagRegex = new RegExp(`<(${safeTag})[^>]*>([\\s\\S]*?)<\\/\\1>`, 'gi');
+                let match;
+                while ((match = tagRegex.exec(text)) !== null) {
+                    if (match[2] && match[2].trim()) {
+                        extractedParts.push(match[2].trim());
+                    }
+                }
+            }
+            // 若成功提取到了白名单标签内容，则以此作为小说基础内容；若未匹配到则回退至原文本
+            if (extractedParts.length > 0) {
+                text = extractedParts.join('\n\n');
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 阶段二【黑名单模式】：在正文中深度剔除不要的标签块
+    // ─────────────────────────────────────────────────────────────
+    // 1. 底层强制静默剥离 DeepSeek 等模型的 <think> 思考过程
+    text = text.replace(/<think[^>]*>[\s\S]*?<\/think>/gi, '');
+
+    // 2. 剥离自定义排除标签块（支持在白名单提取后的正文中二次剔除）
+    const excludeInput = (typeof settings.exclude_tags === 'string') 
+        ? settings.exclude_tags 
+        : (DEFAULT_SETTINGS.exclude_tags || '');
+
+    if (excludeInput && excludeInput.trim()) {
+        const excludeTags = excludeInput
+            .split(/[,，\s]+/)
+            .map(t => t.trim().replace(/^<|>$/g, ''))
+            .filter(Boolean);
+
+        for (const tag of excludeTags) {
             const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const reg = new RegExp(`<(${safeTag})[^>]*>[\\s\\S]*?<\\/\\1>`, 'gi');
             text = text.replace(reg, '');
         }
     }
 
-    // 3. 基础干扰脚本标签剥离
+    // ─────────────────────────────────────────────────────────────
+    // 阶段三【网页与排版杂质清洗】
+    // ─────────────────────────────────────────────────────────────
     text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
     text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
 
-    // 4. HTML 标签剥离并保留真实换行
+    // HTML 换行转换与标签剔除
     text = text.replace(/<br\s*[\/]?>/gi, '\n');
     text = text.replace(/<\/p>/gi, '\n\n');
     text = text.replace(/<\/?[a-zA-Z][^>]*>/g, '');
 
-    // 5. 反转义常见实体
+    // 反转义 HTML 实体
     text = text
         .replace(/&nbsp;/g, ' ')
         .replace(/&lt;/g, '<')
@@ -109,7 +148,9 @@ function cleanNovelText(rawText, settings = {}) {
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'");
 
-    // 6. 整理段落与缩进
+    // ─────────────────────────────────────────────────────────────
+    // 阶段四【中文出版小说段落规范化】
+    // ─────────────────────────────────────────────────────────────
     const paragraphs = text
         .split(/\r?\n+/)
         .map(p => p.trim())
@@ -211,7 +252,6 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         bookTitle = speakerName;
     }
 
-    // 执行包含排除标签块在内的智能排版
     const novelText = cleanNovelText(message.mes || '', settings);
     if (!novelText) return;
 
@@ -285,12 +325,21 @@ async function renderSettingsUI() {
                 </select>
             </div>
 
-            <!-- 预设排除标签块（核心新增） -->
+            <!-- 【白名单】：指定提取正文标签块 -->
             <div class="novel-form-group">
-                <span class="novel-label">排除的预设标签块（逗号分隔）：</span>
-                <input type="text" id="novel_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: status, memory, details, variables" />
+                <span class="novel-label">指定正文标签（白名单，可选）：</span>
+                <input type="text" id="novel_include_tags" class="text_pole" value="${settings.include_tags || ''}" placeholder="留空代表整篇保留；例如: story, response, content" />
                 <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                    自动剔除类似 <code>&lt;status&gt;...&lt;/status&gt;</code> 的预设状态/记忆块，保证小说正文纯净。
+                    若预设把小说写在 <code>&lt;story&gt;</code> 内，填入 <code>story</code> 即可只提取该标签内容，忽略外部其他元数据。
+                </small>
+            </div>
+
+            <!-- 【黑名单】：排除的标签块 -->
+            <div class="novel-form-group">
+                <span class="novel-label">排除的标签块（黑名单）：</span>
+                <input type="text" id="novel_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: status, memory, details, ooc, note" />
+                <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
+                    无论在整篇还是在正文标签内部，都会彻底剔除这些类似 <code>&lt;status&gt;...&lt;/status&gt;</code> 的干扰块。
                 </small>
             </div>
 
@@ -327,7 +376,6 @@ async function renderSettingsUI() {
 
     container.appendChild(panel);
 
-    // 绑定设置事件
     const bindCheck = (id, key) => {
         const el = panel.querySelector(`#${id}`);
         if (el) {
@@ -350,7 +398,16 @@ async function renderSettingsUI() {
         });
     }
 
-    // 绑定排除标签输入框
+    // 绑定白名单标签输入
+    const inputInclude = panel.querySelector('#novel_include_tags');
+    if (inputInclude) {
+        inputInclude.addEventListener('input', (e) => {
+            settings.include_tags = e.target.value.trim();
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+
+    // 绑定黑名单标签输入
     const inputExclude = panel.querySelector('#novel_exclude_tags');
     if (inputExclude) {
         inputExclude.addEventListener('input', (e) => {
@@ -423,7 +480,15 @@ async function renderSettingsUI() {
             testBtn.disabled = true;
             testBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在生成小说章节...';
 
-            const rawSample = '<status>\nHP: 100/100, MP: 50/50, 状态: 正常\n</status>\n夜幕低垂，微风拂过静谧的街角。\n书页翻动的沙沙声在耳边回荡，这是一部由你与 AI 共同谱写的故事。\n如果您在 txt 小说文件中看到这一段文字（且未包含上方的 status 状态块），说明排除标签与小说连载工作一切正常！';
+            const rawSample = `
+<status>HP: 100/100, 外部状态忽略</status>
+<story>
+<ooc>内部小提示：此段被黑名单排除</ooc>
+夜幕低垂，微风拂过静谧的街角。
+书页翻动的沙沙声在耳边回荡，这是一部由你与 AI 共同谱写的故事。
+如果您在 txt 小说文件中看到这一段文字，说明白名单提取与黑名单剔除已完美协同工作！
+</story>
+<meta>tokens: 88</meta>`;
 
             const cleanSample = cleanNovelText(rawSample, settings);
 
