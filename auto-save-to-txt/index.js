@@ -35,6 +35,7 @@ const DEFAULT_SETTINGS = {
     include_user_dialogue: false,
     chapter_style: 'numbered',
     indent_paragraphs: true,
+    exclude_tags: 'status,memory,details,variables,analysis',
 };
 
 let lastSavedSignature = {
@@ -57,12 +58,26 @@ function getSettings() {
     return extSettings[EXTENSION_NAME];
 }
 
-function cleanNovelText(rawText, indent = true) {
+function cleanNovelText(rawText, settings = {}) {
     if (!rawText || typeof rawText !== 'string') return '';
     let text = rawText;
 
     text = text.replace(/<think[^>]*>[\s\S]*?<\/think>/gi, '');
-    text = text.replace(/<details[^>]*>[\s\S]*?<\/details>/gi, '');
+
+    const excludeInput = (typeof settings.exclude_tags === 'string') ? settings.exclude_tags : DEFAULT_SETTINGS.exclude_tags;
+    if (excludeInput && excludeInput.trim()) {
+        const tags = excludeInput
+            .split(/[,，\s]+/)
+            .map(t => t.trim().replace(/^<|>$/g, ''))
+            .filter(Boolean);
+
+        for (const tag of tags) {
+            const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const reg = new RegExp(`<(${safeTag})[^>]*>[\\s\\S]*?<\\/\\1>`, 'gi');
+            text = text.replace(reg, '');
+        }
+    }
+
     text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
     text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
 
@@ -83,7 +98,8 @@ function cleanNovelText(rawText, indent = true) {
         .map(p => p.trim())
         .filter(p => p.length > 0);
 
-    if (indent) {
+    const shouldIndent = settings.indent_paragraphs !== false;
+    if (shouldIndent) {
         return paragraphs.map(p => `　　${p}`).join('\n\n');
     }
 
@@ -178,7 +194,7 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         bookTitle = speakerName;
     }
 
-    const novelText = cleanNovelText(message.mes || '', settings.indent_paragraphs);
+    const novelText = cleanNovelText(message.mes || '', settings);
     if (!novelText) return;
 
     const mesSnippet = novelText.slice(0, 80);
@@ -248,6 +264,14 @@ async function renderSettingsUI() {
                 </select>
             </div>
 
+            <div class="novel-form-group">
+                <span class="novel-label">排除的预设标签块（逗号分隔）：</span>
+                <input type="text" id="novel_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: status, memory, details, variables" />
+                <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
+                    自动剔除类似 <code>&lt;status&gt;...&lt;/status&gt;</code> 的预设状态/记忆块，保证小说正文纯净。
+                </small>
+            </div>
+
             <label class="checkbox_label" title="开启后，你的提问与互动也会作为主角对白融入小说中；关闭则只收录纯故事正文">
                 <input type="checkbox" id="novel_include_user" ${settings.include_user_dialogue ? 'checked' : ''} />
                 <span>将你的发言作为主角对白融入小说</span>
@@ -299,6 +323,14 @@ async function renderSettingsUI() {
         });
     }
 
+    const inputExclude = panel.querySelector('#novel_exclude_tags');
+    if (inputExclude) {
+        inputExclude.addEventListener('input', (e) => {
+            settings.exclude_tags = e.target.value.trim();
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+
     const exportBtn = panel.querySelector('#novel_export_all_btn');
     if (exportBtn) {
         exportBtn.addEventListener('click', () => {
@@ -320,7 +352,7 @@ async function renderSettingsUI() {
 
             for (const msg of chatLog) {
                 if (msg.is_user && !settings.include_user_dialogue) continue;
-                const cleanMes = cleanNovelText(msg.mes || '', settings.indent_paragraphs);
+                const cleanMes = cleanNovelText(msg.mes || '', settings);
                 if (!cleanMes) continue;
 
                 chapterCount++;
@@ -361,9 +393,13 @@ async function renderSettingsUI() {
             testBtn.disabled = true;
             testBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在生成小说章节...';
 
+            const rawSample = '<status>\nHP: 100/100, MP: 50/50, 状态: 正常\n</status>\n夜幕低垂，微风拂过静谧的街角。\n书页翻动的沙沙声在耳边回荡，这是一部由你与 AI 共同谱写的故事。\n如果您在 txt 小说文件中看到这一段文字（且未包含上方的 status 状态块），说明排除标签与小说连载工作一切正常！';
+
+            const cleanSample = cleanNovelText(rawSample, settings);
+
             const testPayload = {
                 name: '故事序幕',
-                mes: '夜幕低垂，微风拂过静谧的街角。\n书页翻动的沙沙声在耳边回荡，这是一部由你与 AI 共同谱写的故事。\n如果您在 txt 小说文件中看到这一段文字，说明小说连载服务已经完美就绪！',
+                mes: cleanSample,
                 is_user: false,
                 characterName: '我的小说试读本',
                 chapterNumber: 1,

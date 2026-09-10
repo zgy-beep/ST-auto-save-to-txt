@@ -1,8 +1,10 @@
 /**
  * SillyTavern 聊天小说连载阅读扩展 (Novel Reader Stream)
  * 
- * 专为沉浸式阅读打造：每次 AI 回复自动编排为规范小说章节追加写入 TXT。
- * 后台全自动静默清洗标签（DeepSeek think 思考过程、HTML 标签等），无需繁复设置。
+ * 专为沉浸式阅读打造：
+ * - 每次 AI 回复自动编排为规范小说章节追加写入 TXT。
+ * - 支持自定义剔除预设包裹标签（如 <status>、<memory> 等）。
+ * - 支持纯前端一键导出整本排版小说，零服务端门槛。
  */
 
 import { getContext, extension_settings as ext_settings_raw } from '../../../extensions.js';
@@ -36,11 +38,11 @@ const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
-    chapter_style: 'numbered',    // 章节标题样式: 'numbered' (第 1 节 · 角色名), 'dialogue' (纯对话故事流), 'separator' (以 * * * 分割)
-    indent_paragraphs: true,      // 自动段落缩进（中文小说排版）
+    chapter_style: 'numbered',    // 章节标题样式: 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
+    indent_paragraphs: true,      // 自动段落首行空两格（中文小说排版）
+    exclude_tags: 'status,memory,details,variables,analysis', // 需排除的预设包裹标签块
 };
 
-// 内存防重记录
 let lastSavedSignature = {
     messageId: null,
     characterName: '',
@@ -62,26 +64,43 @@ function getSettings() {
 }
 
 /**
- * 智能正文清洗：全自动剔除杂质，还原干净小说文学排版
+ * 智能小说正文净化与排版
+ * @param {string} rawText 原始文本
+ * @param {object} settings 当前设置
  */
-function cleanNovelText(rawText, indent = true) {
+function cleanNovelText(rawText, settings = {}) {
     if (!rawText || typeof rawText !== 'string') return '';
     let text = rawText;
 
     // 1. 静默剔除 DeepSeek 等模型的 <think> 思考过程
     text = text.replace(/<think[^>]*>[\s\S]*?<\/think>/gi, '');
 
-    // 2. 静默剔除常见干扰标签（details, script, style, 代码块残留等）
-    text = text.replace(/<details[^>]*>[\s\S]*?<\/details>/gi, '');
+    // 2. 剔除自定义的预设包裹标签块（例如 <status>...</status>、<memory>...</memory> 等）
+    const excludeInput = (typeof settings.exclude_tags === 'string') ? settings.exclude_tags : DEFAULT_SETTINGS.exclude_tags;
+    if (excludeInput && excludeInput.trim()) {
+        const tags = excludeInput
+            .split(/[,，\s]+/) // 支持中英文逗号、空格分隔
+            .map(t => t.trim().replace(/^<|>$/g, '')) // 容错处理：即使输入了 <status> 也自动提取出 status
+            .filter(Boolean);
+
+        for (const tag of tags) {
+            // 安全转义正则保留字
+            const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const reg = new RegExp(`<(${safeTag})[^>]*>[\\s\\S]*?<\\/\\1>`, 'gi');
+            text = text.replace(reg, '');
+        }
+    }
+
+    // 3. 基础干扰脚本标签剥离
     text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
     text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
 
-    // 3. HTML 标签剥离与排版换行还原
+    // 4. HTML 标签剥离并保留真实换行
     text = text.replace(/<br\s*[\/]?>/gi, '\n');
     text = text.replace(/<\/p>/gi, '\n\n');
     text = text.replace(/<\/?[a-zA-Z][^>]*>/g, '');
 
-    // 4. HTML 实体反转义
+    // 5. 反转义常见实体
     text = text
         .replace(/&nbsp;/g, ' ')
         .replace(/&lt;/g, '<')
@@ -90,23 +109,20 @@ function cleanNovelText(rawText, indent = true) {
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'");
 
-    // 5. 段落规整：清理多余空行，每段之间保留一个空行
+    // 6. 整理段落与缩进
     const paragraphs = text
         .split(/\r?\n+/)
         .map(p => p.trim())
         .filter(p => p.length > 0);
 
-    if (indent) {
-        // 中文小说排版：首行全角双空格缩进（非对话引号也适用）
+    const shouldIndent = settings.indent_paragraphs !== false;
+    if (shouldIndent) {
         return paragraphs.map(p => `　　${p}`).join('\n\n');
     }
 
     return paragraphs.join('\n\n');
 }
 
-/**
- * 检查后端连通性
- */
 async function checkServerPluginStatus() {
     try {
         const headers = (typeof getRequestHeaders === 'function') 
@@ -125,9 +141,6 @@ async function checkServerPluginStatus() {
     }
 }
 
-/**
- * 提交章节写入
- */
 async function postChapterToServer(payload) {
     try {
         const headers = (typeof getRequestHeaders === 'function') 
@@ -160,14 +173,10 @@ async function postChapterToServer(payload) {
     }
 }
 
-/**
- * 消息处理与小说章节生成
- */
 async function handleMessageSave(messageIdOrData, isFromUser = false) {
     const settings = getSettings();
     if (!settings.enabled) return;
 
-    // 如果是用户发送，但用户未勾选将主角对话写入小说，则跳过
     if (isFromUser && !settings.include_user_dialogue) {
         return;
     }
@@ -191,10 +200,8 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         return;
     }
 
-    // 发言者名字
     let speakerName = message.name || (message.is_user ? '你' : '旁白');
 
-    // 小说书名（对应文件名）：优先取角色卡名字，群聊取发言角色名
     let bookTitle = '我的小说连载';
     const charList = ctx.characters || characters_raw || window.characters || [];
     const chid = (typeof ctx.this_chid !== 'undefined') ? ctx.this_chid : (typeof this_chid_raw !== 'undefined' ? this_chid_raw : window.this_chid);
@@ -204,11 +211,10 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         bookTitle = speakerName;
     }
 
-    // 智能小说正文排版
-    const novelText = cleanNovelText(message.mes || '', settings.indent_paragraphs);
+    // 执行包含排除标签块在内的智能排版
+    const novelText = cleanNovelText(message.mes || '', settings);
     if (!novelText) return;
 
-    // 防重比对
     const mesSnippet = novelText.slice(0, 80);
     if (
         lastSavedSignature.messageId === messageIndex &&
@@ -218,7 +224,6 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         return;
     }
 
-    // 计算当前章节序号（根据当前聊天历史中有效段落估算章节数）
     const chapterNumber = chatLog.filter((m, idx) => idx <= messageIndex && (!m.is_user || settings.include_user_dialogue)).length;
 
     const payload = {
@@ -240,9 +245,6 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
     }
 }
 
-/**
- * 渲染极简“小说阅读器”设置面板
- */
 async function renderSettingsUI() {
     const settings = getSettings();
     const container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
@@ -283,6 +285,15 @@ async function renderSettingsUI() {
                 </select>
             </div>
 
+            <!-- 预设排除标签块（核心新增） -->
+            <div class="novel-form-group">
+                <span class="novel-label">排除的预设标签块（逗号分隔）：</span>
+                <input type="text" id="novel_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: status, memory, details, variables" />
+                <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
+                    自动剔除类似 <code>&lt;status&gt;...&lt;/status&gt;</code> 的预设状态/记忆块，保证小说正文纯净。
+                </small>
+            </div>
+
             <!-- 包含主角互动开关 -->
             <label class="checkbox_label" title="开启后，你的提问与互动也会作为主角对白融入小说中；关闭则只收录纯故事正文">
                 <input type="checkbox" id="novel_include_user" ${settings.include_user_dialogue ? 'checked' : ''} />
@@ -304,12 +315,9 @@ async function renderSettingsUI() {
 
             <!-- 操作按钮组 -->
             <div style="display: flex; gap: 8px; margin-top: 4px;">
-                <!-- 纯前端一键导出整本小说（免服务端） -->
                 <button id="novel_export_all_btn" class="menu_button" style="flex: 1; background: var(--SmartThemeQuoteColor, #2980b9); color: #fff;" title="即使没有安装服务端插件，也可以一键将当前所有聊天按小说章节排版并下载为 txt！">
                     <i class="fa-solid fa-download"></i> 导出整本小说 TXT
                 </button>
-
-                <!-- 测试连载一章（需服务端） -->
                 <button id="novel_test_btn" class="menu_button" style="flex: 1;" title="测试服务端插件连通性">
                     <i class="fa-solid fa-feather-pointed"></i> 试写一章
                 </button>
@@ -342,7 +350,16 @@ async function renderSettingsUI() {
         });
     }
 
-    // 纯前端一键导出整本小说（100% 零依赖，无需服务端插件）
+    // 绑定排除标签输入框
+    const inputExclude = panel.querySelector('#novel_exclude_tags');
+    if (inputExclude) {
+        inputExclude.addEventListener('input', (e) => {
+            settings.exclude_tags = e.target.value.trim();
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+
+    // 纯前端一键导出整本小说
     const exportBtn = panel.querySelector('#novel_export_all_btn');
     if (exportBtn) {
         exportBtn.addEventListener('click', () => {
@@ -364,7 +381,7 @@ async function renderSettingsUI() {
 
             for (const msg of chatLog) {
                 if (msg.is_user && !settings.include_user_dialogue) continue;
-                const cleanMes = cleanNovelText(msg.mes || '', settings.indent_paragraphs);
+                const cleanMes = cleanNovelText(msg.mes || '', settings);
                 if (!cleanMes) continue;
 
                 chapterCount++;
@@ -383,7 +400,6 @@ async function renderSettingsUI() {
                 return;
             }
 
-            // 触发浏览器直接下载 TXT 文件
             const blob = new Blob([novelText], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -400,7 +416,6 @@ async function renderSettingsUI() {
         });
     }
 
-
     // 绑定测试按钮
     const testBtn = panel.querySelector('#novel_test_btn');
     if (testBtn) {
@@ -408,9 +423,13 @@ async function renderSettingsUI() {
             testBtn.disabled = true;
             testBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在生成小说章节...';
 
+            const rawSample = '<status>\nHP: 100/100, MP: 50/50, 状态: 正常\n</status>\n夜幕低垂，微风拂过静谧的街角。\n书页翻动的沙沙声在耳边回荡，这是一部由你与 AI 共同谱写的故事。\n如果您在 txt 小说文件中看到这一段文字（且未包含上方的 status 状态块），说明排除标签与小说连载工作一切正常！';
+
+            const cleanSample = cleanNovelText(rawSample, settings);
+
             const testPayload = {
                 name: '故事序幕',
-                mes: '夜幕低垂，微风拂过静谧的街角。\n书页翻动的沙沙声在耳边回荡，这是一部由你与 AI 共同谱写的故事。\n如果您在 txt 小说文件中看到这一段文字，说明小说连载服务已经完美就绪！',
+                mes: cleanSample,
                 is_user: false,
                 characterName: '我的小说试读本',
                 chapterNumber: 1,
@@ -419,7 +438,7 @@ async function renderSettingsUI() {
 
             const success = await postChapterToServer(testPayload);
             testBtn.disabled = false;
-            testBtn.innerHTML = '<i class="fa-solid fa-feather-pointed"></i> 试写一章（测试连通并生成小说小节）';
+            testBtn.innerHTML = '<i class="fa-solid fa-feather-pointed"></i> 试写一章';
 
             if (success) {
                 if (window.toastr) {
@@ -431,7 +450,6 @@ async function renderSettingsUI() {
         });
     }
 
-    // 连通性状态检测
     const badge = panel.querySelector('#novel_save_status_badge');
     const status = await checkServerPluginStatus();
     if (status.ready) {
@@ -444,7 +462,7 @@ async function renderSettingsUI() {
         badge.className = 'novel-alert warning';
         badge.innerHTML = `
             <i class="fa-solid fa-triangle-exclamation"></i>
-            <div class="novel-alert-text"><b>服务插件未运行：</b>请确认已将 <code>plugins/auto-save</code> 放置于 SillyTavern 根目录并在 <code>config.yaml</code> 开启 <code>enableServerPlugins: true</code>。</div>
+            <div class="novel-alert-text"><b>服务插件未运行：</b>实时追加需配置服务端；或可直接点击下方<b>“导出整本小说”</b>一键下载。</div>
         `;
     }
 }
