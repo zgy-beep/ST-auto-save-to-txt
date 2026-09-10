@@ -2,11 +2,6 @@
  * SillyTavern 聊天记录自动存档至 TXT 前端扩展
  * 
  * 文件路径：public/scripts/extensions/third-party/ST-auto-save-to-txt/index.js
- * 
- * 架构规范：
- * - 位于扩展仓库根目录，由 SillyTavern 官方扩展加载器自动执行。
- * - 优先从 ../../../extensions.js 和 ../../../../script.js 导入核心依赖。
- * - 结合 SillyTavern.getContext() 进行全版本动态兼容。
  */
 
 import { getContext, extension_settings as ext_settings_raw } from '../../../extensions.js';
@@ -20,7 +15,7 @@ import {
     this_chid as this_chid_raw
 } from '../../../../script.js';
 
-// 获取 SillyTavern 运行期上下文（双重保障）
+// 获取 SillyTavern 运行期上下文
 function getStContext() {
     if (typeof getContext === 'function') {
         return getContext();
@@ -44,9 +39,9 @@ const DEFAULT_SETTINGS = {
     save_user_messages: false,      // 是否同时保存用户消息
     split_by_character: true,       // 是否按角色名分文件（true: 角色名.txt, false: all.txt）
     strip_html: true,               // 是否剔除 HTML 标签
-    filter_think_tags: true,        // 是否剔除 <think> 深度思考标签（常用在 DeepSeek 等推理模型）
-    exclude_tags: 'think,details,script,style', // 需过滤排除的自定义标签列表（逗号分隔）
-    include_only_tags: '',          // 仅提取指定标签内的正文（为空则保留全部有效正文）
+    filter_think_tags: true,        // 是否剔除 <think> 深度思考标签（DeepSeek 等推理模型）
+    exclude_tags: 'think,details,script,style', // 需过滤排除的自定义标签列表
+    include_only_tags: '',          // 仅提取指定标签内的正文
 };
 
 // 内存中维护上一条成功保存的记录特征，用于前端即时防重
@@ -65,7 +60,6 @@ function getSettings() {
     if (!extSettings[EXTENSION_NAME]) {
         extSettings[EXTENSION_NAME] = { ...DEFAULT_SETTINGS };
     } else {
-        // 补齐可能新增的配置项
         for (const key of Object.keys(DEFAULT_SETTINGS)) {
             if (extSettings[EXTENSION_NAME][key] === undefined) {
                 extSettings[EXTENSION_NAME][key] = DEFAULT_SETTINGS[key];
@@ -76,7 +70,7 @@ function getSettings() {
 }
 
 /**
- * 格式化时间戳为本地标准可读字符串：YYYY-MM-DD HH:mm:ss
+ * 格式化时间戳：YYYY-MM-DD HH:mm:ss
  */
 function formatTimestamp(date = new Date()) {
     const d = (date instanceof Date && !isNaN(date)) ? date : new Date();
@@ -92,15 +86,12 @@ function formatTimestamp(date = new Date()) {
 
 /**
  * 对正文文本进行标签过滤与 HTML 清洗
- * @param {string} text - 原始正文
- * @param {object} settings - 当前配置
- * @returns {string} 清洗后的正文
  */
 function filterMessageContent(text, settings) {
     if (!text || typeof text !== 'string') return '';
     let result = text;
 
-    // 1. 若配置了仅包含指定标签（例如只提取某特定标记内的输出）
+    // 1. 仅提取指定标签
     if (settings.include_only_tags && settings.include_only_tags.trim()) {
         const allowedTags = settings.include_only_tags
             .split(',')
@@ -122,12 +113,12 @@ function filterMessageContent(text, settings) {
         }
     }
 
-    // 2. 过滤深度思考标签 <think>...</think>（DeepSeek R1 / 推理模型特有）
+    // 2. 过滤深度思考标签 <think>...</think>
     if (settings.filter_think_tags) {
         result = result.replace(/<think[^>]*>[\s\S]*?<\/think>/gi, '');
     }
 
-    // 3. 过滤自定义排除标签（包含标签及其包裹内容）
+    // 3. 过滤自定义排除标签
     if (settings.exclude_tags && settings.exclude_tags.trim()) {
         const excludeList = settings.exclude_tags
             .split(',')
@@ -141,7 +132,7 @@ function filterMessageContent(text, settings) {
         }
     }
 
-    // 4. 剔除普通 HTML 标签（保留纯文本），如 <div>, <span>, <br> 等
+    // 4. 剔除普通 HTML 标签（保留纯文本）
     if (settings.strip_html) {
         result = result.replace(/<br\s*[\/]?>/gi, '\n');
         result = result.replace(/<\/p>/gi, '\n');
@@ -167,21 +158,20 @@ async function checkServerPluginStatus() {
             ? getRequestHeaders() 
             : { 'Content-Type': 'application/json' };
 
-        // 发送一个空或者检测请求
         const response = await fetch('/api/plugins/auto-save/append', {
             method: 'POST',
             headers: headers,
             body: JSON.stringify({}),
         });
 
-        // 如果服务端返回 400 (Bad Request)，说明路由通了，插件正在运行
+        // 400 代表路由通畅且进入了插件逻辑
         if (response.status === 400) {
             return { ready: true };
         }
         if (response.status === 404) {
-            return { ready: false, reason: '404 Not Found (服务端未开启插件或未放置 plugins/auto-save 目录)' };
+            return { ready: false, reason: '404' };
         }
-        return { ready: response.ok, reason: `HTTP 状态码: ${response.status}` };
+        return { ready: response.ok, reason: String(response.status) };
     } catch (err) {
         return { ready: false, reason: err.message };
     }
@@ -317,7 +307,6 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
  */
 async function renderSettingsUI() {
     const settings = getSettings();
-    // 兼容左列或右列扩展容器
     const container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
     if (!container) {
         console.warn('[AutoSaveTxt] 未找到扩展设置容器 #extensions_settings，稍后重试');
@@ -329,90 +318,91 @@ async function renderSettingsUI() {
 
     panel = document.createElement('div');
     panel.id = 'auto-save-to-txt-settings';
-    panel.className = 'auto-save-settings-box';
+    panel.className = 'inline-drawer';
 
     panel.innerHTML = `
-        <div class="inline-drawer">
-            <div class="inline-drawer-toggle inline-drawer-header">
-                <b>自动存档到 TXT (Auto Save to TXT)</b>
-                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>自动存档到 TXT (Auto Save to TXT)</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <!-- 服务端状态指示徽章 -->
+            <div id="auto_save_status_badge" class="auto-save-alert" style="background: rgba(128,128,128,0.15); color: var(--SmartThemeEmColor, #eee);">
+                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                <div class="auto-save-alert-body">正在检测服务端插件连通性...</div>
             </div>
-            <div class="inline-drawer-content" style="display: flex; flex-direction: column; gap: 10px; padding: 10px 5px;">
-                <!-- 服务端状态指示徽章 -->
-                <div id="auto_save_status_badge" style="font-size: 12px; padding: 6px 10px; border-radius: 4px; display: flex; align-items: center; gap: 6px; background: rgba(128,128,128,0.2);">
-                    <i class="fa-solid fa-circle-notch fa-spin"></i> 正在检测服务端插件连通性...
-                </div>
 
-                <!-- 扩展总开关 -->
-                <label class="checkbox_label" title="开启后，每次 AI 回复完成后自动保存至服务端">
-                    <input type="checkbox" id="auto_save_enabled" ${settings.enabled ? 'checked' : ''} />
-                    <span>启用自动存档</span>
-                </label>
+            <!-- 扩展总开关 -->
+            <label class="checkbox_label" title="开启后，每次 AI 回复完成后自动保存至服务端">
+                <input type="checkbox" id="auto_save_enabled" ${settings.enabled ? 'checked' : ''} />
+                <span>启用自动存档</span>
+            </label>
 
-                <!-- 保存用户消息开关 -->
-                <label class="checkbox_label" title="是否在用户每次发送消息后也记录到 txt 文件">
-                    <input type="checkbox" id="auto_save_user_messages" ${settings.save_user_messages ? 'checked' : ''} />
-                    <span>同时保存用户消息</span>
-                </label>
+            <!-- 保存用户消息开关 -->
+            <label class="checkbox_label" title="是否在用户每次发送消息后也记录到 txt 文件">
+                <input type="checkbox" id="auto_save_user_messages" ${settings.save_user_messages ? 'checked' : ''} />
+                <span>同时保存用户消息</span>
+            </label>
 
-                <!-- 按角色名分文件 -->
-                <label class="checkbox_label" title="开启后按角色名分别创建 txt 文件；关闭则全部追加至 all.txt">
-                    <input type="checkbox" id="auto_save_split_by_character" ${settings.split_by_character ? 'checked' : ''} />
-                    <span>按角色名分文件（开启: [角色名].txt，关闭: all.txt）</span>
-                </label>
+            <!-- 按角色名分文件 -->
+            <label class="checkbox_label" title="开启后按角色名分别创建 txt 文件；关闭则全部追加至 all.txt">
+                <input type="checkbox" id="auto_save_split_by_character" ${settings.split_by_character ? 'checked' : ''} />
+                <span>按角色名分文件（开启: [角色名].txt，关闭: all.txt）</span>
+            </label>
 
-                <!-- 剔除 HTML 标签 -->
-                <label class="checkbox_label" title="保存时自动移除 HTML 标签，仅保留纯文本">
-                    <input type="checkbox" id="auto_save_strip_html" ${settings.strip_html ? 'checked' : ''} />
-                    <span>剔除 HTML 标签</span>
-                </label>
+            <!-- 剔除 HTML 标签 -->
+            <label class="checkbox_label" title="保存时自动移除 HTML 标签，仅保留纯文本">
+                <input type="checkbox" id="auto_save_strip_html" ${settings.strip_html ? 'checked' : ''} />
+                <span>剔除 HTML 标签</span>
+            </label>
 
-                <!-- 剔除推理思考标签 -->
-                <label class="checkbox_label" title="过滤 DeepSeek R1 等推理模型的 <think>...</think> 内部思考正文">
-                    <input type="checkbox" id="auto_save_filter_think" ${settings.filter_think_tags ? 'checked' : ''} />
-                    <span>剔除模型思考标签 (&lt;think&gt;...&lt;/think&gt;)</span>
-                </label>
+            <!-- 剔除推理思考标签 -->
+            <label class="checkbox_label" title="过滤 DeepSeek R1 等推理模型的 <think>...</think> 内部思考正文">
+                <input type="checkbox" id="auto_save_filter_think" ${settings.filter_think_tags ? 'checked' : ''} />
+                <span>剔除模型思考标签 (&lt;think&gt;...&lt;/think&gt;)</span>
+            </label>
 
-                <!-- 自定义排除标签 -->
-                <div style="display: flex; flex-direction: column; gap: 4px;">
-                    <span style="font-size: 12px; opacity: 0.85;">排除的标签（逗号分隔，同时排除标签及内部内容）：</span>
-                    <input type="text" id="auto_save_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: think,details,script" />
-                </div>
+            <!-- 自定义排除标签 -->
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span class="auto-save-input-desc">排除的标签（逗号分隔，同时排除标签及内部内容）：</span>
+                <input type="text" id="auto_save_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: think,details,script" />
+            </div>
 
-                <!-- 仅保留指定标签内容（可选） -->
-                <div style="display: flex; flex-direction: column; gap: 4px;">
-                    <span style="font-size: 12px; opacity: 0.85;">仅提取指定标签（可选，留空则提取整篇正文）：</span>
-                    <input type="text" id="auto_save_include_tags" class="text_pole" value="${settings.include_only_tags || ''}" placeholder="例如: response（留空代表不限制）" />
-                </div>
+            <!-- 仅保留指定标签内容（可选） -->
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span class="auto-save-input-desc">仅提取指定标签（可选，留空则提取整篇正文）：</span>
+                <input type="text" id="auto_save_include_tags" class="text_pole" value="${settings.include_only_tags || ''}" placeholder="例如: response（留空代表不限制）" />
+            </div>
 
-                <!-- 存储位置提示 -->
-                <div class="auto-save-path-hint" style="font-size: 12px; opacity: 0.75; padding: 6px; border-left: 3px solid var(--SmartThemeQuoteColor, #4a90e2); background: rgba(0,0,0,0.15);">
-                    <i class="fa-solid fa-folder-open"></i> 文件保存路径：<code>SillyTavern/plugins/auto-save/logs/</code>
-                </div>
+            <!-- 存储位置提示 -->
+            <div class="auto-save-path-hint">
+                <i class="fa-solid fa-folder-open"></i> 文件保存路径：<code>SillyTavern/plugins/auto-save/logs/</code>
+            </div>
 
-                <!-- 立即测试保存按钮 -->
-                <div style="margin-top: 5px;">
-                    <button id="auto_save_test_btn" class="menu_button">
-                        <i class="fa-solid fa-floppy-disk"></i> 立即测试保存（写入一条测试记录）
-                    </button>
-                </div>
+            <!-- 立即测试保存按钮 -->
+            <div style="margin-top: 4px;">
+                <button id="auto_save_test_btn" class="menu_button">
+                    <i class="fa-solid fa-floppy-disk"></i> 立即测试保存（写入一条测试记录）
+                </button>
             </div>
         </div>
     `;
 
     container.appendChild(panel);
 
-    // 折叠展开交互
+    // 折叠展开交互（ST 若未自带委托则做容错支持）
     const toggleHeader = panel.querySelector('.inline-drawer-toggle');
     const drawerContent = panel.querySelector('.inline-drawer-content');
     const drawerIcon = panel.querySelector('.inline-drawer-icon');
-    toggleHeader.addEventListener('click', () => {
-        const isHidden = drawerContent.style.display === 'none';
-        drawerContent.style.display = isHidden ? 'flex' : 'none';
-        drawerIcon.classList.toggle('down', isHidden);
+    toggleHeader.addEventListener('click', (e) => {
+        // 如果 ST 原生已绑定，则原生会触发 slideToggle；做防重复兼容
+        setTimeout(() => {
+            const isVisible = $(drawerContent).is(':visible');
+            drawerIcon.classList.toggle('down', isVisible);
+        }, 50);
     });
 
-    // 绑定设置变更事件
+    // 绑定设置项事件
     const bindCheckbox = (id, key) => {
         const el = panel.querySelector(`#${id}`);
         if (el) {
@@ -471,17 +461,27 @@ async function renderSettingsUI() {
         });
     }
 
-    // 异步检测服务端插件连通性并在 UI 给出明确指引
+    // 异步检测服务端插件连通性
     const badge = panel.querySelector('#auto_save_status_badge');
     const status = await checkServerPluginStatus();
     if (status.ready) {
-        badge.style.background = 'rgba(46, 204, 113, 0.2)';
-        badge.style.color = '#2ecc71';
-        badge.innerHTML = '<i class="fa-solid fa-circle-check"></i> 服务端插件已就绪 (可正常存档)';
+        badge.className = 'auto-save-alert success';
+        badge.removeAttribute('style');
+        badge.innerHTML = `
+            <i class="fa-solid fa-circle-check"></i>
+            <div class="auto-save-alert-body">
+                <b>服务端插件已就绪：</b>每次 AI 回复完成后将自动追加归档至 TXT。
+            </div>
+        `;
     } else {
-        badge.style.background = 'rgba(231, 76, 60, 0.2)';
-        badge.style.color = '#e74c3c';
-        badge.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> 服务端插件未运行：请将本扩展内的 <code>plugins/auto-save</code> 复制到 SillyTavern 的 <code>plugins/</code> 目录，并在 <code>config.yaml</code> 中开启 <code>enableServerPlugins: true</code>`;
+        badge.className = 'auto-save-alert warning';
+        badge.removeAttribute('style');
+        badge.innerHTML = `
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <div class="auto-save-alert-body">
+                <b>服务端插件未运行：</b>请将本扩展目录中的 <code>plugins/auto-save</code> 复制到 SillyTavern 根目录下的 <code>plugins/</code>，并在 <code>config.yaml</code> 中设置 <code>enableServerPlugins: true</code> 后重启终端服务。
+            </div>
+        `;
     }
 }
 
@@ -493,7 +493,6 @@ jQuery(async () => {
 
     getSettings();
 
-    // 渲染 UI 设置面板（做短暂延迟以确保 ST 侧边栏 DOM 准备完毕）
     setTimeout(() => {
         renderSettingsUI();
     }, 500);
@@ -509,7 +508,6 @@ jQuery(async () => {
         });
         console.log('[AutoSaveTxt] 事件监听器已就绪 (MESSAGE_RECEIVED & MESSAGE_SENT)');
     } else {
-        console.warn('[AutoSaveTxt] 警告: 未获取到 eventSource 或 event_types，将尝试延迟绑定');
         setTimeout(() => {
             const retryCtx = getStContext();
             if (retryCtx.eventSource && retryCtx.event_types) {

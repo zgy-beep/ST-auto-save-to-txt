@@ -1,45 +1,108 @@
 /**
  * 自动存档到 TXT (Auto Save to TXT) 扩展样式表
+ * 适配 SillyTavern 原生主题体系，防止自定义样式冲突
  */
-.auto-save-settings-box {
+
+#auto-save-to-txt-settings {
     margin-bottom: 10px;
-    border-radius: 6px;
-    background-color: var(--SmartThemeBodyColor, rgba(0, 0, 0, 0.2));
 }
 
-.auto-save-settings-box .inline-drawer-toggle {
-    cursor: pointer;
-    user-select: none;
-    padding: 8px 12px;
-    border-radius: 4px;
+#auto-save-to-txt-settings .inline-drawer-content {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: var(--SmartThemeQuoteColor, rgba(255, 255, 255, 0.05));
-    transition: background-color 0.2s ease;
+    flex-direction: column;
+    gap: 12px;
+    padding: 10px 6px;
 }
 
-.auto-save-settings-box .inline-drawer-toggle:hover {
-    filter: brightness(1.1);
-}
-
-.auto-save-settings-box label.checkbox_label {
+.auto-save-alert {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
-    cursor: pointer;
-    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.6;
+    word-break: break-word;
+    box-sizing: border-box;
 }
 
-.auto-save-settings-box input.text_pole {
+.auto-save-alert i {
+    font-size: 15px;
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+
+.auto-save-alert-body {
+    flex: 1;
+    display: block;
+    line-height: 1.6;
+}
+
+.auto-save-alert.warning {
+    background: rgba(231, 76, 60, 0.15) !important;
+    border: 1px solid rgba(231, 76, 60, 0.5) !important;
+    color: #ff6b6b !important;
+}
+
+.auto-save-alert.success {
+    background: rgba(46, 204, 113, 0.15) !important;
+    border: 1px solid rgba(46, 204, 113, 0.5) !important;
+    color: #2ecc71 !important;
+}
+
+#auto-save-to-txt-settings label.checkbox_label {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    cursor: pointer !important;
+    font-size: 13px !important;
+    color: var(--SmartThemeEmColor, #eeeeee) !important;
+    user-select: none;
+}
+
+#auto-save-to-txt-settings label.checkbox_label span {
+    color: var(--SmartThemeEmColor, #eeeeee) !important;
+    font-size: 13px !important;
+    line-height: 1.4;
+}
+
+.auto-save-input-desc {
+    display: block;
+    font-size: 12px;
+    color: var(--SmartThemeEmColor, #cccccc);
+    opacity: 0.9;
+    margin-bottom: 2px;
+}
+
+#auto-save-to-txt-settings input.text_pole {
     width: 100%;
     box-sizing: border-box;
-    padding: 6px 8px;
+    padding: 6px 10px;
     font-size: 12px;
     border-radius: 4px;
 }
 
-.auto-save-settings-box button.menu_button {
+.auto-save-path-hint {
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.2);
+    border-left: 3px solid var(--SmartThemeQuoteColor, #4a90e2);
+    color: var(--SmartThemeEmColor, #dddddd);
+    word-break: break-all;
+}
+
+#auto-save-to-txt-settings code {
+    background: rgba(0, 0, 0, 0.35);
+    color: #f1c40f;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+#auto-save-to-txt-settings button.menu_button {
     width: 100%;
     padding: 8px;
     font-weight: bold;
