@@ -74,6 +74,21 @@ function cleanNovelText(rawText, settings = {}) {
     if (!rawText || typeof rawText !== 'string') return '';
     let text = rawText;
 
+    // 阶段零【思考流与思维链清洗】：
+    // 应对 DeepSeek R1、Fox~ 及各大代理渠道常见的思考块，支持成对闭合或开篇缺失开标签仅有闭标签的情况
+    // 1. 彻底清除成对的思考/思维链标签块（如 <think>...</think>, <think_fox~>...</think_fox~>, <thought>...</thought> 等）
+    text = text.replace(/<([a-zA-Z0-9_\-~]*(?:think|thought|reasoning)[a-zA-Z0-9_\-~]*)[^>]*>[\s\S]*?<\/\1>\s*/gi, '');
+
+    // 2. 彻底清除开篇无起始标签、仅有结束标签的头部思考流（如以思考文本开篇，并以 </think_fox~> 或 </think> 结束）
+    let prevThinkText = '';
+    while (prevThinkText !== text) {
+        prevThinkText = text;
+        text = text.replace(/^[\s\S]*?<\/[a-zA-Z0-9_\-~]*(?:think|thought|reasoning)[a-zA-Z0-9_\-~]*>\s*/i, '');
+    }
+
+    // 3. 清除残留的孤立思考标签标记
+    text = text.replace(/<\/?(?:[a-zA-Z0-9_\-~]*(?:think|thought|reasoning)[a-zA-Z0-9_\-~]*)[^>]*>/gi, '');
+
     // 阶段一【白名单模式】：优先提取指定标签内的正文
     const includeInput = (typeof settings.include_tags === 'string') ? settings.include_tags.trim() : '';
     if (includeInput) {
@@ -101,8 +116,6 @@ function cleanNovelText(rawText, settings = {}) {
     }
 
     // 阶段二【黑名单模式】：深度剔除不要的标签块
-    text = text.replace(/<think[^>]*>[\s\S]*?<\/think>/gi, '');
-
     const excludeInput = (typeof settings.exclude_tags === 'string') 
         ? settings.exclude_tags 
         : (DEFAULT_SETTINGS.exclude_tags || '');
@@ -115,8 +128,15 @@ function cleanNovelText(rawText, settings = {}) {
 
         for (const tag of excludeTags) {
             const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const reg = new RegExp(`<(${safeTag})[^>]*>[\\s\\S]*?<\\/\\1>`, 'gi');
+            // 成对标签块排除
+            const reg = new RegExp(`<(${safeTag})[^>]*>[\\s\\S]*?<\\/\\1>\\s*`, 'gi');
             text = text.replace(reg, '');
+
+            // 若黑名单标签开篇缺失起始标签仅有结束标签（如 </tag>），也将开头思考/内容剔除
+            if (!new RegExp(`<${safeTag}[^>]*>`, 'i').test(text)) {
+                const orphanReg = new RegExp(`^[\\s\\S]*?<\\/${safeTag}[^>]*>\\s*`, 'i');
+                text = text.replace(orphanReg, '');
+            }
         }
     }
 
