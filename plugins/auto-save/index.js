@@ -183,8 +183,19 @@ async function exit() {
     console.log(`[${pluginName}] 小说连载服务已退出。`);
 }
 
+const info = {
+    id: 'auto-save',
+    name: 'Auto Save to TXT',
+    description: 'SillyTavern 聊天小说连载阅读服务端追加插件'
+};
+
 module.exports = {
     init,
     exit,
-    pluginName
+    info,
+    default: {
+        init,
+        exit,
+        info
+    }
 };
