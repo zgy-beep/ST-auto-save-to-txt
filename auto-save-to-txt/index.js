@@ -35,8 +35,8 @@ const DEFAULT_SETTINGS = {
     include_user_dialogue: false,
     chapter_style: 'numbered',
     indent_paragraphs: true,
-    include_tags: '',
-    exclude_tags: 'status,memory,details,variables,analysis,ooc',
+    include_tags: '',             // 【白名单】：指定正文标签（留空代表整篇保留；填入如 story 则只提取 <story>...</story>）
+    exclude_tags: 'status,memory,details,variables,analysis,ooc,note,draft,system,log', // 【黑名单】：需剔除的标签块内容
 };
 
 let lastSavedSignature = {
@@ -59,24 +59,37 @@ function getSettings() {
     return extSettings[EXTENSION_NAME];
 }
 
+const INLINE_TAGS = new Set(['b', 'i', 'u', 's', 'em', 'strong', 'span', 'sub', 'sup', 'small', 'del', 'mark']);
+
 function cleanNovelText(rawText, settings = {}) {
     if (!rawText || typeof rawText !== 'string') return '';
     let text = rawText;
 
-    // 阶段零【思考流与思维链清洗】：
-    // 应对 DeepSeek R1、Fox~ 及各大代理渠道常见的思考块，支持成对闭合或开篇缺失开标签仅有闭标签的情况
-    // 1. 彻底清除成对的思考/思维链标签块（如 <think>...</think>, <think_fox~>...</think_fox~>, <thought>...</thought> 等）
-    text = text.replace(/<([a-zA-Z0-9_\-~]*(?:think|thought|reasoning)[a-zA-Z0-9_\-~]*)[^>]*>[\s\S]*?<\/\1>\s*/gi, '');
-
-    // 2. 彻底清除开篇无起始标签、仅有结束标签的头部思考流（如以思考文本开篇，并以 </think_fox~> 或 </think> 结束）
-    let prevThinkText = '';
-    while (prevThinkText !== text) {
-        prevThinkText = text;
-        text = text.replace(/^[\s\S]*?<\/[a-zA-Z0-9_\-~]*(?:think|thought|reasoning)[a-zA-Z0-9_\-~]*>\s*/i, '');
+    // 阶段零【通用前置无头标签与思维链智能清洗】：
+    // 应对任何反代、Prefill、插件导致的“开篇无起始标签、仅有闭标签”问题（无论标签名叫什么，均可自动识别并切除）
+    let prevLeadText = '';
+    while (prevLeadText !== text) {
+        prevLeadText = text;
+        const match = text.match(/^([\s\S]*?)<\/\s*([a-zA-Z0-9_\-~.:#]+)\s*>\s*/i);
+        if (match) {
+            const beforeClosing = match[1];
+            const tagName = match[2].toLowerCase();
+            if (!INLINE_TAGS.has(tagName)) {
+                const safeTag = match[2].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const openTagRegex = new RegExp(`<\\s*${safeTag}[^>]*>`, 'i');
+                if (!openTagRegex.test(beforeClosing)) {
+                    // 开篇内容中不存在对应开标签，证实这是被省略了开标签的前置内容，彻底切除
+                    text = text.slice(match[0].length);
+                    continue;
+                }
+            }
+        }
+        break;
     }
 
-    // 3. 清除残留的孤立思考标签标记
-    text = text.replace(/<\/?(?:[a-zA-Z0-9_\-~]*(?:think|thought|reasoning)[a-zA-Z0-9_\-~]*)[^>]*>/gi, '');
+    // 泛化剔除成对的思考/思维链/草稿/规划标签（覆盖 think, thought, reasoning, cot, scratchpad, reflection, inner_thought 等各类变体）
+    const genericAuxiliaryPattern = /<\s*([a-zA-Z0-9_\-~.:#]*(?:think|thought|reasoning|cot|scratchpad|reflection|inner_thought|analysis|plan)[a-zA-Z0-9_\-~.:#]*)[^>]*>[\s\S]*?<\/\s*\1\s*>\s*/gi;
+    text = text.replace(genericAuxiliaryPattern, '');
 
     // 阶段一【白名单模式】：优先提取指定标签内的正文
     const includeInput = (typeof settings.include_tags === 'string') ? settings.include_tags.trim() : '';
@@ -90,7 +103,7 @@ function cleanNovelText(rawText, settings = {}) {
             const extractedParts = [];
             for (const tag of includeTags) {
                 const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const tagRegex = new RegExp(`<(${safeTag})[^>]*>([\\s\\S]*?)<\\/\\1>`, 'gi');
+                const tagRegex = new RegExp(`<\\s*(${safeTag})[^>]*>([\\s\\S]*?)<\\/\\s*\\1\\s*>`, 'gi');
                 let match;
                 while ((match = tagRegex.exec(text)) !== null) {
                     if (match[2] && match[2].trim()) {
@@ -104,7 +117,7 @@ function cleanNovelText(rawText, settings = {}) {
         }
     }
 
-    // 阶段二【黑名单模式】：深度剔除不要的标签块
+    // 阶段二【黑名单模式】：深度剔除不要的标签块（支持成对、开篇无开标签、尾部未闭合等各类异常形态）
     const excludeInput = (typeof settings.exclude_tags === 'string') 
         ? settings.exclude_tags 
         : (DEFAULT_SETTINGS.exclude_tags || '');
@@ -117,23 +130,30 @@ function cleanNovelText(rawText, settings = {}) {
 
         for (const tag of excludeTags) {
             const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // 成对标签块排除
-            const reg = new RegExp(`<(${safeTag})[^>]*>[\\s\\S]*?<\\/\\1>\\s*`, 'gi');
-            text = text.replace(reg, '');
+            // 1. 成对标签块排除
+            const pairReg = new RegExp(`<\\s*(${safeTag})[^>]*>[\\s\\S]*?<\\/\\s*\\1\\s*>\\s*`, 'gi');
+            text = text.replace(pairReg, '');
 
-            // 若黑名单标签开篇缺失起始标签仅有结束标签（如 </tag>），也将开头思考/内容剔除
-            if (!new RegExp(`<${safeTag}[^>]*>`, 'i').test(text)) {
-                const orphanReg = new RegExp(`^[\\s\\S]*?<\\/${safeTag}[^>]*>\\s*`, 'i');
-                text = text.replace(orphanReg, '');
+            // 2. 开篇缺失开标签、仅有闭标签的孤立块排除
+            if (!new RegExp(`<\\s*${safeTag}[^>]*>`, 'i').test(text)) {
+                const orphanCloseReg = new RegExp(`^[\\s\\S]*?<\\/\\s*${safeTag}\\s*>\\s*`, 'i');
+                text = text.replace(orphanCloseReg, '');
+            }
+
+            // 3. 末尾只有开标签但未闭合的残留块排除
+            if (!new RegExp(`<\\/\\s*${safeTag}\\s*>`, 'i').test(text)) {
+                const unclosedTailReg = new RegExp(`<\\s*${safeTag}[^>]*>[\\s\\S]*$`, 'i');
+                text = text.replace(unclosedTailReg, '');
             }
         }
     }
 
+    // 阶段三【网页与排版杂质清洗】
     text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
     text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
     text = text.replace(/<br\s*[\/]?>/gi, '\n');
     text = text.replace(/<\/p>/gi, '\n\n');
-    text = text.replace(/<\/?[a-zA-Z][^>]*>/g, '');
+    text = text.replace(/<\/?[a-zA-Z0-9_\-~.:#]+[^>]*>/g, '');
 
     text = text
         .replace(/&nbsp;/g, ' ')
