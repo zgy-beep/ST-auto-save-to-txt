@@ -92,6 +92,16 @@ async function init(router) {
     console.log(`[${pluginName}] 小说连载服务插件正在初始化...`);
     await ensureLogsDir();
 
+    // 状态探针接口：用于前端检测服务端插件是否正常运行
+    router.get('/status', async (req, res) => {
+        res.json({
+            ready: true,
+            plugin: pluginName,
+            version: '1.2.4',
+            logsDir: LOGS_DIR
+        });
+    });
+
     router.post('/append', async (req, res) => {
         try {
             const body = req.body;

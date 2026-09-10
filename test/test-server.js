@@ -14,6 +14,9 @@ class MockRouter {
     post(path, handler) {
         this.routes[`POST ${path}`] = handler;
     }
+    get(path, handler) {
+        this.routes[`GET ${path}`] = handler;
+    }
     async dispatch(method, url, body) {
         const handler = this.routes[`${method} ${url}`];
         if (!handler) {
@@ -61,6 +64,10 @@ async function runTests() {
     }
 
     try {
+        // 测试 0: 服务端健康状态探针 (/status)
+        const res0 = await router.dispatch('GET', '/status', {});
+        assert(res0.status === 200 && res0.data.ready === true, '测试 0: 服务端状态探针正常响应');
+
         const testChar = '我的仙侠传奇';
         const testPayload1 = {
             name: '青云道长',

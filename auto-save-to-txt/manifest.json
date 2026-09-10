@@ -4,7 +4,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "zgy-beep",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "homePage": "https://github.com/zgy-beep/ST-auto-save-to-txt",
   "description": "每轮 AI 回复自动编排为规范小说章节追加归档至 TXT，支持双重标签过滤与免服务端一键导出整本小说。"
 }
