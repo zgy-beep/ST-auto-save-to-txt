@@ -1,8 +1,8 @@
 {
   "name": "auto-save",
-  "version": "1.0.0",
-  "description": "SillyTavern 聊天记录自动追加保存至 TXT 的服务端插件",
+  "version": "1.2.0",
+  "description": "SillyTavern 聊天小说连载阅读服务端追加插件",
   "main": "index.js",
-  "author": "ST Contributor",
+  "author": "zgy-beep",
   "license": "MIT"
 }

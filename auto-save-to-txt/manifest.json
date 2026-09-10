@@ -1,10 +1,10 @@
 {
-  "display_name": "自动存档到 TXT (Auto Save to TXT)",
+  "display_name": "自动存档到 TXT · 小说连载 (Novel Stream)",
   "loading_order": 20,
   "js": "index.js",
   "css": "style.css",
-  "author": "ST Contributor",
-  "version": "1.0.0",
-  "homePage": "https://github.com/",
-  "description": "每轮 AI/用户消息自动格式化追加归档至服务器上的 TXT 文件，支持按角色分文件、标签过滤、去重与群聊兼容。"
+  "author": "zgy-beep",
+  "version": "1.2.0",
+  "homePage": "https://github.com/zgy-beep/ST-auto-save-to-txt",
+  "description": "每轮 AI 回复自动编排为规范小说章节追加归档至 TXT，支持双重标签过滤与免服务端一键导出整本小说。"
 }
