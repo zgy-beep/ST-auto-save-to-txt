@@ -1,9 +1,8 @@
 /**
- * 自动存档到 TXT (Auto Save to TXT) 扩展样式表
- * 适配 SillyTavern 原生主题体系，防止自定义样式冲突
+ * SillyTavern 小说连载阅读扩展样式表
+ * 极简优雅、融入酒馆原生主题、保障文字高对比度与自适应排版
  */
 
-/* 保持抽屉原生的样式，不硬性覆盖背景与标题 */
 #auto-save-to-txt-settings {
     margin-bottom: 10px;
 }
@@ -15,8 +14,8 @@
     padding: 10px 6px;
 }
 
-/* 状态提示告警框样式（自适应段落排版，杜绝竖排挤压） */
-.auto-save-alert {
+/* 状态提示卡片 */
+.novel-alert {
     display: flex;
     align-items: flex-start;
     gap: 8px;
@@ -28,31 +27,36 @@
     box-sizing: border-box;
 }
 
-.auto-save-alert i {
+.novel-alert i {
     font-size: 15px;
     margin-top: 3px;
     flex-shrink: 0;
 }
 
-.auto-save-alert-body {
+.novel-alert-text {
     flex: 1;
     display: block;
     line-height: 1.6;
 }
 
-.auto-save-alert.warning {
+.novel-alert.checking {
+    background: rgba(128, 128, 128, 0.15) !important;
+    color: var(--SmartThemeEmColor, #eee) !important;
+}
+
+.novel-alert.warning {
     background: rgba(231, 76, 60, 0.15) !important;
     border: 1px solid rgba(231, 76, 60, 0.5) !important;
     color: #ff6b6b !important;
 }
 
-.auto-save-alert.success {
+.novel-alert.success {
     background: rgba(46, 204, 113, 0.15) !important;
     border: 1px solid rgba(46, 204, 113, 0.5) !important;
     color: #2ecc71 !important;
 }
 
-/* 复选框及文字标签显示（强化字体颜色，避免在任何主题下隐形） */
+/* 复选框及文字 */
 #auto-save-to-txt-settings label.checkbox_label {
     display: flex !important;
     align-items: center !important;
@@ -69,36 +73,40 @@
     line-height: 1.4;
 }
 
-/* 输入框说明文本 */
-.auto-save-input-desc {
-    display: block;
+/* 表单组与标签 */
+.novel-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.novel-label {
     font-size: 12px;
     color: var(--SmartThemeEmColor, #cccccc);
     opacity: 0.9;
-    margin-bottom: 2px;
 }
 
-#auto-save-to-txt-settings input.text_pole {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 6px 10px;
+/* 小说存储提示框 */
+.novel-book-info {
     font-size: 12px;
-    border-radius: 4px;
-}
-
-/* 保存路径提示框 */
-.auto-save-path-hint {
-    font-size: 12px;
-    line-height: 1.5;
+    line-height: 1.6;
     padding: 8px 10px;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.2);
     border-left: 3px solid var(--SmartThemeQuoteColor, #4a90e2);
     color: var(--SmartThemeEmColor, #dddddd);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
     word-break: break-all;
 }
 
-/* 行内代码标记 */
+.novel-book-info i {
+    font-size: 14px;
+    margin-top: 3px;
+    color: var(--SmartThemeQuoteColor, #4a90e2);
+}
+
 #auto-save-to-txt-settings code {
     background: rgba(0, 0, 0, 0.35);
     color: #f1c40f;
@@ -108,10 +116,10 @@
     font-size: 11px;
 }
 
-/* 测试按钮样式 */
+/* 按钮 */
 #auto-save-to-txt-settings button.menu_button {
     width: 100%;
-    padding: 8px;
+    padding: 9px;
     font-weight: bold;
     cursor: pointer;
     display: flex;
