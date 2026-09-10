@@ -1,0 +1,17 @@
+# Logs
+logs/
+*.log
+plugins/auto-save/logs/*.txt
+!plugins/auto-save/logs/.gitkeep
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,51 @@
+/**
+ * 自动存档到 TXT (Auto Save to TXT) 扩展样式表
+ */
+.auto-save-settings-box {
+    margin-bottom: 10px;
+    border-radius: 6px;
+    background-color: var(--SmartThemeBodyColor, rgba(0, 0, 0, 0.2));
+}
+
+.auto-save-settings-box .inline-drawer-toggle {
+    cursor: pointer;
+    user-select: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--SmartThemeQuoteColor, rgba(255, 255, 255, 0.05));
+    transition: background-color 0.2s ease;
+}
+
+.auto-save-settings-box .inline-drawer-toggle:hover {
+    filter: brightness(1.1);
+}
+
+.auto-save-settings-box label.checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.auto-save-settings-box input.text_pole {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    font-size: 12px;
+    border-radius: 4px;
+}
+
+.auto-save-settings-box button.menu_button {
+    width: 100%;
+    padding: 8px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}

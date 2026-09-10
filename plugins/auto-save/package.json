@@ -1,0 +1,8 @@
+{
+  "name": "auto-save",
+  "version": "1.0.0",
+  "description": "SillyTavern 聊天记录自动追加保存至 TXT 的服务端插件",
+  "main": "index.js",
+  "author": "ST Contributor",
+  "license": "MIT"
+}
