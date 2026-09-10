@@ -260,13 +260,18 @@ async function renderSettingsUI() {
 
             <div class="novel-book-info">
                 <i class="fa-solid fa-book-bookmark"></i>
-                <span>小说存储于：<code>SillyTavern/plugins/auto-save/logs/&lt;角色名&gt;.txt</code><br>
-                <small style="opacity: 0.8;">生成的文件可直接导入微信读书、掌阅、ReadEra 等 APP 沉浸阅读。</small></span>
+                <span>实时连载保存于：<code>SillyTavern/plugins/auto-save/logs/&lt;角色名&gt;.txt</code><br>
+                <small style="opacity: 0.8;">若未配置服务端插件，也可随时点击下方<b>“导出整本小说”</b>直接下载。</small></span>
             </div>
 
-            <button id="novel_test_btn" class="menu_button">
-                <i class="fa-solid fa-feather-pointed"></i> 试写一章（测试连通并生成小说小节）
-            </button>
+            <div style="display: flex; gap: 8px; margin-top: 4px;">
+                <button id="novel_export_all_btn" class="menu_button" style="flex: 1; background: var(--SmartThemeQuoteColor, #2980b9); color: #fff;" title="即使没有安装服务端插件，也可以一键将当前所有聊天按小说章节排版并下载为 txt！">
+                    <i class="fa-solid fa-download"></i> 导出整本小说 TXT
+                </button>
+                <button id="novel_test_btn" class="menu_button" style="flex: 1;" title="测试服务端插件连通性">
+                    <i class="fa-solid fa-feather-pointed"></i> 试写一章
+                </button>
+            </div>
         </div>
     `;
 
@@ -294,6 +299,62 @@ async function renderSettingsUI() {
         });
     }
 
+    const exportBtn = panel.querySelector('#novel_export_all_btn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', () => {
+            const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+            if (!chatLog || chatLog.length === 0) {
+                if (window.toastr) window.toastr.info('当前没有任何聊天内容可供导出。', '小说连载');
+                return;
+            }
+
+            let bookTitle = '我的小说连载';
+            const charList = ctx.characters || characters_raw || window.characters || [];
+            const chid = (typeof ctx.this_chid !== 'undefined') ? ctx.this_chid : (typeof this_chid_raw !== 'undefined' ? this_chid_raw : window.this_chid);
+            if (Array.isArray(charList) && typeof chid !== 'undefined' && charList[chid]?.name) {
+                bookTitle = charList[chid].name;
+            }
+
+            let novelText = `《${bookTitle}》\n\n`;
+            let chapterCount = 0;
+
+            for (const msg of chatLog) {
+                if (msg.is_user && !settings.include_user_dialogue) continue;
+                const cleanMes = cleanNovelText(msg.mes || '', settings.indent_paragraphs);
+                if (!cleanMes) continue;
+
+                chapterCount++;
+                const speaker = msg.name || (msg.is_user ? '你' : '旁白');
+                if (settings.chapter_style === 'separator') {
+                    novelText += `* * *\n\n${cleanMes}\n\n\n`;
+                } else if (settings.chapter_style === 'dialogue') {
+                    novelText += `【${speaker}】\n\n${cleanMes}\n\n\n`;
+                } else {
+                    novelText += `第 ${chapterCount} 节 · ${speaker}\n\n${cleanMes}\n\n\n`;
+                }
+            }
+
+            if (chapterCount === 0) {
+                if (window.toastr) window.toastr.warning('没有可导出的有效剧情章节。', '小说连载');
+                return;
+            }
+
+            const blob = new Blob([novelText], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${bookTitle}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            if (window.toastr) {
+                window.toastr.success(`已成功编排并下载《${bookTitle}》共 ${chapterCount} 个章节！`, '小说连载');
+            }
+        });
+    }
+
     const testBtn = panel.querySelector('#novel_test_btn');
     if (testBtn) {
         testBtn.addEventListener('click', async () => {
@@ -311,7 +372,7 @@ async function renderSettingsUI() {
 
             const success = await postChapterToServer(testPayload);
             testBtn.disabled = false;
-            testBtn.innerHTML = '<i class="fa-solid fa-feather-pointed"></i> 试写一章（测试连通并生成小说小节）';
+            testBtn.innerHTML = '<i class="fa-solid fa-feather-pointed"></i> 试写一章';
 
             if (success) {
                 if (window.toastr) {
@@ -335,7 +396,7 @@ async function renderSettingsUI() {
         badge.className = 'novel-alert warning';
         badge.innerHTML = `
             <i class="fa-solid fa-triangle-exclamation"></i>
-            <div class="novel-alert-text"><b>服务插件未运行：</b>请确认已将 <code>plugins/auto-save</code> 放置于 SillyTavern 根目录并在 <code>config.yaml</code> 开启 <code>enableServerPlugins: true</code>。</div>
+            <div class="novel-alert-text"><b>服务插件未运行：</b>实时追加需配置服务端；或可直接点击下方<b>“导出整本小说”</b>一键下载。</div>
         `;
     }
 }
