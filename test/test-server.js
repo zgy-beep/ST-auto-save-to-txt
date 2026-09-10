@@ -122,6 +122,20 @@ async function runTests() {
         if (fs.existsSync(customFilePath)) fs.unlinkSync(customFilePath);
         if (fs.existsSync(customDir)) fs.rmdirSync(customDir);
 
+        // 测试 5: 全量历史小说同步 (/sync-all)
+        const syncPayload = {
+            characterName: '全书同步测试',
+            fullText: '《全书同步测试》\n\n第 1 节 · 序章\n\n　　这是第一章。\n\n\n第 2 节 · 终章\n\n　　这是第二章。\n\n\n',
+            save_dir: ''
+        };
+        const res5 = await router.dispatch('POST', '/sync-all', syncPayload);
+        assert(res5.status === 200 && res5.data.success === true, '测试 5: 成功执行全量历史同步');
+        const syncFilePath = path.join(logsDir, '全书同步测试.txt');
+        assert(fs.existsSync(syncFilePath), '测试 5.1: 确认同步生成的全本小说存在');
+        const syncContent = fs.readFileSync(syncFilePath, 'utf8');
+        assert(syncContent.includes('第 1 节 · 序章') && syncContent.includes('第 2 节 · 终章'), '测试 5.2: 全本章节内容完整准确');
+        if (fs.existsSync(syncFilePath)) fs.unlinkSync(syncFilePath);
+
         // 清理测试文件
         if (fs.existsSync(filePath1)) fs.unlinkSync(filePath1);
         console.log('\n临时测试小说文件已清理。');

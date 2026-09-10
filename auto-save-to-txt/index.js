@@ -379,11 +379,15 @@ async function renderSettingsUI() {
                     <small style="opacity: 0.8;">若未配置服务端插件，也可随时点击下方<b>“导出整本小说”</b>直接下载。</small></span>
                 </div>
 
-                <div style="display: flex; gap: 8px; margin-top: 4px;">
-                    <button id="novel_export_all_btn" class="menu_button" style="flex: 1; background: var(--SmartThemeQuoteColor, #2980b9); color: #fff;" title="即使没有安装服务端插件，也可以一键将当前所有聊天按小说章节排版并下载为 txt！">
+                <!-- 操作按钮组 -->
+                <div style="display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+                    <button id="novel_sync_all_btn" class="menu_button" style="flex: 1; min-width: 130px; background: var(--SmartThemeEmColor, #27ae60); color: #fff;" title="半路使用插件时，一键将之前的全部历史聊天记录完整编排并同步保存到服务端的 txt 文件中！">
+                        <i class="fa-solid fa-file-import"></i> 同步历史到连载文件
+                    </button>
+                    <button id="novel_export_all_btn" class="menu_button" style="flex: 1; min-width: 120px; background: var(--SmartThemeQuoteColor, #2980b9); color: #fff;" title="即使没有安装服务端插件，也可以一键将当前所有聊天按小说章节排版并下载为 txt！">
                         <i class="fa-solid fa-download"></i> 导出整本小说 TXT
                     </button>
-                    <button id="novel_test_btn" class="menu_button" style="flex: 1;" title="测试服务端插件连通性">
+                    <button id="novel_test_btn" class="menu_button" style="flex: 1; min-width: 90px;" title="测试服务端插件连通性">
                         <i class="fa-solid fa-feather-pointed"></i> 试写一章
                     </button>
                 </div>
@@ -442,6 +446,97 @@ async function renderSettingsUI() {
                 previewEl.textContent = `${prefix}<角色名>.txt`;
             }
             if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+
+    // 一键将全部历史同步写入服务端连载文件
+    const syncAllBtn = panel.querySelector('#novel_sync_all_btn');
+    if (syncAllBtn) {
+        syncAllBtn.addEventListener('click', async () => {
+            const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+            if (!chatLog || chatLog.length === 0) {
+                if (window.toastr) window.toastr.info('当前没有任何聊天内容可供同步。', '小说连载');
+                return;
+            }
+
+            if (typeof confirm === 'function' && !confirm('是否将当前全部历史聊天记录完整编排并同步保存到连载小说文件中？\n（这会生成包含前置所有章节的完整小说，后续回复将自动接着连载）')) {
+                return;
+            }
+
+            syncAllBtn.disabled = true;
+            syncAllBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在同步历史...';
+
+            let bookTitle = '我的小说连载';
+            const charList = ctx.characters || characters_raw || window.characters || [];
+            const chid = (typeof ctx.this_chid !== 'undefined') ? ctx.this_chid : (typeof this_chid_raw !== 'undefined' ? this_chid_raw : window.this_chid);
+            if (Array.isArray(charList) && typeof chid !== 'undefined' && charList[chid]?.name) {
+                bookTitle = charList[chid].name;
+            }
+
+            let novelText = `《${bookTitle}》\n\n`;
+            let chapterCount = 0;
+
+            for (const msg of chatLog) {
+                if (msg.is_user && !settings.include_user_dialogue) continue;
+                const cleanMes = cleanNovelText(msg.mes || '', settings);
+                if (!cleanMes) continue;
+
+                chapterCount++;
+                const speaker = msg.name || (msg.is_user ? '你' : '旁白');
+                if (settings.chapter_style === 'separator') {
+                    novelText += `* * *\n\n${cleanMes}\n\n\n`;
+                } else if (settings.chapter_style === 'dialogue') {
+                    novelText += `【${speaker}】\n\n${cleanMes}\n\n\n`;
+                } else {
+                    novelText += `第 ${chapterCount} 节 · ${speaker}\n\n${cleanMes}\n\n\n`;
+                }
+            }
+
+            if (chapterCount === 0) {
+                syncAllBtn.disabled = false;
+                syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史到连载文件';
+                if (window.toastr) window.toastr.warning('没有可同步的有效剧情章节。', '小说连载');
+                return;
+            }
+
+            try {
+                const headers = (typeof getRequestHeaders === 'function') 
+                    ? getRequestHeaders() 
+                    : { 'Content-Type': 'application/json' };
+
+                if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+
+                const response = await fetch('/api/plugins/auto-save/sync-all', {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        characterName: bookTitle,
+                        fullText: novelText,
+                        save_dir: settings.save_dir || ''
+                    }),
+                });
+
+                syncAllBtn.disabled = false;
+                syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史到连载文件';
+
+                if (response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    const targetFile = data.file || '小说文件';
+                    if (window.toastr) {
+                        window.toastr.success(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！后续 AI 回复将接着往后连载。`, '小说连载');
+                    } else {
+                        alert(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！`);
+                    }
+                } else {
+                    if (window.toastr) {
+                        window.toastr.error('同步失败，请检查服务端插件是否正常运行。', '小说连载');
+                    }
+                }
+            } catch (err) {
+                syncAllBtn.disabled = false;
+                syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史到连载文件';
+                if (window.toastr) window.toastr.error(`同步异常: ${err.message}`, '小说连载');
+            }
         });
     }
 

@@ -176,6 +176,56 @@ async function init(router) {
         }
     });
 
+    // 全量历史同步接口：半路启用插件时，一键将过去的全部章节完整写入小说文件
+    router.post('/sync-all', async (req, res) => {
+        try {
+            const body = req.body;
+            if (!body || typeof body !== 'object') {
+                return res.status(400).json({ error: '无效请求' });
+            }
+
+            const { characterName, fullText, save_dir } = body;
+            if (!fullText || typeof fullText !== 'string') {
+                return res.status(400).json({ error: '小说正文不能为空' });
+            }
+
+            // 大小限制防护 (20MB)
+            const byteLength = Buffer.byteLength(fullText, 'utf8');
+            if (byteLength > 20 * 1024 * 1024) {
+                return res.status(413).json({ error: '小说篇幅过大，超出 20MB 限制' });
+            }
+
+            const bookTitle = sanitizeFilename(characterName || '我的小说连载');
+            const targetFileName = `${bookTitle}.txt`;
+
+            let targetDir = LOGS_DIR;
+            if (save_dir && typeof save_dir === 'string' && save_dir.trim()) {
+                const customDir = save_dir.trim();
+                targetDir = path.isAbsolute(customDir) ? customDir : path.resolve(process.cwd(), customDir);
+            }
+            await fs.promises.mkdir(targetDir, { recursive: true });
+
+            const targetFilePath = path.join(targetDir, targetFileName);
+
+            // 完整写入小说文件（覆盖初始化）
+            await fs.promises.writeFile(targetFilePath, fullText, { encoding: 'utf8' });
+
+            const relPath = path.relative(process.cwd(), targetFilePath);
+            console.log(`[${pluginName}] 📚 成功全量同步历史小说 -> ${relPath}`);
+
+            return res.json({
+                success: true,
+                file: relPath
+            });
+        } catch (error) {
+            console.error(`[${pluginName}] 全量同步异常:`, error);
+            return res.status(500).json({
+                error: '全量同步写入失败',
+                detail: error.message
+            });
+        }
+    });
+
     console.log(`[${pluginName}] 小说连载服务初始化就绪，书籍目录：${LOGS_DIR}`);
 }
 
