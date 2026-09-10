@@ -97,7 +97,7 @@ async function init(router) {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.2.4',
+            version: '1.3.1',
             logsDir: LOGS_DIR
         });
     });

@@ -46,6 +46,7 @@ const DEFAULT_SETTINGS = {
     include_tags: '',             // 【白名单】：指定正文标签（留空代表整篇保留；填入如 story 则只提取 <story>...</story>）
     exclude_tags: 'status,memory,details,variables,analysis,ooc,note,draft,system,log', // 【黑名单】：需剔除的标签块内容
     save_dir: '',                 // 自定义保存文件夹路径（留空则保存至默认 plugins/auto-save/logs；支持任意绝对路径如 D:\MyNovels）
+    show_toast: true,             // 连载更新时弹出轻量提示通知
 };
 
 let lastSavedSignature = {
@@ -53,6 +54,61 @@ let lastSavedSignature = {
     characterName: '',
     mesSnippet: ''
 };
+
+let recentStatus = {
+    state: 'idle', // 'idle' | 'updating' | 'success' | 'skipped' | 'error'
+    text: '连载服务就绪（收到 AI 回复将自动排版写入）',
+    time: '',
+    file: ''
+};
+
+function updateRecentStatus(state, text, file = '') {
+    recentStatus.state = state;
+    recentStatus.text = text;
+    recentStatus.time = new Date().toLocaleTimeString();
+    if (file) recentStatus.file = file;
+
+    // 更新面板顶栏标题右侧小指示灯（无论抽屉是否展开均可见）
+    const headerStatus = document.getElementById('novel_header_status');
+    if (headerStatus) {
+        if (state === 'updating') {
+            headerStatus.innerHTML = `<span style="color: var(--SmartThemeQuoteColor, #3498db); font-weight: normal;"><i class="fa-solid fa-spinner fa-spin"></i> 连载更新中...</span>`;
+        } else if (state === 'success') {
+            headerStatus.innerHTML = `<span style="color: var(--SmartThemeEmColor, #2ecc71); font-weight: normal;"><i class="fa-solid fa-circle-check"></i> 已连载 ${recentStatus.time}</span>`;
+        } else if (state === 'skipped') {
+            headerStatus.innerHTML = `<span style="color: #f39c12; font-weight: normal;"><i class="fa-solid fa-circle-info"></i> 已跳过</span>`;
+        } else if (state === 'error') {
+            headerStatus.innerHTML = `<span style="color: #e74c3c; font-weight: normal;"><i class="fa-solid fa-circle-exclamation"></i> 连载失败</span>`;
+        }
+    }
+
+    // 更新抽屉内部的状态卡片
+    const detailEl = document.getElementById('novel_recent_detail');
+    const timeEl = document.getElementById('novel_recent_time');
+    const cardEl = document.getElementById('novel_recent_status');
+
+    if (detailEl && timeEl && cardEl) {
+        timeEl.textContent = recentStatus.time;
+        if (state === 'updating') {
+            cardEl.style.borderColor = 'var(--SmartThemeQuoteColor, #3498db)';
+            detailEl.innerHTML = `<span style="color: var(--SmartThemeQuoteColor, #3498db);"><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${text}</span>`;
+        } else if (state === 'success') {
+            cardEl.style.borderColor = 'var(--SmartThemeEmColor, #2ecc71)';
+            detailEl.innerHTML = `<span style="color: var(--SmartThemeEmColor, #2ecc71);"><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${text}</span>` + 
+                (recentStatus.file ? `<div style="margin-top: 3px; font-size: 11px; opacity: 0.85;">文件路径：<code>${recentStatus.file}</code></div>` : '');
+        } else if (state === 'skipped') {
+            cardEl.style.borderColor = '#f39c12';
+            detailEl.innerHTML = `<span style="color: #f39c12;"><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${text}</span>` +
+                (recentStatus.file ? `<div style="margin-top: 3px; font-size: 11px; opacity: 0.85;">文件路径：<code>${recentStatus.file}</code></div>` : '');
+        } else if (state === 'error') {
+            cardEl.style.borderColor = '#e74c3c';
+            detailEl.innerHTML = `<span style="color: #e74c3c;"><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${text}</span>`;
+        } else {
+            cardEl.style.borderColor = 'var(--SmartThemeEmColor, #2ecc71)';
+            detailEl.innerHTML = `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${text}`;
+        }
+    }
+}
 
 function getSettings() {
     const extSettings = ctx.extension_settings || ext_settings_raw || window.extension_settings || {};
@@ -225,7 +281,7 @@ async function postChapterToServer(payload) {
 
         if (!response.ok) {
             console.warn(`[AutoSaveTxt] 写入失败 (${response.status})`);
-            return false;
+            return { success: false, status: response.status };
         }
 
         const data = await response.json().catch(() => ({}));
@@ -235,7 +291,7 @@ async function postChapterToServer(payload) {
         return { success: true, file: data.file, skipped: data.skipped };
     } catch (error) {
         console.warn('[AutoSaveTxt] 连接服务端插件异常:', error);
-        return false;
+        return { success: false, error: error.message };
     }
 }
 
@@ -278,7 +334,10 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
     }
 
     const novelText = cleanNovelText(message.mes || '', settings);
-    if (!novelText) return;
+    if (!novelText) {
+        updateRecentStatus('skipped', '最新回复经标签过滤后无正文，已略过写入');
+        return;
+    }
 
     const mesSnippet = novelText.slice(0, 80);
     if (
@@ -289,14 +348,17 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         return;
     }
 
-    const chapterNumber = chatLog.filter((m, idx) => idx <= messageIndex && (!m.is_user || settings.include_user_dialogue)).length;
+    const chapterNumber = chatLog.filter((m, idx) => idx <= messageIndex && (!m.is_user || settings.include_user_dialogue)).length || 1;
+
+    // 1. 设置状态为更新中（顶栏指示灯与面板卡片即时响应）
+    updateRecentStatus('updating', `正在将第 ${chapterNumber} 节 · ${speakerName} 编排写入小说...`);
 
     const payload = {
         name: speakerName,
         mes: novelText,
         is_user: !!message.is_user,
         characterName: bookTitle,
-        chapterNumber: chapterNumber || 1,
+        chapterNumber: chapterNumber,
         chapterStyle: settings.chapter_style || 'numbered',
         save_dir: settings.save_dir || ''
     };
@@ -308,6 +370,35 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
             characterName: bookTitle,
             mesSnippet: mesSnippet
         };
+
+        const targetFile = res.file || `${bookTitle}.txt`;
+
+        if (res.skipped) {
+            updateRecentStatus('skipped', `第 ${chapterNumber} 节末尾内容重复，已自动略过写入`, targetFile);
+            if (settings.show_toast !== false && window.toastr) {
+                window.toastr.info(`第 ${chapterNumber} 节内容与前文重复，已略过`, '小说连载提示', { timeOut: 2500 });
+            }
+        } else {
+            // 2. 更新完成提示（顶栏指示灯与面板卡片）
+            updateRecentStatus('success', `第 ${chapterNumber} 节 · ${speakerName} 连载成功！`, targetFile);
+
+            // 3. 屏幕 Toast 提示通知
+            if (settings.show_toast !== false && window.toastr) {
+                window.toastr.success(`第 ${chapterNumber} 节 · ${speakerName} 已自动写入《${bookTitle}》`, '小说连载更新完成', {
+                    timeOut: 3500,
+                    preventDuplicates: true
+                });
+            }
+        }
+    } else {
+        const errMsg = (res && res.error) ? res.error : (res && res.status ? `HTTP ${res.status}` : '连接服务端插件异常');
+        updateRecentStatus('error', `第 ${chapterNumber} 节写入失败: ${errMsg}`);
+
+        if (settings.show_toast !== false && window.toastr) {
+            window.toastr.warning(`第 ${chapterNumber} 节自动连载失败: ${errMsg}`, '小说连载更新失败', {
+                timeOut: 4500
+            });
+        }
     }
 }
 
@@ -325,8 +416,9 @@ async function renderSettingsUI() {
 
     // 默认折叠（移除 down 类名，内容设为 display: none，移除 emoji 保持对齐）
     panel.innerHTML = `
-        <div class="inline-drawer-toggle inline-drawer-header">
+        <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center;">
             <b>小说连载阅读 (Novel Stream)</b>
+            <span id="novel_header_status" style="margin-left: auto; margin-right: 8px; font-size: 11px; opacity: 0.85;"></span>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
         </div>
         <div class="inline-drawer-content" style="display: none;">
@@ -337,10 +429,36 @@ async function renderSettingsUI() {
                     <div class="novel-alert-text">正在检查连载服务状态...</div>
                 </div>
 
+                <!-- 最近连载动态卡片 (更新中/更新完成实时展示) -->
+                <div id="novel_recent_status" class="novel-status-card" style="border-left: 3px solid ${recentStatus.state === 'error' ? '#e74c3c' : (recentStatus.state === 'updating' ? 'var(--SmartThemeQuoteColor, #3498db)' : (recentStatus.state === 'skipped' ? '#f39c12' : 'var(--SmartThemeEmColor, #2ecc71)'))};">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <span style="font-weight: bold; opacity: 0.9;"><i class="fa-solid fa-clock-rotate-left"></i> 最近连载状态</span>
+                        <span id="novel_recent_time" style="opacity: 0.65; font-size: 11px;">${recentStatus.time || '--:--:--'}</span>
+                    </div>
+                    <div id="novel_recent_detail" style="word-break: break-all; line-height: 1.4;">
+                        ${recentStatus.state === 'success' 
+                            ? `<span style="color: var(--SmartThemeEmColor, #2ecc71);"><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${recentStatus.text}</span>${recentStatus.file ? `<div style="margin-top: 3px; font-size: 11px; opacity: 0.85;">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
+                            : (recentStatus.state === 'updating'
+                                ? `<span style="color: var(--SmartThemeQuoteColor, #3498db);"><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${recentStatus.text}</span>`
+                                : (recentStatus.state === 'skipped'
+                                    ? `<span style="color: #f39c12;"><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${recentStatus.text}</span>${recentStatus.file ? `<div style="margin-top: 3px; font-size: 11px; opacity: 0.85;">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
+                                    : (recentStatus.state === 'error'
+                                        ? `<span style="color: #e74c3c;"><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${recentStatus.text}</span>`
+                                        : `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${recentStatus.text}`)))
+                        }
+                    </div>
+                </div>
+
                 <!-- 主开关 -->
                 <label class="checkbox_label" title="开启后，每轮 AI 回复将像小说章节一样自动写入 txt，随时用手机或阅读器翻阅">
                     <input type="checkbox" id="novel_save_enabled" ${settings.enabled ? 'checked' : ''} />
                     <span>开启小说自动连载</span>
+                </label>
+
+                <!-- 连载更新弹窗提示开关 -->
+                <label class="checkbox_label" title="开启后，每当新章节连载更新完成时，在屏幕右上角弹出轻量提示通知">
+                    <input type="checkbox" id="novel_show_toast" ${settings.show_toast !== false ? 'checked' : ''} />
+                    <span>连载更新时弹出轻量提示通知（Toast）</span>
                 </label>
 
                 <!-- 章节排版模式 -->
@@ -417,6 +535,22 @@ async function renderSettingsUI() {
 
     container.appendChild(panel);
 
+    // 同步更新顶栏状态指示
+    if (recentStatus.state !== 'idle') {
+        const headerStatus = panel.querySelector('#novel_header_status');
+        if (headerStatus) {
+            if (recentStatus.state === 'updating') {
+                headerStatus.innerHTML = `<span style="color: var(--SmartThemeQuoteColor, #3498db);"><i class="fa-solid fa-spinner fa-spin"></i> 连载更新中...</span>`;
+            } else if (recentStatus.state === 'success') {
+                headerStatus.innerHTML = `<span style="color: var(--SmartThemeEmColor, #2ecc71);"><i class="fa-solid fa-circle-check"></i> 已连载 ${recentStatus.time}</span>`;
+            } else if (recentStatus.state === 'skipped') {
+                headerStatus.innerHTML = `<span style="color: #f39c12;"><i class="fa-solid fa-circle-info"></i> 已跳过</span>`;
+            } else if (recentStatus.state === 'error') {
+                headerStatus.innerHTML = `<span style="color: #e74c3c;"><i class="fa-solid fa-circle-exclamation"></i> 连载失败</span>`;
+            }
+        }
+    }
+
     // 绑定设置事件
     const bindCheck = (id, key) => {
         const el = panel.querySelector(`#${id}`);
@@ -429,6 +563,7 @@ async function renderSettingsUI() {
     };
 
     bindCheck('novel_save_enabled', 'enabled');
+    bindCheck('novel_show_toast', 'show_toast');
     bindCheck('novel_include_user', 'include_user_dialogue');
     bindCheck('novel_indent_paragraphs', 'indent_paragraphs');
 
@@ -486,6 +621,10 @@ async function renderSettingsUI() {
 
             syncAllBtn.disabled = true;
             syncAllBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在同步历史...';
+            updateRecentStatus('updating', '正在编排全量历史章节并同步至连载文件...');
+            if (settings.show_toast !== false && window.toastr) {
+                window.toastr.info('正在编排历史聊天并写入连载文件...', '小说连载更新中', { timeOut: 2000 });
+            }
 
             let bookTitle = '我的小说连载';
             const charList = ctx.characters || characters_raw || window.characters || [];
@@ -516,6 +655,7 @@ async function renderSettingsUI() {
             if (chapterCount === 0) {
                 syncAllBtn.disabled = false;
                 syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史到连载文件';
+                updateRecentStatus('skipped', '没有可同步的有效剧情章节');
                 if (window.toastr) window.toastr.warning('没有可同步的有效剧情章节。', '小说连载');
                 return;
             }
@@ -543,20 +683,23 @@ async function renderSettingsUI() {
                 if (response.ok) {
                     const data = await response.json().catch(() => ({}));
                     const targetFile = data.file || '小说文件';
+                    updateRecentStatus('success', `全书共 ${chapterCount} 个章节已完整同步！`, targetFile);
                     if (window.toastr) {
-                        window.toastr.success(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！后续 AI 回复将接着往后连载。`, '小说连载');
+                        window.toastr.success(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！后续 AI 回复将接着往后连载。`, '小说连载更新完成');
                     } else {
                         alert(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！`);
                     }
                 } else {
+                    updateRecentStatus('error', '同步失败，请检查服务端插件是否正常运行');
                     if (window.toastr) {
-                        window.toastr.error('同步失败，请检查服务端插件是否正常运行。', '小说连载');
+                        window.toastr.error('同步失败，请检查服务端插件是否正常运行。', '小说连载更新失败');
                     }
                 }
             } catch (err) {
                 syncAllBtn.disabled = false;
                 syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史到连载文件';
-                if (window.toastr) window.toastr.error(`同步异常: ${err.message}`, '小说连载');
+                updateRecentStatus('error', `同步异常: ${err.message}`);
+                if (window.toastr) window.toastr.error(`同步异常: ${err.message}`, '小说连载更新失败');
             }
         });
     }
@@ -624,6 +767,7 @@ async function renderSettingsUI() {
         testBtn.addEventListener('click', async () => {
             testBtn.disabled = true;
             testBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在生成小说章节...';
+            updateRecentStatus('updating', '正在向服务端写入测试连载章节...');
 
             const rawSample = `
 <status>HP: 100/100, 外部状态忽略</status>
@@ -653,10 +797,16 @@ async function renderSettingsUI() {
 
             if (res && res.success) {
                 const targetText = res.file || (settings.save_dir ? settings.save_dir : 'plugins/auto-save/logs/');
-                if (window.toastr) {
-                    window.toastr.success(`试读章节已连载！文件：${targetText}`, '小说连载');
-                } else {
+                updateRecentStatus('success', '试读章节已连载成功！', targetText);
+                if (settings.show_toast !== false && window.toastr) {
+                    window.toastr.success(`试读章节已连载！文件：${targetText}`, '小说连载更新完成');
+                } else if (!window.toastr) {
                     alert(`试读章节已连载！文件：${targetText}`);
+                }
+            } else {
+                updateRecentStatus('error', '试读章节写入失败，请检查服务插件');
+                if (settings.show_toast !== false && window.toastr) {
+                    window.toastr.error('试写失败，请确认服务端插件已启动。', '小说连载更新失败');
                 }
             }
         });

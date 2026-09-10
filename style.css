@@ -60,6 +60,24 @@
     color: #2ecc71 !important;
 }
 
+/* 最近连载动态卡片 */
+.novel-status-card {
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 5px;
+    font-size: 12px;
+    line-height: 1.5;
+    transition: all 0.25s ease-in-out;
+}
+
+#novel_header_status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 1;
+}
+
 /* 复选框及文字 */
 #auto-save-to-txt-settings label.checkbox_label {
     display: flex !important;
