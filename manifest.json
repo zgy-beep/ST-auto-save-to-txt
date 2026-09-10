@@ -1,0 +1,10 @@
+{
+  "display_name": "自动存档到 TXT (Auto Save to TXT)",
+  "loading_order": 20,
+  "js": "index.js",
+  "css": "style.css",
+  "author": "zgy-beep",
+  "version": "1.0.1",
+  "homePage": "https://github.com/zgy-beep/ST-auto-save-to-txt",
+  "description": "每轮 AI/用户消息自动格式化追加归档至服务器上的 TXT 文件，支持按角色分文件、标签过滤、去重与群聊兼容。"
+}

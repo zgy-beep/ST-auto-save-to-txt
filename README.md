@@ -52,46 +52,48 @@ SillyTavern 根目录/
 
 ---
 
-## 🚀 安装步骤
+## 🚀 安装与使用步骤
 
-### 第一步：安装服务端插件 (Server Plugin)
+### 方式 A：SillyTavern 官方 UI 一键安装（最便捷）
 
-1. 进入您的 SillyTavern 根目录下的 `plugins/` 文件夹（若没有 `plugins` 文件夹可手动新建）。
-2. 在 `plugins/` 下新建名为 `auto-save` 的文件夹。
-3. 将本项目 `plugins/auto-save/` 目录下的所有文件复制进去：
-   - `plugins/auto-save/index.js`
-   - `plugins/auto-save/package.json`
+1. **安装前端扩展**：
+   - 打开 SillyTavern 网页，点击顶部导航栏的 **扩展图标（积木/三个小方块图标 <i class="fa-solid fa-puzzle-piece"></i>）**。
+   - 点击 **“Install Extension”（安装扩展）**。
+   - 在输入框中粘贴本仓库地址：
+     ```text
+     https://github.com/zgy-beep/ST-auto-save-to-txt
+     ```
+   - 点击确认，SillyTavern 会自动克隆并识别本扩展。
 
-### 第二步：安装前端扩展 (UI Extension)
+2. **放置服务端插件**（因为官方扩展安装器仅会克隆到前端目录，需要将插件文件夹复制到根目录）：
+   - 打开您的电脑文件管理器，进入刚才克隆下来的前端目录：
+     `SillyTavern/public/scripts/extensions/third-party/ST-auto-save-to-txt/plugins/auto-save`
+   - 将整个 `auto-save` 文件夹复制并粘贴到 SillyTavern 根目录下的 `plugins/` 目录中：
+     即目标路径为：`SillyTavern/plugins/auto-save/`
 
-1. 进入 SillyTavern 根目录下的 `public/scripts/extensions/third-party/` 文件夹。
-2. 新建名为 `auto-save-to-txt` 的文件夹。
-3. 将本项目 `auto-save-to-txt/` 目录下的所有文件复制进去：
-   - `public/scripts/extensions/third-party/auto-save-to-txt/manifest.json`
-   - `public/scripts/extensions/third-party/auto-save-to-txt/index.js`
-   - `public/scripts/extensions/third-party/auto-save-to-txt/style.css`
+3. **启用服务端插件配置**：
+   - 打开 SillyTavern 根目录下的 `config.yaml`。
+   - 将 `enableServerPlugins` 设为 `true`：
+     ```yaml
+     enableServerPlugins: true
+     ```
 
-### 第三步：配置 config.yaml 启用服务端插件
+4. **彻底重启 SillyTavern 服务**：
+   - 关闭并重新启动终端里的 `node server.js`（或双击启动脚本）。
+   - 刷新浏览器页面即可。
 
-打开 SillyTavern 根目录下的 `config.yaml`（如果是初次运行，可能名为 `default/config.yaml` 或已生成在根目录）：
+---
 
-找到 `enableServerPlugins` 配置项，将其设置为 `true`：
+## 📍 扩展入口在哪里？
 
-```yaml
-# 开启服务端插件功能
-enableServerPlugins: true
-```
+刷新页面后，请按如下步骤打开设置面板：
+1. 点击 SillyTavern 顶部导航栏的 **扩展菜单（三块积木/方块图标）** 打开扩展侧边栏。
+2. 向下滚动找到 **“自动存档到 TXT (Auto Save to TXT)”** 折叠菜单。
+3. 点击展开，您会看到：
+   - 🟢 **绿色指示徽章**：提示 `服务端插件已就绪 (可正常存档)`。
+   - 🔴 **红色提示徽章**：若未放置服务端插件或未重启，会清晰提醒您复制目录与修改 `config.yaml`。
+   - 各项开关（保存用户消息、按角色分文件、剔除 HTML、剔除 `<think>` 思考标签）及 **【立即测试保存】** 按钮。
 
-> ⚠️ **注意**：SillyTavern 默认出于安全考虑将 `enableServerPlugins` 设为 `false`。必须显式设为 `true`，服务端插件才能被 Express 加载。
-
-### 第四步：重启 SillyTavern
-
-重启 SillyTavern Node.js 服务。在终端控制台输出中，若看到：
-```text
-[auto-save] 自动归档服务端插件正在初始化...
-[auto-save] 插件初始化完成，归档目录：.../plugins/auto-save/logs
-```
-说明服务端插件已成功挂载在 `/api/plugins/auto-save`。
 
 ---
 
