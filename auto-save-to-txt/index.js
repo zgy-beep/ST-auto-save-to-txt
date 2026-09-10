@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered',    // 章节标题样式: 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
+    naming_rule: 'char_chat',     // 文件命名规则: 'char_chat' (角色名 - 对话名), 'char_only' (仅角色名)
     indent_paragraphs: true,      // 自动段落首行空两格（中文小说规范排版）
     include_tags: '',             // 【白名单】：指定正文标签（留空代表整篇保留；填入如 story 则只提取 <story>...</story>）
     exclude_tags: 'status,memory,details,variables,analysis,ooc,note,draft,system,log', // 【黑名单】：需剔除的标签块内容
@@ -122,6 +123,53 @@ function getSettings() {
         }
     }
     return extSettings[EXTENSION_NAME];
+}
+
+/**
+ * 获取当前连载小说书名
+ * 支持根据【文件命名规则】自动区分同一角色卡的不同对话（平行世界、重开等）
+ */
+function getBookTitle(settings, speakerName = '') {
+    let charName = '我的小说连载';
+    const charList = ctx.characters || characters_raw || window.characters || [];
+    const chid = (typeof ctx.this_chid !== 'undefined') ? ctx.this_chid : (typeof this_chid_raw !== 'undefined' ? this_chid_raw : window.this_chid);
+    if (Array.isArray(charList) && typeof chid !== 'undefined' && charList[chid]?.name) {
+        charName = charList[chid].name;
+    } else if (speakerName && speakerName !== '你') {
+        charName = speakerName;
+    }
+
+    if (settings && settings.naming_rule === 'char_only') {
+        return charName;
+    }
+
+    // 获取当前对话标题或文件名（自动区分同一角色的不同聊天会话 / 平行分支）
+    let chatTitle = '';
+    if (Array.isArray(charList) && typeof chid !== 'undefined' && charList[chid]) {
+        const charObj = charList[chid];
+        if (charObj.chat && typeof charObj.chat === 'string') {
+            chatTitle = charObj.chat.replace(/\.jsonl$/i, '').trim();
+        }
+    }
+    if (!chatTitle && ctx.chatMetadata && typeof ctx.chatMetadata === 'object' && ctx.chatMetadata.title) {
+        chatTitle = String(ctx.chatMetadata.title).trim();
+    }
+    if (!chatTitle) {
+        const cId = ctx.chatId || window.chat_id;
+        if (cId && typeof cId === 'string') {
+            chatTitle = cId.replace(/\.jsonl$/i, '').trim();
+        }
+    }
+
+    if (chatTitle) {
+        // 如果酒馆默认生成的对话文件名已包含角色名前缀（如 "艾莉丝 - 2026-9-10..."）
+        if (chatTitle.startsWith(charName + ' - ') || chatTitle.startsWith(charName + '_')) {
+            return chatTitle;
+        }
+        return `${charName} - ${chatTitle}`;
+    }
+
+    return charName;
 }
 
 const INLINE_TAGS = new Set(['b', 'i', 'u', 's', 'em', 'strong', 'span', 'sub', 'sup', 'small', 'del', 'mark']);
@@ -325,15 +373,7 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
     }
 
     let speakerName = message.name || (message.is_user ? '你' : '旁白');
-
-    let bookTitle = '我的小说连载';
-    const charList = ctx.characters || characters_raw || window.characters || [];
-    const chid = (typeof ctx.this_chid !== 'undefined') ? ctx.this_chid : (typeof this_chid_raw !== 'undefined' ? this_chid_raw : window.this_chid);
-    if (Array.isArray(charList) && typeof chid !== 'undefined' && charList[chid]?.name) {
-        bookTitle = charList[chid].name;
-    } else if (speakerName && speakerName !== '你') {
-        bookTitle = speakerName;
-    }
+    let bookTitle = getBookTitle(settings, speakerName);
 
     const novelText = cleanNovelText(message.mes || '', settings);
     if (!novelText) {
@@ -473,6 +513,18 @@ async function renderSettingsUI() {
                     </select>
                 </div>
 
+                <!-- 小说文件命名规则 -->
+                <div class="novel-form-group">
+                    <span class="novel-label">文件命名规则：</span>
+                    <select id="novel_naming_rule" class="text_pole" style="padding: 5px 8px; border-radius: 4px; font-size: 13px;">
+                        <option value="char_chat" ${settings.naming_rule !== 'char_only' ? 'selected' : ''}>角色名 - 对话名（推荐：新聊天自动新建小说，绝不覆盖旧聊天）</option>
+                        <option value="char_only" ${settings.naming_rule === 'char_only' ? 'selected' : ''}>仅角色名（所有聊天合为一本，如 角色名.txt）</option>
+                    </select>
+                    <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
+                        开启新聊天或平行分支时，默认会自动保存为新小说（如 <code>艾莉丝 - 2026-09-10.txt</code> 或自定义对话名），旧小说绝不被覆盖或串台！
+                    </small>
+                </div>
+
                 <!-- 【白名单】：指定提取正文标签块 -->
                 <div class="novel-form-group">
                     <span class="novel-label">指定正文标签（白名单，可选）：</span>
@@ -515,7 +567,7 @@ async function renderSettingsUI() {
                 <!-- 存储位置说明 -->
                 <div class="novel-book-info">
                     <i class="fa-solid fa-book-bookmark"></i>
-                    <span>实时连载保存于：<code id="novel_save_dir_preview">${settings.save_dir ? (settings.save_dir.replace(/[\\/]+$/, '') + '/<角色名>.txt') : 'SillyTavern/plugins/auto-save/logs/<角色名>.txt'}</code><br>
+                    <span>实时连载保存于：<code id="novel_save_dir_preview">${settings.save_dir ? (settings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/'}${settings.naming_rule === 'char_only' ? '<角色名>.txt' : '<角色名> - <对话名>.txt'}</code><br>
                     <small style="opacity: 0.8;">若未配置服务端插件，也可随时点击下方<b>“导出整本小说”</b>直接下载。</small></span>
                 </div>
 
@@ -577,6 +629,15 @@ async function renderSettingsUI() {
         });
     }
 
+    const selectNaming = panel.querySelector('#novel_naming_rule');
+    if (selectNaming) {
+        selectNaming.addEventListener('change', (e) => {
+            settings.naming_rule = e.target.value;
+            updatePreview();
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+
     const inputInclude = panel.querySelector('#novel_include_tags');
     if (inputInclude) {
         inputInclude.addEventListener('input', (e) => {
@@ -595,14 +656,18 @@ async function renderSettingsUI() {
 
     const inputSaveDir = panel.querySelector('#novel_save_dir');
     const previewEl = panel.querySelector('#novel_save_dir_preview');
+    const updatePreview = () => {
+        if (!previewEl) return;
+        const prefix = settings.save_dir ? (settings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
+        const fileExample = settings.naming_rule === 'char_only' ? '<角色名>.txt' : '<角色名> - <对话名>.txt';
+        previewEl.textContent = `${prefix}${fileExample}`;
+    };
+
     if (inputSaveDir) {
         inputSaveDir.addEventListener('input', (e) => {
             const val = e.target.value.trim();
             settings.save_dir = val;
-            if (previewEl) {
-                const prefix = val ? (val.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
-                previewEl.textContent = `${prefix}<角色名>.txt`;
-            }
+            updatePreview();
             if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
         });
     }
@@ -628,12 +693,7 @@ async function renderSettingsUI() {
                 window.toastr.info('正在编排历史聊天并写入连载文件...', '小说连载更新中', { timeOut: 2000 });
             }
 
-            let bookTitle = '我的小说连载';
-            const charList = ctx.characters || characters_raw || window.characters || [];
-            const chid = (typeof ctx.this_chid !== 'undefined') ? ctx.this_chid : (typeof this_chid_raw !== 'undefined' ? this_chid_raw : window.this_chid);
-            if (Array.isArray(charList) && typeof chid !== 'undefined' && charList[chid]?.name) {
-                bookTitle = charList[chid].name;
-            }
+            let bookTitle = getBookTitle(settings);
 
             let novelText = `《${bookTitle}》\n\n`;
             let chapterCount = 0;
@@ -718,12 +778,7 @@ async function renderSettingsUI() {
                 return;
             }
 
-            let bookTitle = '我的小说连载';
-            const charList = ctx.characters || characters_raw || window.characters || [];
-            const chid = (typeof ctx.this_chid !== 'undefined') ? ctx.this_chid : (typeof this_chid_raw !== 'undefined' ? this_chid_raw : window.this_chid);
-            if (Array.isArray(charList) && typeof chid !== 'undefined' && charList[chid]?.name) {
-                bookTitle = charList[chid].name;
-            }
+            let bookTitle = getBookTitle(settings);
 
             let novelText = `《${bookTitle}》\n\n`;
             let chapterCount = 0;

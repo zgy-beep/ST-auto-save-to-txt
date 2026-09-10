@@ -34,7 +34,7 @@ function sanitizeFilename(rawName) {
         .replace(/[/\\?%*:|"<>]/g, '_')
         .replace(/\.{2,}/g, '_')
         .trim();
-    safeName = safeName.slice(0, 80);
+    safeName = safeName.slice(0, 150);
     return safeName || '我的小说连载';
 }
 
@@ -119,7 +119,7 @@ async function init(router) {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.3.2',
+            version: '1.4.0',
             logsDir: LOGS_DIR
         });
     });
