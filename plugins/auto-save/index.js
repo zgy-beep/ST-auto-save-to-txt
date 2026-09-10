@@ -99,7 +99,7 @@ async function init(router) {
                 return res.status(400).json({ error: '无效请求' });
             }
 
-            const { name, mes, is_user, characterName, chapterNumber, chapterStyle } = body;
+            const { name, mes, is_user, characterName, chapterNumber, chapterStyle, save_dir } = body;
 
             if (!mes || typeof mes !== 'string') {
                 return res.status(400).json({ error: '正文内容不能为空' });
@@ -111,10 +111,19 @@ async function init(router) {
                 return res.status(413).json({ error: '单章节篇幅过大，超出 100KB 限制' });
             }
 
-            // 安全书名与文件路径
+            // 安全书名与目标存储路径
             const bookTitle = sanitizeFilename(characterName || name);
             const targetFileName = `${bookTitle}.txt`;
-            const targetFilePath = path.join(LOGS_DIR, targetFileName);
+
+            // 支持自定义存储目录（绝对路径或相对酒馆运行目录），留空则使用默认 logs 目录
+            let targetDir = LOGS_DIR;
+            if (save_dir && typeof save_dir === 'string' && save_dir.trim()) {
+                const customDir = save_dir.trim();
+                targetDir = path.isAbsolute(customDir) ? customDir : path.resolve(process.cwd(), customDir);
+            }
+            await fs.promises.mkdir(targetDir, { recursive: true });
+
+            const targetFilePath = path.join(targetDir, targetFileName);
 
             // 检查末尾防重
             const duplicate = await isDuplicateTail(targetFilePath, mes);

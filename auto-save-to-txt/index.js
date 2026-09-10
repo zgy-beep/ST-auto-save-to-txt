@@ -37,6 +37,7 @@ const DEFAULT_SETTINGS = {
     indent_paragraphs: true,
     include_tags: '',             // 【白名单】：指定正文标签（留空代表整篇保留；填入如 story 则只提取 <story>...</story>）
     exclude_tags: 'status,memory,details,variables,analysis,ooc,note,draft,system,log', // 【黑名单】：需剔除的标签块内容
+    save_dir: '',                 // 自定义保存文件夹路径（留空则保存至默认 plugins/auto-save/logs；支持任意绝对路径如 D:\MyNovels）
 };
 
 let lastSavedSignature = {
@@ -219,7 +220,7 @@ async function postChapterToServer(payload) {
         if (!data.skipped) {
             console.log(`[AutoSaveTxt] 📖 新章节已融入小说: ${data.file || ''}`);
         }
-        return true;
+        return { success: true, file: data.file, skipped: data.skipped };
     } catch (error) {
         console.warn('[AutoSaveTxt] 连接服务端插件异常:', error);
         return false;
@@ -284,11 +285,12 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         is_user: !!message.is_user,
         characterName: bookTitle,
         chapterNumber: chapterNumber || 1,
-        chapterStyle: settings.chapter_style || 'numbered'
+        chapterStyle: settings.chapter_style || 'numbered',
+        save_dir: settings.save_dir || ''
     };
 
-    const ok = await postChapterToServer(payload);
-    if (ok) {
+    const res = await postChapterToServer(payload);
+    if (res && res.success) {
         lastSavedSignature = {
             messageId: messageIndex,
             characterName: bookTitle,
@@ -361,9 +363,19 @@ async function renderSettingsUI() {
                     <span>段落首行空两格（中文小说规范缩进）</span>
                 </label>
 
+                <!-- 【保存文件夹设置】：自定义存储路径 -->
+                <div class="novel-form-group">
+                    <span class="novel-label">指定保存文件夹（可选）：</span>
+                    <input type="text" id="novel_save_dir" class="text_pole" value="${settings.save_dir || ''}" placeholder="留空默认存至 plugins/auto-save/logs；支持绝对路径如 D:\\我的小说" />
+                    <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
+                        可填写电脑任意文件夹路径（如同步盘、阅读器书库、NAS 目录）。留空则使用酒馆默认目录。
+                    </small>
+                </div>
+
+                <!-- 存储位置说明 -->
                 <div class="novel-book-info">
                     <i class="fa-solid fa-book-bookmark"></i>
-                    <span>实时连载保存于：<code>SillyTavern/plugins/auto-save/logs/&lt;角色名&gt;.txt</code><br>
+                    <span>实时连载保存于：<code id="novel_save_dir_preview">${settings.save_dir ? (settings.save_dir.replace(/[\\/]+$/, '') + '/<角色名>.txt') : 'SillyTavern/plugins/auto-save/logs/<角色名>.txt'}</code><br>
                     <small style="opacity: 0.8;">若未配置服务端插件，也可随时点击下方<b>“导出整本小说”</b>直接下载。</small></span>
                 </div>
 
@@ -415,6 +427,20 @@ async function renderSettingsUI() {
     if (inputExclude) {
         inputExclude.addEventListener('input', (e) => {
             settings.exclude_tags = e.target.value.trim();
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+
+    const inputSaveDir = panel.querySelector('#novel_save_dir');
+    const previewEl = panel.querySelector('#novel_save_dir_preview');
+    if (inputSaveDir) {
+        inputSaveDir.addEventListener('input', (e) => {
+            const val = e.target.value.trim();
+            settings.save_dir = val;
+            if (previewEl) {
+                const prefix = val ? (val.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
+                previewEl.textContent = `${prefix}<角色名>.txt`;
+            }
             if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
         });
     }
@@ -499,18 +525,20 @@ async function renderSettingsUI() {
                 is_user: false,
                 characterName: '我的小说试读本',
                 chapterNumber: 1,
-                chapterStyle: settings.chapter_style
+                chapterStyle: settings.chapter_style,
+                save_dir: settings.save_dir || ''
             };
 
-            const success = await postChapterToServer(testPayload);
+            const res = await postChapterToServer(testPayload);
             testBtn.disabled = false;
             testBtn.innerHTML = '<i class="fa-solid fa-feather-pointed"></i> 试写一章';
 
-            if (success) {
+            if (res && res.success) {
+                const targetText = res.file || (settings.save_dir ? settings.save_dir : 'plugins/auto-save/logs/');
                 if (window.toastr) {
-                    window.toastr.success('试读章节已生成！请查看 plugins/auto-save/logs/ 目录下的 txt 文件', '小说连载');
+                    window.toastr.success(`试读章节已连载！文件：${targetText}`, '小说连载');
                 } else {
-                    alert('试读章节已生成！');
+                    alert(`试读章节已连载！文件：${targetText}`);
                 }
             }
         });

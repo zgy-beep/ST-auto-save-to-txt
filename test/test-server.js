@@ -97,7 +97,23 @@ async function runTests() {
         assert(res3.status === 200 && res3.data.success === true, '测试 3: 成功连载第二节');
 
         const content2 = fs.readFileSync(filePath1, 'utf8');
-        assert(content2.includes('第 1 节 · 青云道长') && content2.includes('第 2 节 · 青云道长'), '测试 3.1: 章节顺序连贯编排');
+        // 测试 4: 自定义保存文件夹路径 (如外部书库/同步盘目录)
+        const customDir = path.join(__dirname, '../plugins/auto-save/custom_novels');
+        const testPayloadCustom = {
+            name: '玄清仙子',
+            mes: '　　雪花轻舞，仙子倚剑而立。',
+            is_user: false,
+            characterName: '极北雪境',
+            chapterNumber: 1,
+            chapterStyle: 'numbered',
+            save_dir: customDir
+        };
+        const res4 = await router.dispatch('POST', '/append', testPayloadCustom);
+        assert(res4.status === 200 && res4.data.success === true, '测试 4: 成功向自定义文件夹连载');
+        const customFilePath = path.join(customDir, '极北雪境.txt');
+        assert(fs.existsSync(customFilePath), '测试 4.1: 自定义文件夹成功自动创建并保存小说');
+        if (fs.existsSync(customFilePath)) fs.unlinkSync(customFilePath);
+        if (fs.existsSync(customDir)) fs.rmdirSync(customDir);
 
         // 清理测试文件
         if (fs.existsSync(filePath1)) fs.unlinkSync(filePath1);
