@@ -280,8 +280,10 @@ async function postChapterToServer(payload) {
         });
 
         if (!response.ok) {
-            console.warn(`[AutoSaveTxt] 写入失败 (${response.status})`);
-            return { success: false, status: response.status };
+            const errData = await response.json().catch(() => ({}));
+            const errMsg = errData.error || `写入失败 (HTTP ${response.status})`;
+            console.warn(`[AutoSaveTxt] ${errMsg}`);
+            return { success: false, status: response.status, error: errMsg };
         }
 
         const data = await response.json().catch(() => ({}));
@@ -504,9 +506,9 @@ async function renderSettingsUI() {
                 <!-- 【保存文件夹设置】：自定义存储路径 -->
                 <div class="novel-form-group">
                     <span class="novel-label">指定保存文件夹（可选）：</span>
-                    <input type="text" id="novel_save_dir" class="text_pole" value="${settings.save_dir || ''}" placeholder="留空默认存至 plugins/auto-save/logs；支持绝对路径如 D:\\我的小说" />
+                    <input type="text" id="novel_save_dir" class="text_pole" value="${settings.save_dir || ''}" placeholder="留空默认存至 plugins/auto-save/logs；填写服务端有效目录" />
                     <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                        可填写电脑任意文件夹路径（如同步盘、阅读器书库、NAS 目录）。留空则使用酒馆默认目录。
+                        此处为<b>服务端（运行酒馆的机器）</b>上的保存目录。<span style="color: #f39c12;">注意：若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 <code>D:\</code>）；</span>如需在本机阅读，可留空并点击下方<b>【导出整本小说 TXT】</b>直接下载，或使用 Syncthing 自动双向同步。
                     </small>
                 </div>
 
@@ -690,9 +692,11 @@ async function renderSettingsUI() {
                         alert(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！`);
                     }
                 } else {
-                    updateRecentStatus('error', '同步失败，请检查服务端插件是否正常运行');
+                    const errData = await response.json().catch(() => ({}));
+                    const errMsg = errData.error || `HTTP ${response.status}`;
+                    updateRecentStatus('error', `同步失败: ${errMsg}`);
                     if (window.toastr) {
-                        window.toastr.error('同步失败，请检查服务端插件是否正常运行。', '小说连载更新失败');
+                        window.toastr.error(`同步失败: ${errMsg}`, '小说连载更新失败');
                     }
                 }
             } catch (err) {

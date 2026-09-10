@@ -39,6 +39,28 @@ function sanitizeFilename(rawName) {
 }
 
 /**
+ * 解析并校验目标存储文件夹
+ * 针对云服务器(Linux)场景提供友好拦截与提示
+ */
+function resolveTargetDirectory(customDir) {
+    if (!customDir || typeof customDir !== 'string' || !customDir.trim()) {
+        return { success: true, dir: LOGS_DIR };
+    }
+    const trimmed = customDir.trim();
+
+    // 如果服务端运行在 Linux/Unix 环境，而前端传递了 Windows 盘符路径（如 D:\... 或 C:\...）
+    if (process.platform !== 'win32' && /^[a-zA-Z]:/i.test(trimmed)) {
+        return {
+            success: false,
+            error: `当前酒馆运行在云服务器(Linux/Docker)中，无法直接访问您本地电脑的盘符路径（"${trimmed}"）。请留空使用默认目录，或填写服务器内部有效路径（如 /mnt/...），或使用前端【导出整本小说 TXT】。`
+        };
+    }
+
+    const resolved = path.isAbsolute(trimmed) ? trimmed : path.resolve(process.cwd(), trimmed);
+    return { success: true, dir: resolved };
+}
+
+/**
  * 防重复写入检查：防止 Swipe 或重新生成在小说末尾连续堆叠相同段落
  */
 async function isDuplicateTail(filePath, mes) {
@@ -97,7 +119,7 @@ async function init(router) {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.3.1',
+            version: '1.3.2',
             logsDir: LOGS_DIR
         });
     });
@@ -126,11 +148,11 @@ async function init(router) {
             const targetFileName = `${bookTitle}.txt`;
 
             // 支持自定义存储目录（绝对路径或相对酒馆运行目录），留空则使用默认 logs 目录
-            let targetDir = LOGS_DIR;
-            if (save_dir && typeof save_dir === 'string' && save_dir.trim()) {
-                const customDir = save_dir.trim();
-                targetDir = path.isAbsolute(customDir) ? customDir : path.resolve(process.cwd(), customDir);
+            const dirResult = resolveTargetDirectory(save_dir);
+            if (!dirResult.success) {
+                return res.status(400).json({ error: dirResult.error });
             }
+            const targetDir = dirResult.dir;
             await fs.promises.mkdir(targetDir, { recursive: true });
 
             const targetFilePath = path.join(targetDir, targetFileName);
@@ -198,11 +220,11 @@ async function init(router) {
             const bookTitle = sanitizeFilename(characterName || '我的小说连载');
             const targetFileName = `${bookTitle}.txt`;
 
-            let targetDir = LOGS_DIR;
-            if (save_dir && typeof save_dir === 'string' && save_dir.trim()) {
-                const customDir = save_dir.trim();
-                targetDir = path.isAbsolute(customDir) ? customDir : path.resolve(process.cwd(), customDir);
+            const dirResult = resolveTargetDirectory(save_dir);
+            if (!dirResult.success) {
+                return res.status(400).json({ error: dirResult.error });
             }
+            const targetDir = dirResult.dir;
             await fs.promises.mkdir(targetDir, { recursive: true });
 
             const targetFilePath = path.join(targetDir, targetFileName);
