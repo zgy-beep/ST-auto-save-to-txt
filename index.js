@@ -49,6 +49,7 @@ const DEFAULT_SETTINGS = {
     exclude_tags: 'status,memory,details,variables,analysis,ooc,note,draft,system,log', // 【黑名单】：需剔除的标签块内容
     save_dir: '',                 // 自定义保存文件夹路径（留空则保存至默认 plugins/auto-save/logs；支持任意绝对路径如 D:\MyNovels）
     show_toast: true,             // 连载更新时弹出轻量提示通知
+    userDisabled: false,          // 用户是否主动手动关闭了连载
 };
 
 let lastSavedSignature = {
@@ -825,8 +826,12 @@ async function renderSettingsUI(cachedStatus = null) {
                 } finally {
                     enableEl.disabled = false;
                 }
+                settings.enabled = true;
+                settings.userDisabled = false; // 用户主动开启
+            } else {
+                settings.enabled = false;
+                settings.userDisabled = true;  // 用户主动手动关闭，不再自动重新勾选
             }
-            settings.enabled = e.target.checked;
             if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
         });
     }
@@ -1103,9 +1108,18 @@ async function renderSettingsUI(cachedStatus = null) {
         badge.className = 'novel-alert success';
         badge.innerHTML = `
             <i class="fa-solid fa-circle-check"></i>
-            <div class="novel-alert-text"><b>连载服务已就绪：</b>每次 AI 回复将自动像小说一样顺畅续写。</div>
+            <div class="novel-alert-text"><b>连载服务已就绪：</b>已自动开启小说连载，每次 AI 回复将像小说一样顺畅续写。</div>
         `;
         if (guideEl) guideEl.style.display = 'none';
+
+        // 服务端就绪：若当前未开启且非用户刻意主动关闭，全自动勾选并激活连载主开关！
+        if (!settings.enabled && !settings.userDisabled) {
+            settings.enabled = true;
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            const enableCb = panel.querySelector('#novel_save_enabled');
+            if (enableCb) enableCb.checked = true;
+            updateRecentStatus('ready', '连载服务已就绪，已全自动开启小说连载');
+        }
     } else {
         // 未安装服务端插件时：强制取消勾选并保存，彻底杜绝后续网络 404 报错
         if (settings.enabled) {
@@ -1286,11 +1300,16 @@ jQuery(async () => {
     const bootSettings = getSettings();
     const bootStatus = await checkServerPluginStatus();
 
-    // 如果服务端未就绪，强制将 enabled 置为 false，防止首次加载时产生 404 网络请求
+    // 如果服务端未就绪，强制将 enabled 置为 false，防止产生 404 网络请求
     if (!bootStatus.ready && bootSettings.enabled) {
         bootSettings.enabled = false;
         if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
         updateRecentStatus('idle', '未检测到服务端插件，已自动取消勾选实时连载（可直接导出整本小说）');
+    } else if (bootStatus.ready && !bootSettings.enabled && !bootSettings.userDisabled) {
+        // 服务端就绪且未被用户主动刻意关闭：全自动开启小说连载！
+        bootSettings.enabled = true;
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        updateRecentStatus('ready', '服务端连载服务已就绪，已全自动开启连载功能');
     }
 
     setTimeout(() => {
