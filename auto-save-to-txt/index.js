@@ -41,7 +41,7 @@ const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
-    chapter_style: 'numbered',    // 章节标题样式: 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
+    chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
     naming_rule: 'char_chat',     // 文件命名规则: 'char_chat' (角色名 - 对话名), 'char_only' (仅角色名)
     indent_paragraphs: true,      // 自动段落首行空两格（中文小说规范排版）
     include_tags: '',             // 【白名单】：指定正文标签（留空代表整篇保留；填入如 story 则只提取 <story>...</story>）
@@ -474,9 +474,14 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
     }
     chapterNumber = chapterNumber || 1;
 
+    const floor = messageIndex + 1;
+    const isNumberedFloor = (settings.chapter_style === 'numbered_floor' || !settings.chapter_style);
+    const sectionLabel = isNumberedFloor ? `第 ${chapterNumber} 章` : ((settings.chapter_style === 'numbered') ? `第 ${chapterNumber} 节` : '新章节');
+    const floorLabel = isNumberedFloor ? ` (原楼层: ${floor})` : '';
+
     // 1. 设置状态为更新中（顶栏指示灯与面板卡片即时响应）
     const actionText = isRegenerate ? '正在替换更新' : '正在编排写入';
-    updateRecentStatus('updating', `${actionText}第 ${chapterNumber} 节 · ${speakerName}...`);
+    updateRecentStatus('updating', `${actionText}${sectionLabel} · ${speakerName}${floorLabel}...`);
 
     const payload = {
         name: speakerName,
@@ -484,9 +489,10 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         is_user: !!message.is_user,
         characterName: bookTitle,
         chapterNumber: chapterNumber,
-        chapterStyle: settings.chapter_style || 'numbered',
+        chapterStyle: settings.chapter_style || 'numbered_floor',
         save_dir: settings.save_dir || '',
-        is_regenerate: isRegenerate
+        is_regenerate: isRegenerate,
+        floor: floor
     };
 
     const res = await postChapterToServer(payload);
@@ -500,25 +506,25 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         const targetFile = res.file || `${bookTitle}.txt`;
 
         if (res.skipped) {
-            updateRecentStatus('skipped', `第 ${chapterNumber} 节末尾内容重复，已自动略过写入`, targetFile);
+            updateRecentStatus('skipped', `${sectionLabel}末尾内容重复，已自动略过写入`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
-                window.toastr.info(`第 ${chapterNumber} 节内容与前文重复，已略过`, '小说连载提示', { timeOut: 2500 });
+                window.toastr.info(`${sectionLabel}内容与前文重复，已略过`, '小说连载提示', { timeOut: 2500 });
             }
         } else if (res.is_regenerate) {
-            updateRecentStatus('success', `第 ${chapterNumber} 节 · ${speakerName}（重新生成已替换更新）`, targetFile);
+            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel}（重新生成已替换更新）`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
-                window.toastr.success(`第 ${chapterNumber} 节已更新为最新生成版本！`, '小说连载已更新', {
+                window.toastr.success(`${sectionLabel}${floorLabel}已更新为最新生成版本！`, '小说连载已更新', {
                     timeOut: 3000,
                     preventDuplicates: true
                 });
             }
         } else {
             // 2. 更新完成提示（顶栏指示灯与面板卡片）
-            updateRecentStatus('success', `第 ${chapterNumber} 节 · ${speakerName} 连载成功！`, targetFile);
+            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel} 连载成功！`, targetFile);
 
             // 3. 屏幕 Toast 提示通知
             if (settings.show_toast !== false && window.toastr) {
-                window.toastr.success(`第 ${chapterNumber} 节 · ${speakerName} 已自动写入《${bookTitle}》`, '小说连载更新完成', {
+                window.toastr.success(`${sectionLabel} · ${speakerName}${floorLabel} 已自动写入《${bookTitle}》`, '小说连载更新完成', {
                     timeOut: 3500,
                     preventDuplicates: true
                 });
@@ -526,10 +532,10 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         }
     } else {
         const errMsg = (res && res.error) ? res.error : (res && res.status ? `HTTP ${res.status}` : '连接服务端插件异常');
-        updateRecentStatus('error', `第 ${chapterNumber} 节写入失败: ${errMsg}`);
+        updateRecentStatus('error', `${sectionLabel}写入失败: ${errMsg}`);
 
         if (settings.show_toast !== false && window.toastr) {
-            window.toastr.warning(`第 ${chapterNumber} 节自动连载失败: ${errMsg}`, '小说连载更新失败', {
+            window.toastr.warning(`${sectionLabel}自动连载失败: ${errMsg}`, '小说连载更新失败', {
                 timeOut: 4500
             });
         }
@@ -599,7 +605,8 @@ async function renderSettingsUI() {
                 <div class="novel-form-group">
                     <span class="novel-label">章节目录风格：</span>
                     <select id="novel_chapter_style" class="text_pole" style="padding: 5px 8px; border-radius: 4px; font-size: 13px;">
-                        <option value="numbered" ${settings.chapter_style === 'numbered' ? 'selected' : ''}>第 X 节 · 角色名（手机阅读器可自动识别目录）</option>
+                        <option value="numbered_floor" ${settings.chapter_style !== 'numbered' && settings.chapter_style !== 'separator' && settings.chapter_style !== 'dialogue' ? 'selected' : ''}>第 X 章 · 角色名 (原楼层: Y)（默认推荐：带楼层标记，方便快速定位排查问题）</option>
+                        <option value="numbered" ${settings.chapter_style === 'numbered' ? 'selected' : ''}>第 X 节 · 角色名（纯净小说目录，无楼层）</option>
                         <option value="separator" ${settings.chapter_style === 'separator' ? 'selected' : ''}>优雅分割线（* * * 散文小说连续阅读）</option>
                         <option value="dialogue" ${settings.chapter_style === 'dialogue' ? 'selected' : ''}>纯净戏剧体（角色名: 正文）</option>
                     </select>
@@ -790,19 +797,23 @@ async function renderSettingsUI() {
             let novelText = `《${bookTitle}》\n\n`;
             let chapterCount = 0;
 
-            for (const msg of chatLog) {
+            for (let i = 0; i < chatLog.length; i++) {
+                const msg = chatLog[i];
                 if (msg.is_user && !settings.include_user_dialogue) continue;
                 const cleanMes = cleanNovelText(msg.mes || '', settings);
                 if (!cleanMes) continue;
 
                 chapterCount++;
                 const speaker = msg.name || (msg.is_user ? '你' : '旁白');
+                const floor = i + 1;
                 if (settings.chapter_style === 'separator') {
                     novelText += `* * *\n\n${cleanMes}\n\n\n`;
                 } else if (settings.chapter_style === 'dialogue') {
                     novelText += `【${speaker}】\n\n${cleanMes}\n\n\n`;
-                } else {
+                } else if (settings.chapter_style === 'numbered') {
                     novelText += `第 ${chapterCount} 节 · ${speaker}\n\n${cleanMes}\n\n\n`;
+                } else {
+                    novelText += `第 ${chapterCount} 章 · ${speaker} (原楼层: ${floor})\n\n${cleanMes}\n\n\n`;
                 }
             }
 
@@ -875,19 +886,23 @@ async function renderSettingsUI() {
             let novelText = `《${bookTitle}》\n\n`;
             let chapterCount = 0;
 
-            for (const msg of chatLog) {
+            for (let i = 0; i < chatLog.length; i++) {
+                const msg = chatLog[i];
                 if (msg.is_user && !settings.include_user_dialogue) continue;
                 const cleanMes = cleanNovelText(msg.mes || '', settings);
                 if (!cleanMes) continue;
 
                 chapterCount++;
                 const speaker = msg.name || (msg.is_user ? '你' : '旁白');
+                const floor = i + 1;
                 if (settings.chapter_style === 'separator') {
                     novelText += `* * *\n\n${cleanMes}\n\n\n`;
                 } else if (settings.chapter_style === 'dialogue') {
                     novelText += `【${speaker}】\n\n${cleanMes}\n\n\n`;
-                } else {
+                } else if (settings.chapter_style === 'numbered') {
                     novelText += `第 ${chapterCount} 节 · ${speaker}\n\n${cleanMes}\n\n\n`;
+                } else {
+                    novelText += `第 ${chapterCount} 章 · ${speaker} (原楼层: ${floor})\n\n${cleanMes}\n\n\n`;
                 }
             }
 
@@ -939,8 +954,9 @@ async function renderSettingsUI() {
                 is_user: false,
                 characterName: '我的小说试读本',
                 chapterNumber: 1,
-                chapterStyle: settings.chapter_style,
-                save_dir: settings.save_dir || ''
+                chapterStyle: settings.chapter_style || 'numbered_floor',
+                save_dir: settings.save_dir || '',
+                floor: 1
             };
 
             const res = await postChapterToServer(testPayload);

@@ -139,8 +139,8 @@ async function isDuplicateTail(filePath, mes) {
 async function replaceLastChapter(filePath, newFormattedChapter) {
     try {
         const content = await fs.promises.readFile(filePath, 'utf8');
-        // 匹配章节标题起始位置：第 X 节、* * *、或【角色名】
-        const regex = /(?:^|\r?\n\r?\n)(第 \d+ 节 · [^\r\n]+|\* \* \*|【[^\r\n]+】)\r?\n\r?\n/g;
+        // 匹配章节标题起始位置：第 X 章/节、* * *、或【角色名】
+        const regex = /(?:^|\r?\n\r?\n)(第 \d+ [章节] · [^\r\n]+|\* \* \*|【[^\r\n]+】)\r?\n\r?\n/g;
         let lastMatch = null;
         let match;
         while ((match = regex.exec(content)) !== null) {
@@ -167,11 +167,16 @@ async function replaceLastChapter(filePath, newFormattedChapter) {
 /**
  * 格式化为小说章节
  */
-function formatNovelChapter({ name, mes, is_user, chapterNumber, chapterStyle }) {
+function formatNovelChapter({ name, mes, is_user, chapterNumber, chapterStyle, floor }) {
     const cleanMes = mes.trim();
     const num = chapterNumber || 1;
+    const floorNum = (typeof floor !== 'undefined' && floor !== null) ? floor : num;
 
     switch (chapterStyle) {
+        case 'numbered':
+            // 标准小说章节体（无楼层）
+            return `第 ${num} 节 · ${name}\n\n${cleanMes}\n\n\n`;
+
         case 'separator':
             // 散文流分割体
             return `* * *\n\n${cleanMes}\n\n`;
@@ -180,10 +185,10 @@ function formatNovelChapter({ name, mes, is_user, chapterNumber, chapterStyle })
             // 戏剧对话体
             return `【${name}】\n\n${cleanMes}\n\n`;
 
-        case 'numbered':
+        case 'numbered_floor':
         default:
-            // 标准小说章节体（微信读书/阅读器可直接识别为目录索引）
-            return `第 ${num} 节 · ${name}\n\n${cleanMes}\n\n\n`;
+            // 默认推荐：第 X 章 · 角色名 (原楼层: Y)
+            return `第 ${num} 章 · ${name} (原楼层: ${floorNum})\n\n${cleanMes}\n\n\n`;
     }
 }
 
@@ -196,7 +201,7 @@ async function init(router) {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.5.0',
+            version: '1.5.1',
             logsDir: LOGS_DIR
         });
     });
@@ -208,7 +213,7 @@ async function init(router) {
                 return res.status(400).json({ error: '无效请求' });
             }
 
-            const { name, mes, is_user, characterName, chapterNumber, chapterStyle, save_dir, is_regenerate } = body;
+            const { name, mes, is_user, characterName, chapterNumber, chapterStyle, save_dir, is_regenerate, floor } = body;
 
             if (!mes || typeof mes !== 'string') {
                 return res.status(400).json({ error: '正文内容不能为空' });
@@ -258,7 +263,8 @@ async function init(router) {
                     mes,
                     is_user,
                     chapterNumber,
-                    chapterStyle
+                    chapterStyle,
+                    floor
                 });
 
                 if (isNewFile) {
