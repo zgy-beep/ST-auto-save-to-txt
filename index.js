@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.6.0',             // 扩展版本号
+    version: '1.6.1',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -694,15 +694,24 @@ async function renderSettingsUI(cachedStatus = null) {
 
     // 默认折叠，顶栏清晰显示扩展名称 + 当前聊天连载文件名 Badge + 动态状态
     panel.innerHTML = `
-        <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
-            <div style="display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
-                <b style="white-space: nowrap;">小说连载阅读 (Novel Stream)</b>
+        <div class="inline-drawer-toggle inline-drawer-header novel-drawer-header">
+            <div class="novel-header-title-box">
+                <b class="novel-header-title">
+                    <span class="novel-title-main">小说连载阅读</span>
+                    <span class="novel-title-sub">(Novel Stream)</span>
+                </b>
+            </div>
+            <div class="novel-header-file-box">
                 <span id="novel_header_file_badge" class="novel-header-file-badge" title="当前聊天连载文件：${initialDir}${initialFileName}（点击可复制完整路径）">
-                    <i class="fa-solid fa-book"></i> <span id="novel_header_file_text">${initialFileName}</span>
+                    <span class="novel-header-file-content">
+                        <i class="fa-solid fa-book"></i>
+                        <span id="novel_header_file_text" class="novel-header-file-text">${initialFileName}</span>
+                    </span>
+                    <span class="novel-header-file-copy-hint"><i class="fa-regular fa-copy"></i> 复制</span>
                 </span>
             </div>
-            <div style="display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;">
-                <span id="novel_header_status" style="font-size: 11px; opacity: 0.85;"></span>
+            <div class="novel-header-right">
+                <span id="novel_header_status"></span>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
             </div>
         </div>

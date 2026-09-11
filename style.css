@@ -78,11 +78,58 @@
     line-height: 1;
 }
 
+/* 抽屉顶栏整体结构（宽屏单行，手机端自适应双行） */
+.novel-drawer-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    flex-wrap: nowrap;
+}
+
+.novel-header-title-box {
+    order: 1;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+}
+
+.novel-header-title {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--SmartThemeEmColor, #eee);
+}
+
+.novel-title-main {
+    white-space: nowrap;
+}
+
+.novel-title-sub {
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: normal;
+    opacity: 0.75;
+    color: var(--SmartThemeEmColor, #aaa);
+}
+
+.novel-header-file-box {
+    order: 2;
+    flex: 0 1 auto;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+}
+
 /* 抽屉顶栏当前连载文件 Badge */
 .novel-header-file-badge {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     background: rgba(0, 0, 0, 0.28);
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 12px;
@@ -90,10 +137,8 @@
     font-size: 11px;
     font-family: Consolas, Monaco, monospace;
     color: #f1c40f;
-    max-width: 220px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    max-width: 240px;
+    min-width: 0;
     user-select: none;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -104,10 +149,44 @@
     border-color: rgba(241, 196, 15, 0.5);
 }
 
-.novel-header-file-badge i {
+.novel-header-file-badge:active {
+    background: rgba(241, 196, 15, 0.18) !important;
+    border-color: rgba(241, 196, 15, 0.6) !important;
+}
+
+.novel-header-file-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.novel-header-file-content i {
     font-size: 10px;
     color: #f1c40f;
     opacity: 0.85;
+    flex-shrink: 0;
+}
+
+.novel-header-file-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.novel-header-file-copy-hint {
+    display: none; /* PC 宽屏保持胶囊轻量紧凑 */
+}
+
+.novel-header-right {
+    order: 3;
+    margin-left: auto;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 /* 复选框及文字 */
@@ -395,3 +474,111 @@
     border-radius: 3px;
     user-select: all;
 }
+
+/* ========================================================
+ * 移动端/窄屏自适应响应式布局 (Mobile Responsive Adaptations)
+ * 屏幕宽度 <= 600px 时，顶栏自动重组为上下两行优雅卡片流
+ * ======================================================== */
+@media (max-width: 600px) {
+    .novel-drawer-header {
+        flex-wrap: wrap !important;
+        padding: 8px 4px !important;
+        gap: 6px 0 !important;
+    }
+
+    /* 第一行：左侧精简标题（隐藏英文后缀） */
+    .novel-header-title-box {
+        order: 1 !important;
+        flex: 0 1 auto !important;
+        min-width: 0 !important;
+    }
+
+    .novel-title-sub {
+        display: none !important; /* 隐藏英文后缀，留足空间 */
+    }
+
+    .novel-title-main {
+        font-size: 13px !important;
+        font-weight: bold !important;
+        white-space: nowrap !important;
+    }
+
+    /* 第一行：右侧状态指示与折叠箭头 */
+    .novel-header-right {
+        order: 2 !important;
+        margin-left: auto !important;
+        flex: 0 0 auto !important;
+        gap: 5px !important;
+    }
+
+    #novel_header_status {
+        font-size: 10.5px !important;
+    }
+
+    /* 第二行：整行专属书名条（100% 宽度，舒适呼吸感） */
+    .novel-header-file-box {
+        order: 3 !important;
+        width: 100% !important;
+        flex-basis: 100% !important;
+        margin-top: 5px !important;
+        display: block !important;
+    }
+
+    .novel-header-file-badge {
+        width: 100% !important;
+        max-width: 100% !important;
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        padding: 5px 10px !important;
+        box-sizing: border-box !important;
+        border-radius: 6px !important;
+        background: rgba(0, 0, 0, 0.35) !important;
+        border: 1px solid rgba(255, 255, 255, 0.16) !important;
+    }
+
+    .novel-header-file-badge:hover,
+    .novel-header-file-badge:active {
+        background: rgba(241, 196, 15, 0.15) !important;
+        border-color: rgba(241, 196, 15, 0.5) !important;
+    }
+
+    .novel-header-file-content {
+        flex: 1 !important;
+        min-width: 0 !important;
+    }
+
+    .novel-header-file-text {
+        font-size: 11px !important;
+        font-weight: normal !important;
+    }
+
+    /* 移动端贴心提示：显式展示复制操作按钮 */
+    .novel-header-file-copy-hint {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 3px !important;
+        font-size: 10px !important;
+        color: var(--SmartThemeEmColor, #aaa) !important;
+        opacity: 0.85 !important;
+        flex-shrink: 0 !important;
+        margin-left: 8px !important;
+        user-select: none !important;
+    }
+}
+
+/* 超窄屏手机进一步优化 (<= 360px) */
+@media (max-width: 360px) {
+    .novel-title-main {
+        font-size: 12px !important;
+    }
+
+    #novel_header_status {
+        font-size: 10px !important;
+    }
+
+    .novel-header-file-badge {
+        padding: 4px 8px !important;
+    }
+}
+
