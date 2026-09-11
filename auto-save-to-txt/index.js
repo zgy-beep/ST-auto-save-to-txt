@@ -1126,10 +1126,10 @@ async function renderSettingsUI(cachedStatus = null) {
 
         if (guideEl) {
             guideEl.style.display = 'flex';
-            // 采用专属安装脚本：全自动识别 Docker 容器、宿主机挂载卷及本地酒馆环境
-            const cmdScriptLinux = `bash -c "$(curl -fsSL https://raw.githubusercontent.com/zgy-beep/ST-auto-save-to-txt/main/install.sh 2>/dev/null || cat $(find ~ . /opt /var /volume1 -name install.sh -path "*ST-auto-save*" 2>/dev/null | head -n 1))"`;
-            const cmdScriptDocker = `find . -type d -name "auto-save" -path "*ST-auto-save*" -exec cp -r {} plugins/ \\; && echo "✅ 部署完成"`;
-            const cmdScriptWindows = `irm https://raw.githubusercontent.com/zgy-beep/ST-auto-save-to-txt/main/install.ps1 | iex`;
+            // 超轻量高精度部署命令：0 外网依赖、0 慢速磁盘遍历，定向秒级完成
+            const cmdDocker = `docker exec -it $(docker ps -q --filter "name=sillytavern" | head -n 1) sh -c 'for s in /home/node/app/data/*/extensions/*auto-save*/plugins/auto-save /home/node/app/public/scripts/extensions/*/*auto-save*/plugins/auto-save; do [ -d "$s" ] && cp -r "$s" /home/node/app/plugins/ && echo "✅ 部署完成: /home/node/app/plugins/auto-save" && exit 0; done; echo "❌ 未在容器内找到插件目录"'`;
+            const cmdLinux = `for s in data/*/extensions/*auto-save*/plugins/auto-save public/scripts/extensions/*/*auto-save*/plugins/auto-save; do [ -d "$s" ] && cp -r "$s" plugins/ && echo "✅ 部署完成: plugins/auto-save" && exit 0; done; echo "❌ 请先 cd 进 SillyTavern 根目录后执行"`;
+            const cmdWindows = `$s = Get-ChildItem -Path @("data", "public") -Recurse -Filter "auto-save" -Directory -Depth 5 -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*ST-auto-save*" } | Select-Object -First 1; if ($s) { Copy-Item -Recurse -Force $s.FullName "plugins/"; Write-Host "✅ 部署完成: plugins/auto-save" } else { Write-Host "❌ 请在 SillyTavern 根目录执行此命令" }`;
 
             guideEl.innerHTML = `
                 <!-- 零配置免安装直接导出高亮卡片 -->
@@ -1148,21 +1148,21 @@ async function renderSettingsUI(cachedStatus = null) {
                         <small style="opacity: 0.7; font-size: 11px;">两步完成</small>
                     </div>
                     <div class="novel-tab-bar">
-                        <button type="button" class="novel-tab-btn active" data-tab="linux"><i class="fa-brands fa-linux"></i> Linux / 服务器 (含Docker)</button>
-                        <button type="button" class="novel-tab-btn" data-tab="docker"><i class="fa-brands fa-docker"></i> 容器内部终端</button>
+                        <button type="button" class="novel-tab-btn active" data-tab="docker"><i class="fa-brands fa-docker"></i> Docker / 容器环境 (推荐)</button>
+                        <button type="button" class="novel-tab-btn" data-tab="linux"><i class="fa-brands fa-linux"></i> Linux 本机运行</button>
                         <button type="button" class="novel-tab-btn" data-tab="windows"><i class="fa-brands fa-windows"></i> Windows 本机</button>
                     </div>
                     <div class="novel-code-wrapper">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-size: 11px; opacity: 0.75;" id="novel_tab_hint">在服务器 SSH 终端粘贴执行官方自动部署脚本（智能识别 Docker/挂载卷）：</span>
+                            <span style="font-size: 11px; opacity: 0.75;" id="novel_tab_hint">在服务器终端（SSH）直接粘贴执行（纯本地操作，0.01 秒完成，不卡顿）：</span>
                             <button type="button" class="novel-copy-btn" id="novel_copy_cmd_btn"><i class="fa-solid fa-copy"></i> 复制命令</button>
                         </div>
-                        <code class="novel-code-text" id="novel_cmd_display">${cmdScriptLinux}</code>
+                        <code class="novel-code-text" id="novel_cmd_display">${cmdDocker}</code>
                     </div>
                     <small style="opacity: 0.75; font-size: 11px; line-height: 1.5;">
-                        <b>第 1 步：</b>粘贴执行上述部署脚本（自动探测容器、挂载目录与权限，免手动配置）；<br>
+                        <b>第 1 步：</b>粘贴执行上述命令（秒级部署，不依赖网络，不扫描大硬盘）；<br>
                         <b>第 2 步：</b>确认酒馆 <code>config.yaml</code> 中 <code>enableServerPlugins: true</code> 并重启酒馆。<br>
-                        <span style="opacity: 0.85;">💡 亦可手动复制：将扩展内部的 <code>plugins/auto-save</code> 目录直接复制到酒馆根目录的 <code>plugins/</code> 下。</span>
+                        <span style="opacity: 0.85;">💡 亦可在酒馆目录直接运行 <code>bash install.sh</code>，或手动将扩展内的 <code>plugins/auto-save</code> 复制至酒馆 <code>plugins/</code> 目录。</span>
                     </small>
                 </div>
             `;
@@ -1173,7 +1173,7 @@ async function renderSettingsUI(cachedStatus = null) {
             const tabHint = guideEl.querySelector('#novel_tab_hint');
             const copyBtn = guideEl.querySelector('#novel_copy_cmd_btn');
 
-            let currentCmd = cmdScriptLinux;
+            let currentCmd = cmdDocker;
 
             tabBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -1181,14 +1181,14 @@ async function renderSettingsUI(cachedStatus = null) {
                     btn.classList.add('active');
                     const tab = btn.getAttribute('data-tab');
                     if (tab === 'windows') {
-                        currentCmd = cmdScriptWindows;
-                        if (tabHint) tabHint.textContent = '在 PowerShell 粘贴执行一键部署脚本：';
-                    } else if (tab === 'docker') {
-                        currentCmd = cmdScriptDocker;
-                        if (tabHint) tabHint.textContent = '在容器内部终端（群晖/1Panel/Portainer）粘贴执行：';
+                        currentCmd = cmdWindows;
+                        if (tabHint) tabHint.textContent = '在酒馆根目录打开 PowerShell 粘贴执行：';
+                    } else if (tab === 'linux') {
+                        currentCmd = cmdLinux;
+                        if (tabHint) tabHint.textContent = '在酒馆根目录终端中粘贴执行：';
                     } else {
-                        currentCmd = cmdScriptLinux;
-                        if (tabHint) tabHint.textContent = '在服务器 SSH 终端粘贴执行官方自动部署脚本（智能识别 Docker/挂载卷）：';
+                        currentCmd = cmdDocker;
+                        if (tabHint) tabHint.textContent = '在服务器终端（SSH）直接粘贴执行（纯本地操作，0.01 秒完成，不卡顿）：';
                     }
                     if (cmdDisplay) cmdDisplay.textContent = currentCmd;
                 });

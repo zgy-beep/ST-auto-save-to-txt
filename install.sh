@@ -1,39 +1,19 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# SillyTavern 小说连载阅读 (ST-auto-save-to-txt) 服务端插件全自动部署脚本
-# 适用环境：
-# 1. Linux 宿主机 (自动识别并穿透部署至 Docker 容器及宿主机挂载卷)
-# 2. Docker 容器内部终端
-# 3. 本地 Linux/VPS 直接运行的 SillyTavern
+# SillyTavern 小说连载阅读 (ST-auto-save-to-txt) 官方安装部署脚本 (高性能优化版)
+# 特性：纯本地精准定位、0 外部依赖、杜绝全盘慢速遍历、秒级响应
 # ==============================================================================
 
 echo "=========================================================="
-echo " 📖 小说连载阅读 (Novel Stream) 服务端插件全自动部署程序"
+echo " 📖 小说连载阅读 (Novel Stream) 服务端插件自动安装程序"
 echo "=========================================================="
 
 SUCCESS=0
 
 # ------------------------------------------------------------------------------
-# 1. 尝试模式 A：如果在 Docker 容器内部执行
+# 模式 1：检测是否在 Docker 宿主机，且有 SillyTavern 容器运行（优先处理）
 # ------------------------------------------------------------------------------
-if [ -f /.dockerenv ] || grep -q 'docker\|containerd' /proc/1/cgroup 2>/dev/null; then
-    echo "🔍 检测到当前运行在 Docker 容器内部..."
-    SRC=$(find / -type d -name "auto-save" -path "*ST-auto-save*" 2>/dev/null | head -n 1)
-    if [ -n "$SRC" ]; then
-        DEST="/home/node/app/plugins"
-        [ ! -d "$DEST" ] && [ -d "plugins" ] && DEST="plugins"
-        mkdir -p "$DEST"
-        cp -r "$SRC" "$DEST/"
-        echo "🎉 [成功] 容器内部署完成！已安装至: $DEST/auto-save"
-        SUCCESS=1
-    fi
-fi
-
-# ------------------------------------------------------------------------------
-# 2. 尝试模式 B：如果在宿主机执行，且宿主机运行着 SillyTavern Docker 容器
-# ------------------------------------------------------------------------------
-if [ "$SUCCESS" -eq 0 ] && command -v docker >/dev/null 2>&1; then
-    echo "🔍 正在检测 Docker 容器中的 SillyTavern 实例..."
+if command -v docker >/dev/null 2>&1; then
     CID=$(docker ps --filter "name=sillytavern" -q | head -n 1)
     if [ -z "$CID" ]; then
         CID=$(docker ps --format '{{.ID}} {{.Image}} {{.Names}}' | grep -i 'sillytavern' | awk '{print $1}' | head -n 1)
@@ -41,55 +21,89 @@ if [ "$SUCCESS" -eq 0 ] && command -v docker >/dev/null 2>&1; then
 
     if [ -n "$CID" ]; then
         CNAME=$(docker inspect --format '{{.Name}}' "$CID" | sed 's/^\///')
-        echo "🐳 找到正在运行的酒馆容器: $CNAME ($CID)"
+        echo "🐳 检测到运行中的酒馆容器: $CNAME ($CID)"
+        echo "⏳ 正在容器内部秒级部署..."
 
-        # 在容器内部执行搜寻并安装
-        docker exec "$CID" sh -c '
-            SRC=$(find / -type d -name "auto-save" -path "*ST-auto-save*" 2>/dev/null | head -n 1)
-            if [ -n "$SRC" ]; then
-                DEST="/home/node/app/plugins"
-                [ ! -d "$DEST" ] && [ -d "plugins" ] && DEST="plugins"
-                mkdir -p "$DEST"
-                cp -r "$SRC" "$DEST/"
-                echo "CONTAINER_COPY_OK"
-            fi
-        ' 2>/dev/null | grep -q "CONTAINER_COPY_OK" && SUCCESS=1
-
-        # 同时探测宿主机上的映射挂载卷，确保两端一致
-        MOUNTS=$(docker inspect "$CID" --format '{{range .Mounts}}{{.Source}}:{{.Destination}}{{"\n"}}{{end}}' 2>/dev/null)
-        while IFS=':' read -r host_path container_path; do
-            [ -z "$host_path" ] && continue
-            if echo "$container_path" | grep -qE "plugins$"; then
-                SRC_HOST=$(find / -type d -name "auto-save" -path "*ST-auto-save*" 2>/dev/null | head -n 1)
-                [ -n "$SRC_HOST" ] && cp -r "$SRC_HOST" "$host_path/" && echo "📁 [同步] 已同步至宿主机挂载目录: $host_path/auto-save"
-            elif echo "$container_path" | grep -qE "app$|data$"; then
-                if [ -d "$host_path/plugins" ] || [ -d "$(dirname "$host_path")/plugins" ]; then
-                    p_dir="$host_path/plugins"
-                    [ ! -d "$p_dir" ] && p_dir="$(dirname "$host_path")/plugins"
-                    SRC_HOST=$(find / -type d -name "auto-save" -path "*ST-auto-save*" 2>/dev/null | head -n 1)
-                    [ -n "$SRC_HOST" ] && mkdir -p "$p_dir" && cp -r "$SRC_HOST" "$p_dir/" && echo "📁 [同步] 已同步至宿主机挂载目录: $p_dir/auto-save"
+        OUT=$(docker exec "$CID" sh -c '
+            for s in /home/node/app/data/*/extensions/*auto-save*/plugins/auto-save \
+                     /home/node/app/public/scripts/extensions/*/*auto-save*/plugins/auto-save \
+                     /app/data/*/extensions/*auto-save*/plugins/auto-save; do
+                if [ -d "$s" ]; then
+                    mkdir -p /home/node/app/plugins
+                    cp -r "$s" /home/node/app/plugins/
+                    echo "INSTALLED_OK"
+                    exit 0
                 fi
+            done
+            # 容错降级：在应用目录内限制 4 层快速搜索
+            src=$(find /home/node/app /app -maxdepth 5 -type d -name "auto-save" -path "*ST-auto-save*" 2>/dev/null | head -n 1)
+            if [ -n "$src" ]; then
+                mkdir -p /home/node/app/plugins
+                cp -r "$src" /home/node/app/plugins/
+                echo "INSTALLED_OK"
+                exit 0
             fi
-        done <<< "$MOUNTS"
+            echo "NOT_FOUND"
+        ' 2>/dev/null)
 
-        if [ "$SUCCESS" -eq 1 ]; then
-            echo "🎉 [成功] 已成功向 Docker 容器及挂载卷部署服务端插件！"
+        if echo "$OUT" | grep -q "INSTALLED_OK"; then
+            echo "🎉 [成功] 已通过 Docker 成功将插件部署到容器 plugins/ 目录！"
+            SUCCESS=1
         fi
     fi
 fi
 
 # ------------------------------------------------------------------------------
-# 3. 尝试模式 C：本地直接运行的 Linux / 原生 Node.js SillyTavern
+# 模式 2：检测是否在 Docker 容器内部执行
+# ------------------------------------------------------------------------------
+if [ "$SUCCESS" -eq 0 ] && ([ -f /.dockerenv ] || grep -q 'docker\|containerd' /proc/1/cgroup 2>/dev/null); then
+    echo "🔍 检测到当前运行在 Docker 容器终端内部..."
+    for s in /home/node/app/data/*/extensions/*auto-save*/plugins/auto-save \
+             /home/node/app/public/scripts/extensions/*/*auto-save*/plugins/auto-save \
+             ./data/*/extensions/*auto-save*/plugins/auto-save \
+             ./public/scripts/extensions/*/*auto-save*/plugins/auto-save; do
+        if [ -d "$s" ]; then
+            dest="/home/node/app/plugins"
+            [ ! -d "$dest" ] && dest="plugins"
+            mkdir -p "$dest"
+            cp -r "$s" "$dest/"
+            echo "🎉 [成功] 容器内部署完成: $dest/auto-save"
+            SUCCESS=1
+            break
+        fi
+    done
+fi
+
+# ------------------------------------------------------------------------------
+# 模式 3：常规 Linux 原生 Node.js 运行环境 (非 Docker)
 # ------------------------------------------------------------------------------
 if [ "$SUCCESS" -eq 0 ]; then
-    echo "🔍 正在全盘搜索本地 SillyTavern 安装路径..."
-    SRC=$(find ~ . /opt /var /volume1 -type d -name "auto-save" -path "*ST-auto-save*" 2>/dev/null | head -n 1)
-    if [ -n "$SRC" ]; then
-        P_DIR=$(echo "$SRC" | sed -E 's/(data|public).*/plugins\//')
-        if [ -n "$P_DIR" ] && [ "$P_DIR" != "$SRC" ]; then
-            mkdir -p "$P_DIR"
-            cp -r "$SRC" "$P_DIR"
-            echo "🎉 [成功] 已部署至本地目录: $P_DIR/auto-save"
+    echo "🔍 正在检查本地 SillyTavern 目录..."
+    # 优先使用精准路径通配，耗时 0.001 秒，绝不扫描 NAS/大存储盘
+    for s in data/*/extensions/*auto-save*/plugins/auto-save \
+             public/scripts/extensions/*/*auto-save*/plugins/auto-save \
+             */data/*/extensions/*auto-save*/plugins/auto-save \
+             ../data/*/extensions/*auto-save*/plugins/auto-save; do
+        if [ -d "$s" ]; then
+            p_dir="plugins"
+            if [ ! -d "$p_dir" ]; then
+                p_dir="$(echo "$s" | sed -E 's/(data|public).*/plugins/') "
+            fi
+            mkdir -p "$p_dir"
+            cp -r "$s" "$p_dir/"
+            echo "🎉 [成功] 已部署至本地: $p_dir/auto-save"
+            SUCCESS=1
+            break
+        fi
+    done
+
+    # 仅在当前目录树（最大深度 5 层）快速扫描，拒绝全盘遍历
+    if [ "$SUCCESS" -eq 0 ]; then
+        src=$(find . -maxdepth 5 -type d -name "auto-save" -path "*ST-auto-save*" 2>/dev/null | head -n 1)
+        if [ -n "$src" ]; then
+            mkdir -p plugins
+            cp -r "$src" plugins/
+            echo "🎉 [成功] 已部署至本地: plugins/auto-save"
             SUCCESS=1
         fi
     fi
@@ -98,13 +112,13 @@ fi
 echo "----------------------------------------------------------"
 if [ "$SUCCESS" -eq 1 ]; then
     echo "✅ 插件安装完成！"
-    echo "👉 下一步：请确认酒馆根目录 config.yaml 中 enableServerPlugins: true，然后重启酒馆即可生效！"
+    echo "👉 下一步：请确认酒馆 config.yaml 中 enableServerPlugins: true，然后重启酒馆即可生效！"
 else
-    echo "❌ 未能自动检测到 ST-auto-save-to-txt 插件源文件。"
-    echo "💡 请排查："
-    echo "   1. 确认已在 SillyTavern 网页端的扩展菜单中安装了该扩展；"
-    echo "   2. 如果酒馆运行在 Docker 中，请确保容器正在运行 (docker ps 可见)；"
-    echo "   3. 手动安装：将扩展内的 plugins/auto-save 目录复制到酒馆根目录的 plugins/ 即可。"
+    echo "❌ 未能自动找到 ST-auto-save 扩展文件。"
+    echo "💡 提示："
+    echo "   1. 确认已在酒馆网页扩展菜单中下载并安装了本扩展；"
+    echo "   2. 如果使用 Docker，请确认容器正在运行中 (docker ps 可见)；"
+    echo "   3. 亦可手动复制：将扩展目录内的 plugins/auto-save 文件夹复制到 SillyTavern 根目录的 plugins/ 即可。"
     exit 1
 fi
 echo "=========================================================="
