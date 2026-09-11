@@ -1,6 +1,6 @@
 {
   "name": "auto-save",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "SillyTavern 聊天小说连载阅读服务端追加插件",
   "main": "index.js",
   "author": "zgy-beep",

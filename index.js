@@ -39,6 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
+    version: '1.5.2',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -114,8 +115,17 @@ function updateRecentStatus(state, text, file = '') {
 function getSettings() {
     const extSettings = ctx.extension_settings || ext_settings_raw || window.extension_settings || {};
     if (!extSettings[EXTENSION_NAME]) {
-        extSettings[EXTENSION_NAME] = { ...DEFAULT_SETTINGS };
+        extSettings[EXTENSION_NAME] = { ...DEFAULT_SETTINGS, version: '1.5.2' };
     } else {
+        // 版本平滑迁移：针对升级用户，如果仍为历史默认值 'numbered'，自动切换至推荐的 'numbered_floor'
+        if (extSettings[EXTENSION_NAME].version !== '1.5.2') {
+            if (extSettings[EXTENSION_NAME].chapter_style === 'numbered') {
+                extSettings[EXTENSION_NAME].chapter_style = 'numbered_floor';
+            }
+            extSettings[EXTENSION_NAME].version = '1.5.2';
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        }
+
         for (const key of Object.keys(DEFAULT_SETTINGS)) {
             if (extSettings[EXTENSION_NAME][key] === undefined) {
                 extSettings[EXTENSION_NAME][key] = DEFAULT_SETTINGS[key];
@@ -270,6 +280,10 @@ function cleanNovelText(rawText, settings = {}) {
     const genericAuxiliaryPattern = /<\s*([a-zA-Z0-9_\-~.:#]*(?:think|thought|reasoning|cot|scratchpad|reflection|inner_thought|analysis|plan)[a-zA-Z0-9_\-~.:#]*)[^>]*>[\s\S]*?<\/\s*\1\s*>\s*/gi;
     text = text.replace(genericAuxiliaryPattern, '');
 
+    // 剔除末尾未闭合的思考链（针对 max_tokens 截断未输出闭合标签的情况）
+    const unclosedAuxPattern = /<\s*([a-zA-Z0-9_\-~.:#]*(?:think|thought|reasoning|cot|scratchpad|reflection|inner_thought|analysis|plan)[a-zA-Z0-9_\-~.:#]*)[^>]*>[\s\S]*$/i;
+    text = text.replace(unclosedAuxPattern, '');
+
     // 阶段一【白名单模式】：优先提取指定标签内的正文
     const includeInput = (typeof settings.include_tags === 'string') ? settings.include_tags.trim() : '';
     if (includeInput) {
@@ -401,7 +415,12 @@ async function postChapterToServer(payload) {
         if (!data.skipped) {
             console.log(`[AutoSaveTxt] 📖 新章节已融入小说: ${data.file || ''}`);
         }
-        return { success: true, file: data.file, skipped: data.skipped };
+        return {
+            success: true,
+            file: data.file,
+            skipped: data.skipped,
+            is_regenerate: (typeof data.is_regenerate !== 'undefined') ? data.is_regenerate : payload.is_regenerate
+        };
     } catch (error) {
         console.warn('[AutoSaveTxt] 连接服务端插件异常:', error);
         return { success: false, error: error.message };
@@ -510,7 +529,7 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
             if (settings.show_toast !== false && window.toastr) {
                 window.toastr.info(`${sectionLabel}内容与前文重复，已略过`, '小说连载提示', { timeOut: 2500 });
             }
-        } else if (res.is_regenerate) {
+        } else if (res.is_regenerate || isRegenerate) {
             updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel}（重新生成已替换更新）`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
                 window.toastr.success(`${sectionLabel}${floorLabel}已更新为最新生成版本！`, '小说连载已更新', {

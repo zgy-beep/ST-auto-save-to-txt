@@ -52,6 +52,10 @@ function cleanNovelTextUniversal(rawText, settings = {}) {
     const genericAuxiliaryPattern = /<\s*([a-zA-Z0-9_\-~.:#]*(?:think|thought|reasoning|cot|scratchpad|reflection|inner_thought|analysis|plan)[a-zA-Z0-9_\-~.:#]*)[^>]*>[\s\S]*?<\/\s*\1\s*>\s*/gi;
     text = text.replace(genericAuxiliaryPattern, '');
 
+    // 剔除末尾未闭合的思考链（针对 max_tokens 截断未输出闭合标签的情况）
+    const unclosedAuxPattern = /<\s*([a-zA-Z0-9_\-~.:#]*(?:think|thought|reasoning|cot|scratchpad|reflection|inner_thought|analysis|plan)[a-zA-Z0-9_\-~.:#]*)[^>]*>[\s\S]*$/i;
+    text = text.replace(unclosedAuxPattern, '');
+
     // =========================================================================
     // 阶段一【白名单模式】：优先提取指定标签内的正文
     // =========================================================================
@@ -196,6 +200,11 @@ const cases = [
         name: '测试9: Markdown 表情图片与 img 标签过滤',
         input: '艾莉丝露出了笑容。![微笑表情](https://example.com/smile.png)\n<img src="avatar.jpg" alt="头像" />“今天天气真好呀。”',
         expected: '　　艾莉丝露出了笑容。\n\n　　“今天天气真好呀。”'
+    },
+    {
+        name: '测试10: max_tokens 截断导致末尾未闭合的思考链（如 <think>正在分析...）',
+        input: '艾莉丝叹了一口气。<think>正在构思下一步行动，但是突然被截断了',
+        expected: '　　艾莉丝叹了一口气。'
     }
 ];
 

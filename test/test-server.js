@@ -66,12 +66,12 @@ async function runTests() {
     try {
         // 测试 0: 服务端健康状态探针 (/status)
         const res0 = await router.dispatch('GET', '/status', {});
-        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.5.1', '测试 0: 服务端状态探针正常响应且版本为 1.5.1');
+        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.5.2', '测试 0: 服务端状态探针正常响应且版本为 1.5.2');
 
         const testChar = '我的仙侠传奇';
         const testPayload1 = {
             name: '青云道长',
-            mes: '　　山风拂面，竹林沙沙作响。老道手抚长须，微微一笑道：“徒儿，今日便传你本门至高心法。”',
+            mes: '　　山风拂面，竹林沙沙作响。老道手抚长须，微微一笑道：“徒儿，今日便传你本门至高心法。”好的。',
             is_user: false,
             characterName: testChar,
             chapterNumber: 1,
@@ -108,22 +108,35 @@ async function runTests() {
         const content2 = fs.readFileSync(filePath1, 'utf8');
         assert(content2.includes('第 2 章 · 青云道长 (原楼层: 3)'), '测试 2.2: 成功显示跳过用户楼层后的“原楼层: 3”标记');
 
-        // 测试 3: 重新生成 / Swipe 分支智能替换测试 (is_regenerate = true)
-        const testPayloadRegen = {
+        // 测试 2.3: 短文本同尾防误判测试（第 3 章回复仅为简短“好的。”，即使第 1 章也包含“好的。”，也绝不能被误杀）
+        const testPayloadShort = {
             name: '青云道长',
-            mes: '　　山风拂面，竹林沙沙作响。重新生成的分支：天边划过一道金色剑芒！',
+            mes: '好的。',
             is_user: false,
             characterName: testChar,
-            chapterNumber: 2,
+            chapterNumber: 3,
             chapterStyle: 'numbered_floor',
-            floor: 3,
+            floor: 4
+        };
+        const res2_3 = await router.dispatch('POST', '/append', testPayloadShort);
+        assert(res2_3.status === 200 && res2_3.data.skipped === false, '测试 2.3: 短回复新章节精准识别，未因历史尾部片段被误杀');
+
+        // 测试 3: 重新生成 / Swipe 分支智能替换测试 (包含正文内部的 【系统提示】 与 * * *，验证绝不误伤正文)
+        const testPayloadRegen = {
+            name: '青云道长',
+            mes: '　　正文开篇。\n\n* * *\n\n【系统提示：突破金丹期】\n\n重新生成的新分支：天边划过一道金色剑芒！',
+            is_user: false,
+            characterName: testChar,
+            chapterNumber: 3,
+            chapterStyle: 'numbered_floor',
+            floor: 4,
             is_regenerate: true
         };
         const res3 = await router.dispatch('POST', '/append', testPayloadRegen);
         assert(res3.status === 200 && res3.data.is_regenerate === true, '测试 3: 成功执行重新生成替换');
         const contentRegen = fs.readFileSync(filePath1, 'utf8');
-        assert(contentRegen.includes('金色剑芒') && !contentRegen.includes('兽吼'), '测试 3.1: 最后一节成功被新分支替换，旧分支无残留');
-        assert(contentRegen.includes('第 2 章 · 青云道长 (原楼层: 3)'), '测试 3.2: 替换后章节头保留原始楼层标记');
+        assert(contentRegen.includes('金色剑芒') && !contentRegen.includes('第 3 章 · 青云道长 (原楼层: 4)\n\n好的。'), '测试 3.1: 最后一节成功被新分支替换，旧分支无残留');
+        assert(contentRegen.includes('【系统提示：突破金丹期】'), '测试 3.2: 正文内部包含【系统提示】与分隔符未被截断误判');
 
         // 测试 4: 自定义保存文件夹路径 (如外部书库/同步盘目录)
         const customDir = path.join(__dirname, '../plugins/auto-save/custom_novels');

@@ -95,8 +95,9 @@ function resolveTargetDirectory(customDir) {
 /**
  * 精准末尾防重复写入检查：
  * 仅对比文件最末尾的实际章节内容，绝不在整个 4KB 范围内做前文误伤匹配
+ * 结合章节序号判断，彻底杜绝短回复误杀
  */
-async function isDuplicateTail(filePath, mes) {
+async function isDuplicateTail(filePath, mes, chapterNumber, chapterStyle) {
     try {
         const stat = await fs.promises.stat(filePath).catch(() => null);
         if (!stat || stat.size === 0) {
@@ -116,15 +117,24 @@ async function isDuplicateTail(filePath, mes) {
         const cleanMes = mes.trim();
         const tailTrimmed = tailContent.trim();
 
+        // 0. 若为带序号章节，且当前序号大于 1：若文件尾部尚未包含本章序号标记，说明本章绝对未写入过，绝不可误判为重复
+        if (chapterNumber && chapterNumber > 1 && (!chapterStyle || chapterStyle === 'numbered_floor' || chapterStyle === 'numbered')) {
+            if (!tailContent.includes(`第 ${chapterNumber} `)) {
+                return false;
+            }
+        }
+
         // 1. 如果文件末尾完全以此段正文结尾
         if (tailTrimmed.endsWith(cleanMes)) {
             return true;
         }
 
-        // 2. 检查文件最末尾 200 个字符内是否包含该正文的尾部特征片段（确保是同一章末尾重复）
-        const tailSnippet = cleanMes.slice(-60);
-        if (tailSnippet && tailTrimmed.slice(-200).includes(tailSnippet)) {
-            return true;
+        // 2. 检查文件最末尾 200 个字符内是否包含该正文的尾部特征片段（仅针对长正文进行模糊比对，短回复不做模糊比对防误判）
+        if (cleanMes.length >= 30) {
+            const tailSnippet = cleanMes.slice(-60);
+            if (tailSnippet.length >= 20 && tailTrimmed.slice(-200).includes(tailSnippet)) {
+                return true;
+            }
         }
 
         return false;
@@ -135,16 +145,48 @@ async function isDuplicateTail(filePath, mes) {
 
 /**
  * 替换文件末尾的最后一章节（用于支持 Regenerate / Swipe 重新生成替换）
+ * 严格按照当前的章节排版样式与章节序号进行精准边界匹配，避免误伤正文内部的散文分隔符或系统括号
  */
-async function replaceLastChapter(filePath, newFormattedChapter) {
+async function replaceLastChapter(filePath, newFormattedChapter, chapterStyle, chapterNumber) {
     try {
         const content = await fs.promises.readFile(filePath, 'utf8');
-        // 匹配章节标题起始位置：第 X 章/节、* * *、或【角色名】
-        const regex = /(?:^|\r?\n\r?\n)(第 \d+ [章节] · [^\r\n]+|\* \* \*|【[^\r\n]+】)\r?\n\r?\n/g;
+
         let lastMatch = null;
-        let match;
-        while ((match = regex.exec(content)) !== null) {
-            lastMatch = match;
+
+        // 优先策略：如果已知章节序号，精准匹配该章节标题头（最安全，绝不误伤正文内容）
+        if (chapterNumber && (chapterStyle === 'numbered_floor' || chapterStyle === 'numbered' || !chapterStyle)) {
+            const exactRegex = new RegExp(`(?:^|\\r?\\n\\r?\\n)(第 ${chapterNumber} [章节] · [^\\r\\n]+)\\r?\\n\\r?\\n`, 'g');
+            let m;
+            while ((m = exactRegex.exec(content)) !== null) {
+                lastMatch = m;
+            }
+        }
+
+        // 次级策略：若未匹配到精准序号，则根据当前章节风格专一定位末尾章节头
+        if (!lastMatch) {
+            let regex;
+            switch (chapterStyle) {
+                case 'numbered_floor':
+                    regex = /(?:^|\r?\n\r?\n)(第 \d+ 章 · [^\r\n]+)\r?\n\r?\n/g;
+                    break;
+                case 'numbered':
+                    regex = /(?:^|\r?\n\r?\n)(第 \d+ 节 · [^\r\n]+)\r?\n\r?\n/g;
+                    break;
+                case 'separator':
+                    regex = /(?:^|\r?\n\r?\n)(\* \* \*)\r?\n\r?\n/g;
+                    break;
+                case 'dialogue':
+                    regex = /(?:^|\r?\n\r?\n)(【[^\r\n]+】)\r?\n\r?\n/g;
+                    break;
+                default:
+                    regex = /(?:^|\r?\n\r?\n)(第 \d+ [章节] · [^\r\n]+|\* \* \*|【[^\r\n]+】)\r?\n\r?\n/g;
+                    break;
+            }
+
+            let m;
+            while ((m = regex.exec(content)) !== null) {
+                lastMatch = m;
+            }
         }
 
         if (lastMatch && lastMatch.index >= 0) {
@@ -201,7 +243,7 @@ async function init(router) {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.5.1',
+            version: '1.5.2',
             logsDir: LOGS_DIR
         });
     });
@@ -244,9 +286,9 @@ async function init(router) {
                 const stat = await fs.promises.stat(targetFilePath).catch(() => null);
                 const isNewFile = !stat || stat.size === 0;
 
-                // 非新建且非重新生成模式下，检查末尾防重
+                // 非新建且非重新生成模式下，检查末尾防重（结合章节序号精确防误杀）
                 if (!isNewFile && !is_regenerate) {
-                    const duplicate = await isDuplicateTail(targetFilePath, mes);
+                    const duplicate = await isDuplicateTail(targetFilePath, mes, chapterNumber, chapterStyle);
                     if (duplicate) {
                         console.log(`[${pluginName}] 检测到末尾已有相同段落，跳过重复写入`);
                         return {
@@ -272,8 +314,8 @@ async function init(router) {
                     const fileHeader = `${UTF8_BOM}《${bookTitle}》\n\n\n`;
                     await fs.promises.writeFile(targetFilePath, fileHeader + formattedNovel, { encoding: 'utf8' });
                 } else if (is_regenerate) {
-                    // 用户重新生成或滑动分支：智能替换末尾章节，避免残留旧草稿
-                    await replaceLastChapter(targetFilePath, formattedNovel);
+                    // 用户重新生成或滑动分支：智能替换末尾章节（精确定位该章节起始边界，避免残留旧草稿或误伤正文）
+                    await replaceLastChapter(targetFilePath, formattedNovel, chapterStyle, chapterNumber);
                 } else {
                     // 正常追加新章节
                     await fs.promises.appendFile(targetFilePath, formattedNovel, { encoding: 'utf8' });
