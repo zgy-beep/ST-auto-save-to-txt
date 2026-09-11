@@ -261,3 +261,42 @@
     background: #27ae60 !important;
     border-color: #2ecc71 !important;
 }
+
+/* 自动失败保底：醒目手动复制引导卡片 */
+.novel-manual-card {
+    background: rgba(230, 126, 34, 0.12);
+    border: 1px solid rgba(230, 126, 34, 0.45);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--SmartThemeEmColor, #eee);
+}
+
+.novel-manual-card b {
+    color: #f39c12;
+}
+
+.novel-manual-paths {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.novel-manual-paths code {
+    font-family: Consolas, Monaco, monospace;
+    color: #ffd166;
+    word-break: break-all;
+    background: rgba(0, 0, 0, 0.25);
+    padding: 2px 6px;
+    border-radius: 3px;
+    user-select: all;
+}

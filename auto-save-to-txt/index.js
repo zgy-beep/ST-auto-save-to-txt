@@ -1120,7 +1120,7 @@ async function renderSettingsUI(cachedStatus = null) {
             <i class="fa-solid fa-triangle-exclamation"></i>
             <div class="novel-alert-text">
                 <b>未检测到服务端插件：</b>已自动取消勾选自动连载（防止产生网络 404 错误）。<br>
-                您可直接使用下方<b>【导出整本小说 TXT】</b>一键下载，或参考下方引导复制命令部署插件。
+                您可参考下方<b>方案一（一键命令自动部署）</b>或<b>方案二（手动复制保底）</b>进行部署，亦可直接使用<b>【📥 导出整本小说 TXT】</b>零配置打包下载。
             </div>
         `;
 
@@ -1130,6 +1130,7 @@ async function renderSettingsUI(cachedStatus = null) {
             const cmdOnlineLinux = `curl -fsSL https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/install.sh | bash`;
             const cmdOnlineWindows = `irm https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/install.ps1 | iex`;
             const cmdDirectScript = `bash install.sh`;
+            const cmdManualDocker = `docker exec sillytavern cp -r /home/node/app/data/default-user/extensions/ST-auto-save-to-txt/plugins/auto-save /home/node/app/plugins/`;
 
             guideEl.innerHTML = `
                 <!-- 零配置免安装直接导出高亮卡片 -->
@@ -1141,10 +1142,10 @@ async function renderSettingsUI(cachedStatus = null) {
                     无需配置服务器或 Docker 挂载！随时点击下方<b>【📥 导出整本小说 TXT】</b>，浏览器可直接排版、生成带楼层/目录的完整小说并一键下载，零门槛、零网络报错！
                 </div>
 
-                <!-- 进阶可选：一键部署服务端自动连载插件 -->
+                <!-- 方案一：一键脚本自动部署 -->
                 <div class="novel-deploy-card">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: bold; opacity: 0.95;"><i class="fa-solid fa-plug"></i> 进阶配置：开启每轮自动落盘（可选）</span>
+                        <span style="font-weight: bold; opacity: 0.95;"><i class="fa-solid fa-wand-magic-sparkles"></i> 方案一：一键命令自动部署（国内 CDN 高速加速）</span>
                         <small style="opacity: 0.7; font-size: 11px;">极简一行直达</small>
                     </div>
                     <div class="novel-tab-bar">
@@ -1160,10 +1161,35 @@ async function renderSettingsUI(cachedStatus = null) {
                         <code class="novel-code-text" id="novel_cmd_display">${cmdOnlineLinux}</code>
                     </div>
                     <small style="opacity: 0.75; font-size: 11px; line-height: 1.5;">
-                        <b>第 1 步：</b>粘贴执行上述命令（国内 CDN 毫秒级直达，脚本全自动穿透 Docker、定位挂载卷并完成部署）；<br>
-                        <b>第 2 步：</b>确认酒馆 <code>config.yaml</code> 中 <code>enableServerPlugins: true</code> 并重启酒馆。<br>
-                        <span style="opacity: 0.85;">💡 亦可手动复制：将扩展内部的 <code>plugins/auto-save</code> 目录直接复制到酒馆根目录的 <code>plugins/</code> 下。</span>
+                        <b>第 1 步：</b>粘贴执行上述命令（全自动感知 Docker 容器、定位挂载卷并完成部署）；<br>
+                        <b>第 2 步：</b>确认酒馆 <code>config.yaml</code> 中 <code>enableServerPlugins: true</code> 并重启酒馆。
                     </small>
+                </div>
+
+                <!-- 方案二：醒目手动复制保底卡片 -->
+                <div class="novel-manual-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: bold; color: #f39c12; display: flex; align-items: center; gap: 6px;">
+                            <i class="fa-solid fa-triangle-exclamation"></i> 方案二：若脚本自动部署失败，请手动复制（100% 成功保底）
+                        </span>
+                        <small style="color: #f39c12; font-weight: bold; font-size: 11px;">终极保底</small>
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.9; line-height: 1.4;">
+                        当环境特殊或脚本无法自动感知目录时，只需手动复制一个文件夹即可完全搞定：
+                    </div>
+                    <div class="novel-manual-paths">
+                        <div><b>📂 复制源路径：</b><br><code>SillyTavern/data/default-user/extensions/ST-auto-save-to-txt/plugins/auto-save</code></div>
+                        <div style="margin-top: 4px;"><b>🎯 粘贴至目标：</b><br><code>SillyTavern/plugins/auto-save</code></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 2px;">
+                        <span style="font-size: 11px; opacity: 0.85;">🐳 <b>Docker 容器内直连手动复制命令：</b></span>
+                        <button type="button" class="novel-copy-btn" id="novel_copy_docker_manual_btn" style="padding: 2px 8px; font-size: 10px;">
+                            <i class="fa-solid fa-copy"></i> 复制 Docker 手动命令
+                        </button>
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.8; line-height: 1.4; border-top: 1px dashed rgba(230, 126, 34, 0.3); padding-top: 5px;">
+                        💡 <b>提示：</b>复制完成后，请确认酒馆 <code>config.yaml</code> 中开启 <code>enableServerPlugins: true</code>，重启酒馆（Docker 执行 <code>docker restart &lt;容器名&gt;</code>），刷新网页即可正常使用！
+                    </div>
                 </div>
             `;
 
@@ -1172,6 +1198,7 @@ async function renderSettingsUI(cachedStatus = null) {
             const cmdDisplay = guideEl.querySelector('#novel_cmd_display');
             const tabHint = guideEl.querySelector('#novel_tab_hint');
             const copyBtn = guideEl.querySelector('#novel_copy_cmd_btn');
+            const copyDockerManualBtn = guideEl.querySelector('#novel_copy_docker_manual_btn');
 
             let currentCmd = cmdOnlineLinux;
 
@@ -1218,6 +1245,34 @@ async function renderSettingsUI(cachedStatus = null) {
                         }, 2000);
                     } catch (e) {
                         alert('复制失败，请手动选中文本复制：\n' + currentCmd);
+                    }
+                });
+            }
+
+            if (copyDockerManualBtn) {
+                copyDockerManualBtn.addEventListener('click', async () => {
+                    try {
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            await navigator.clipboard.writeText(cmdManualDocker);
+                        } else {
+                            const ta = document.createElement('textarea');
+                            ta.value = cmdManualDocker;
+                            document.body.appendChild(ta);
+                            ta.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(ta);
+                        }
+                        copyDockerManualBtn.classList.add('copied');
+                        copyDockerManualBtn.innerHTML = '<i class="fa-solid fa-check"></i> 已复制 Docker 命令！';
+                        if (window.toastr) {
+                            window.toastr.success('Docker 手动复制命令已复制到剪贴板！', '小说连载');
+                        }
+                        setTimeout(() => {
+                            copyDockerManualBtn.classList.remove('copied');
+                            copyDockerManualBtn.innerHTML = '<i class="fa-solid fa-copy"></i> 复制 Docker 手动命令';
+                        }, 2500);
+                    } catch (e) {
+                        alert('复制失败，请手动选中文本复制：\n' + cmdManualDocker);
                     }
                 });
             }

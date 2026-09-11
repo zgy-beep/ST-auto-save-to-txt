@@ -79,10 +79,22 @@ if ($srcItem) {
 
 Write-Host "----------------------------------------------------------"
 if ($success) {
+    Write-Host "==========================================================" -ForegroundColor Green
     Write-Host "✅ 插件安装完成！" -ForegroundColor Green
     Write-Host "👉 下一步：请确认酒馆根目录 config.yaml 中 enableServerPlugins: true，然后重启酒馆即可生效！" -ForegroundColor Yellow
+    Write-Host "==========================================================" -ForegroundColor Green
 } else {
-    Write-Host "❌ 未能自动找到 ST-auto-save 扩展源目录。" -ForegroundColor Red
-    Write-Host "💡 请在 SillyTavern 根目录下打开 PowerShell 后重新执行此脚本。" -ForegroundColor Gray
+    Write-Host "==========================================================" -ForegroundColor Red
+    Write-Host "❌ [自动部署未完成] 未能在当前环境自动定位到酒馆根目录或插件文件" -ForegroundColor Red
+    Write-Host "==========================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "📌 请使用【100% 成功保底方案：手动复制】" -ForegroundColor Yellow
+    Write-Host "   【源文件夹】：SillyTavern\data\default-user\extensions\ST-auto-save-to-txt\plugins\auto-save" -ForegroundColor White
+    Write-Host "   【目标目录】：SillyTavern\plugins\auto-save" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "👉 操作步骤：" -ForegroundColor Cyan
+    Write-Host "   1. 打开文件资源管理器，进入扩展所在文件夹；"
+    Write-Host "   2. 将 plugins\auto-save 整个文件夹复制到 SillyTavern 根目录的 plugins\ 下；"
+    Write-Host "   3. 确认 config.yaml 中 enableServerPlugins: true 并重启酒馆。" -ForegroundColor Yellow
+    Write-Host "==========================================================" -ForegroundColor Red
 }
-Write-Host "=========================================================="
