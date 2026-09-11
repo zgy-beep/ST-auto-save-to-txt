@@ -1126,10 +1126,10 @@ async function renderSettingsUI(cachedStatus = null) {
 
         if (guideEl) {
             guideEl.style.display = 'flex';
-            // 彻底杜绝硬编码路径：采用智能通配自适应命令，覆盖 Docker 容器终端、Linux 宿主机任何工作目录、Windows 及新版 data/ 老版 public/ 结构
-            const cmdDocker = `find . -type d -name "auto-save" -path "*ST-auto-save*" -exec cp -r {} plugins/ \\; && echo "✅ 安装成功"`;
-            const cmdWindows = `Get-ChildItem -Path . -Recurse -Filter "auto-save" -Directory | Where-Object { $_.FullName -like "*ST-auto-save*" } | ForEach-Object { Copy-Item -Recurse -Force $_.FullName "plugins/"; Write-Host "✅ 安装成功" }`;
-            const cmdLinux = `find . -type d -name "auto-save" -path "*ST-auto-save*" -exec cp -r {} plugins/ \\; 2>/dev/null && echo "✅ 安装成功" || (src=$(find ~ /opt /var /volume1 -type d -name "auto-save" -path "*ST-auto-save*" 2>/dev/null | head -n 1) && [ -n "$src" ] && p="$(echo "$src" | sed -E 's/(data|public).*/plugins\\//')" && cp -r "$src" "$p" && echo "✅ 自动定位并安装至: $p")`;
+            // 采用专属安装脚本：全自动识别 Docker 容器、宿主机挂载卷及本地酒馆环境
+            const cmdScriptLinux = `bash -c "$(curl -fsSL https://raw.githubusercontent.com/zgy-beep/ST-auto-save-to-txt/main/install.sh 2>/dev/null || cat $(find ~ . /opt /var /volume1 -name install.sh -path "*ST-auto-save*" 2>/dev/null | head -n 1))"`;
+            const cmdScriptDocker = `find . -type d -name "auto-save" -path "*ST-auto-save*" -exec cp -r {} plugins/ \\; && echo "✅ 部署完成"`;
+            const cmdScriptWindows = `irm https://raw.githubusercontent.com/zgy-beep/ST-auto-save-to-txt/main/install.ps1 | iex`;
 
             guideEl.innerHTML = `
                 <!-- 零配置免安装直接导出高亮卡片 -->
@@ -1148,21 +1148,21 @@ async function renderSettingsUI(cachedStatus = null) {
                         <small style="opacity: 0.7; font-size: 11px;">两步完成</small>
                     </div>
                     <div class="novel-tab-bar">
-                        <button type="button" class="novel-tab-btn active" data-tab="docker"><i class="fa-brands fa-docker"></i> Docker / 容器终端</button>
-                        <button type="button" class="novel-tab-btn" data-tab="linux"><i class="fa-brands fa-linux"></i> Linux / 服务器终端</button>
+                        <button type="button" class="novel-tab-btn active" data-tab="linux"><i class="fa-brands fa-linux"></i> Linux / 服务器 (含Docker)</button>
+                        <button type="button" class="novel-tab-btn" data-tab="docker"><i class="fa-brands fa-docker"></i> 容器内部终端</button>
                         <button type="button" class="novel-tab-btn" data-tab="windows"><i class="fa-brands fa-windows"></i> Windows 本机</button>
                     </div>
                     <div class="novel-code-wrapper">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-size: 11px; opacity: 0.75;" id="novel_tab_hint">在容器面板（群晖/1Panel/Portainer）打开容器“终端”，粘贴执行：</span>
+                            <span style="font-size: 11px; opacity: 0.75;" id="novel_tab_hint">在服务器 SSH 终端粘贴执行官方自动部署脚本（智能识别 Docker/挂载卷）：</span>
                             <button type="button" class="novel-copy-btn" id="novel_copy_cmd_btn"><i class="fa-solid fa-copy"></i> 复制命令</button>
                         </div>
-                        <code class="novel-code-text" id="novel_cmd_display">${cmdDocker}</code>
+                        <code class="novel-code-text" id="novel_cmd_display">${cmdScriptLinux}</code>
                     </div>
                     <small style="opacity: 0.75; font-size: 11px; line-height: 1.5;">
-                        <b>第 1 步：</b>粘贴执行上述自适应命令（自动搜寻扩展路径，绝不报找不到路径）；<br>
+                        <b>第 1 步：</b>粘贴执行上述部署脚本（自动探测容器、挂载目录与权限，免手动配置）；<br>
                         <b>第 2 步：</b>确认酒馆 <code>config.yaml</code> 中 <code>enableServerPlugins: true</code> 并重启酒馆。<br>
-                        <span style="opacity: 0.85;">💡 亦可手动复制：将扩展内部的 <code>plugins/auto-save</code> 目录复制到酒馆根目录的 <code>plugins/</code> 下即可。</span>
+                        <span style="opacity: 0.85;">💡 亦可手动复制：将扩展内部的 <code>plugins/auto-save</code> 目录直接复制到酒馆根目录的 <code>plugins/</code> 下。</span>
                     </small>
                 </div>
             `;
@@ -1173,7 +1173,7 @@ async function renderSettingsUI(cachedStatus = null) {
             const tabHint = guideEl.querySelector('#novel_tab_hint');
             const copyBtn = guideEl.querySelector('#novel_copy_cmd_btn');
 
-            let currentCmd = cmdDocker;
+            let currentCmd = cmdScriptLinux;
 
             tabBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -1181,14 +1181,14 @@ async function renderSettingsUI(cachedStatus = null) {
                     btn.classList.add('active');
                     const tab = btn.getAttribute('data-tab');
                     if (tab === 'windows') {
-                        currentCmd = cmdWindows;
-                        if (tabHint) tabHint.textContent = '在酒馆根目录打开 PowerShell 粘贴执行：';
-                    } else if (tab === 'linux') {
-                        currentCmd = cmdLinux;
-                        if (tabHint) tabHint.textContent = '在服务器终端粘贴执行（支持全自动定位，无论当前在哪个目录均可）：';
+                        currentCmd = cmdScriptWindows;
+                        if (tabHint) tabHint.textContent = '在 PowerShell 粘贴执行一键部署脚本：';
+                    } else if (tab === 'docker') {
+                        currentCmd = cmdScriptDocker;
+                        if (tabHint) tabHint.textContent = '在容器内部终端（群晖/1Panel/Portainer）粘贴执行：';
                     } else {
-                        currentCmd = cmdDocker;
-                        if (tabHint) tabHint.textContent = '在容器面板（群晖/1Panel/Portainer）打开容器“终端”，粘贴执行：';
+                        currentCmd = cmdScriptLinux;
+                        if (tabHint) tabHint.textContent = '在服务器 SSH 终端粘贴执行官方自动部署脚本（智能识别 Docker/挂载卷）：';
                     }
                     if (cmdDisplay) cmdDisplay.textContent = currentCmd;
                 });
