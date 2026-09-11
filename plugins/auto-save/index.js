@@ -409,7 +409,7 @@ async function exit() {
 
 const info = {
     id: 'auto-save',
-    name: 'Auto Save to TXT',
+    name: '小说连载阅读 (Novel Stream)',
     description: 'SillyTavern 聊天小说连载阅读服务端追加插件'
 };
 

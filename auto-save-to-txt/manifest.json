@@ -1,5 +1,5 @@
 {
-  "display_name": "自动存档到 TXT · 小说连载 (Novel Stream)",
+  "display_name": "小说连载阅读 (Novel Stream)",
   "loading_order": 20,
   "js": "index.js",
   "css": "style.css",
