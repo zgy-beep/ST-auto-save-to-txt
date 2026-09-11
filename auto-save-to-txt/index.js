@@ -1126,9 +1126,9 @@ async function renderSettingsUI(cachedStatus = null) {
 
         if (guideEl) {
             guideEl.style.display = 'flex';
-            // 全环境通用自适应命令：自动模糊感知任意 Docker 容器名、Linux 内核 PID 进程目录、容器内部终端，绝不硬编码
-            const cmdUniversalLinux = `CID=$(docker ps --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -iE 'sillytavern|tavern' | awk '{print $1}' | head -n 1); [ -n "$CID" ] && docker exec -it "$CID" sh -c 'for s in /home/node/app/data/*/extensions/*auto-save*/plugins/auto-save /home/node/app/public/scripts/extensions/*/*auto-save*/plugins/auto-save data/*/extensions/*auto-save*/plugins/auto-save; do [ -d "$s" ] && cp -r "$s" /home/node/app/plugins/ && echo "🎉 [成功] 容器内部署完成: /home/node/app/plugins/auto-save" && exit 0; done; echo "❌ 容器内未找到插件目录"' || (P=$(readlink -f /proc/$(pgrep -f "server.js" 2>/dev/null | head -n 1)/cwd 2>/dev/null); [ -d "$P" ] && for s in "$P"/data/*/extensions/*auto-save*/plugins/auto-save "$P"/public/scripts/extensions/*/*auto-save*/plugins/auto-save; do [ -d "$s" ] && cp -r "$s" "$P/plugins/" && echo "🎉 [成功] 本地部署完成: $P/plugins/auto-save" && exit 0; done) || (for s in data/*/extensions/*auto-save*/plugins/auto-save public/scripts/extensions/*/*auto-save*/plugins/auto-save; do [ -d "$s" ] && cp -r "$s" plugins/ && echo "🎉 [成功] 部署完成: plugins/auto-save" && exit 0; done; echo "❌ 未能自动感知到运行中的酒馆，请确认酒馆正在运行")`;
-            const cmdWindows = `$s = Get-ChildItem -Path @("data", "public") -Recurse -Filter "auto-save" -Directory -Depth 5 -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*ST-auto-save*" } | Select-Object -First 1; if ($s) { Copy-Item -Recurse -Force $s.FullName "plugins/"; Write-Host "🎉 [成功] 部署完成: plugins/auto-save" } else { Write-Host "❌ 请在 SillyTavern 根目录执行此命令" }`;
+            // 一键部署命令：极简一行命令，国内 CDN 高速直连，所有复杂感知与挂载穿透完全封装在 install 脚本中
+            const cmdOnlineLinux = `curl -fsSL https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/install.sh | bash`;
+            const cmdOnlineWindows = `irm https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/install.ps1 | iex`;
             const cmdDirectScript = `bash install.sh`;
 
             guideEl.innerHTML = `
@@ -1145,22 +1145,22 @@ async function renderSettingsUI(cachedStatus = null) {
                 <div class="novel-deploy-card">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-weight: bold; opacity: 0.95;"><i class="fa-solid fa-plug"></i> 进阶配置：开启每轮自动落盘（可选）</span>
-                        <small style="opacity: 0.7; font-size: 11px;">两步完成</small>
+                        <small style="opacity: 0.7; font-size: 11px;">极简一行直达</small>
                     </div>
                     <div class="novel-tab-bar">
-                        <button type="button" class="novel-tab-btn active" data-tab="universal"><i class="fa-brands fa-linux"></i> Linux / Docker / NAS (通用自适应)</button>
+                        <button type="button" class="novel-tab-btn active" data-tab="universal"><i class="fa-brands fa-linux"></i> Linux / Docker / NAS (推荐)</button>
                         <button type="button" class="novel-tab-btn" data-tab="windows"><i class="fa-brands fa-windows"></i> Windows 本机</button>
-                        <button type="button" class="novel-tab-btn" data-tab="script"><i class="fa-solid fa-terminal"></i> 运行脚本 (install.sh)</button>
+                        <button type="button" class="novel-tab-btn" data-tab="script"><i class="fa-solid fa-terminal"></i> 离线/本地运行</button>
                     </div>
                     <div class="novel-code-wrapper">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-size: 11px; opacity: 0.75;" id="novel_tab_hint">在服务器终端（SSH 或容器控制台）直接粘贴执行（全自动模糊感知，0.01 秒完成）：</span>
+                            <span style="font-size: 11px; opacity: 0.75;" id="novel_tab_hint">在服务器终端（SSH 或控制台）直接粘贴执行（国内 CDN 高速直连，自动穿透 Docker）：</span>
                             <button type="button" class="novel-copy-btn" id="novel_copy_cmd_btn"><i class="fa-solid fa-copy"></i> 复制命令</button>
                         </div>
-                        <code class="novel-code-text" id="novel_cmd_display">${cmdUniversalLinux}</code>
+                        <code class="novel-code-text" id="novel_cmd_display">${cmdOnlineLinux}</code>
                     </div>
                     <small style="opacity: 0.75; font-size: 11px; line-height: 1.5;">
-                        <b>第 1 步：</b>粘贴执行上述命令（自动模糊感知 Docker 容器、宿主机与本地进程，绝无路径硬编码）；<br>
+                        <b>第 1 步：</b>粘贴执行上述命令（国内 CDN 毫秒级直达，脚本全自动穿透 Docker、定位挂载卷并完成部署）；<br>
                         <b>第 2 步：</b>确认酒馆 <code>config.yaml</code> 中 <code>enableServerPlugins: true</code> 并重启酒馆。<br>
                         <span style="opacity: 0.85;">💡 亦可手动复制：将扩展内部的 <code>plugins/auto-save</code> 目录直接复制到酒馆根目录的 <code>plugins/</code> 下。</span>
                     </small>
@@ -1173,7 +1173,7 @@ async function renderSettingsUI(cachedStatus = null) {
             const tabHint = guideEl.querySelector('#novel_tab_hint');
             const copyBtn = guideEl.querySelector('#novel_copy_cmd_btn');
 
-            let currentCmd = cmdUniversalLinux;
+            let currentCmd = cmdOnlineLinux;
 
             tabBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -1181,14 +1181,14 @@ async function renderSettingsUI(cachedStatus = null) {
                     btn.classList.add('active');
                     const tab = btn.getAttribute('data-tab');
                     if (tab === 'windows') {
-                        currentCmd = cmdWindows;
-                        if (tabHint) tabHint.textContent = '在酒馆根目录打开 PowerShell 粘贴执行：';
+                        currentCmd = cmdOnlineWindows;
+                        if (tabHint) tabHint.textContent = '在 Windows PowerShell 中直接粘贴执行（国内高速加速）：';
                     } else if (tab === 'script') {
                         currentCmd = cmdDirectScript;
-                        if (tabHint) tabHint.textContent = '在扩展或酒馆根目录下直接运行官方脚本：';
+                        if (tabHint) tabHint.textContent = '在酒馆根目录或扩展目录中直接执行官方脚本（0 网络依赖）：';
                     } else {
-                        currentCmd = cmdUniversalLinux;
-                        if (tabHint) tabHint.textContent = '在服务器终端（SSH 或容器控制台）直接粘贴执行（全自动模糊感知，0.01 秒完成）：';
+                        currentCmd = cmdOnlineLinux;
+                        if (tabHint) tabHint.textContent = '在服务器终端（SSH 或控制台）直接粘贴执行（国内 CDN 高速直连，自动穿透 Docker）：';
                     }
                     if (cmdDisplay) cmdDisplay.textContent = currentCmd;
                 });
