@@ -42,9 +42,10 @@
 
 ### 第二步：部署服务端插件（若需每轮自动后台落盘）
 > 💡 *若仅使用纯前端一键导出功能，此步骤可完全跳过！*
-1. 打开扩展设置抽屉，点击 **【复制命令】**（前端会根据您的操作系统与容器环境自动生成最精确的路径）。
+1. 打开扩展设置抽屉，点击 **【复制命令】**（前端提供全自动智能命令，自适应 Docker 容器、云服务器 Linux 及 Windows 本机，彻底消除路径报错）。
 2. 在终端（或 Docker 容器终端）粘贴执行该命令。
-3. 确认 SillyTavern 根目录的 **`config.yaml`** 中 `enableServerPlugins: true` 并重启酒馆服务。
+3. *（亦可手动操作）*：将扩展内的 `plugins/auto-save` 文件夹直接复制到 SillyTavern 根目录的 `plugins/` 目录下。
+4. 确认 SillyTavern 根目录的 **`config.yaml`** 中 `enableServerPlugins: true` 并重启酒馆服务。
 
 ---
 
