@@ -1,11 +1,15 @@
 # Logs & Generated Novels (用户连载小说与日志目录，绝不上传 GitHub)
-log/
-logs/
-**/log/
-**/logs/
 *.log
 *.txt
 !requirements.txt
+plugins/auto-save/logs/*
+!plugins/auto-save/logs/.gitkeep
+
+# Syncthing (华为家庭存储 / 私有云同步元数据)
+.stfolder/
+.stversions/
+**/.stfolder/
+**/.stversions/
 
 # Node
 node_modules/

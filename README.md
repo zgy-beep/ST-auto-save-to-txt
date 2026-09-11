@@ -114,3 +114,29 @@
 
 　　她转过身，示意你跟上她的脚步。远处的钟楼适时敲响了午夜的钟声……
 ```
+
+---
+
+## 📁 项目目录结构
+
+```text
+ST-auto-save-to-txt/
+├── index.js                  # 前端核心扩展代码 (UI / 交互 / 拦截 / 导出)
+├── style.css                 # 前端样式表 (酒馆原生自适应 / 精致按钮 / 状态徽标)
+├── manifest.json             # SillyTavern 官方扩展清单元数据
+├── install.sh                # Linux / Docker / 群晖 NAS 通用自适应部署脚本
+├── install.ps1               # Windows 本机一键部署脚本
+├── README.md                 # 项目中英文使用与部署说明文档
+├── .gitignore                # Git 忽略配置 (保护连载小说与私有数据安全)
+├── plugins/
+│   └── auto-save/            # SillyTavern 服务端插件 (部署至 SillyTavern/plugins/)
+│       ├── index.js          # 服务端 Node/Express 路由与追加写入核心逻辑
+│       ├── package.json      # 服务端插件清单与元数据定义
+│       └── logs/             # 默认连载生成输出目录
+│           └── .gitkeep      # 目录占位标记
+└── test/                     # 自动化测试套件
+    ├── test-server.js        # 服务端接口与文件连载落盘测试
+    ├── test-think.js         # 思维链/思考流多形态清洗测试
+    └── test-universal-tags.js # 通用全标签清洗引擎测试
+```
+
