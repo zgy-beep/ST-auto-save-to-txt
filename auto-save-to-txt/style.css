@@ -3,6 +3,7 @@
  * 极简优雅、100% 贴合酒馆原生抽屉边距与主题
  */
 
+/* 移除自定义 margin-bottom，严格与酒馆原生抽屉间距保持 1:1 一致 */
 #auto-save-to-txt-settings {
     margin: 0;
 }
@@ -17,6 +18,7 @@
     gap: 12px;
 }
 
+/* 状态提示卡片 */
 .novel-alert {
     display: flex;
     align-items: flex-start;
@@ -76,6 +78,7 @@
     line-height: 1;
 }
 
+/* 复选框及文字 */
 #auto-save-to-txt-settings label.checkbox_label {
     display: flex !important;
     align-items: center !important;
@@ -92,6 +95,7 @@
     line-height: 1.4;
 }
 
+/* 表单组与标签 */
 .novel-form-group {
     display: flex;
     flex-direction: column;
@@ -104,6 +108,7 @@
     opacity: 0.9;
 }
 
+/* 小说存储提示框 */
 .novel-book-info {
     font-size: 12px;
     line-height: 1.6;
@@ -133,6 +138,7 @@
     font-size: 11px;
 }
 
+/* 按钮 */
 #auto-save-to-txt-settings button.menu_button {
     width: 100%;
     padding: 9px;

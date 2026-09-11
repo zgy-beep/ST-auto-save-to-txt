@@ -126,10 +126,68 @@ function getSettings() {
 }
 
 /**
+ * 健壮的文件名清洗（防 Windows 非法字符与截断）
+ */
+function sanitizeFilename(rawName) {
+    if (!rawName || typeof rawName !== 'string') {
+        return '我的小说连载';
+    }
+    let safeName = rawName
+        .replace(/[/\\?%*:|"<>]/g, '_')
+        .replace(/[\r\n\t]/g, ' ')
+        .replace(/\.{2,}/g, '_')
+        .trim();
+    safeName = safeName.slice(0, 150).replace(/[. ]+$/, '');
+    return safeName || '我的小说连载';
+}
+
+/**
  * 获取当前连载小说书名
  * 支持根据【文件命名规则】自动区分同一角色卡的不同对话（平行世界、重开等）
+ * 支持自动识别多角色群聊 (Group Chat) 并自动聚合为同一部群小说
  */
 function getBookTitle(settings, speakerName = '') {
+    // 1. 优先检测是否处于群聊 (Group Chat)
+    const selectedGroup = (typeof ctx.selected_group !== 'undefined') 
+        ? ctx.selected_group 
+        : (typeof window !== 'undefined' ? window.selected_group : null);
+
+    if (selectedGroup) {
+        let groupName = '群聊纪事';
+        const groupList = ctx.groups || (typeof window !== 'undefined' ? window.groups : null) || [];
+        if (Array.isArray(groupList)) {
+            const grp = groupList.find(g => g.id === selectedGroup);
+            if (grp && grp.name) {
+                groupName = grp.name;
+            }
+        }
+
+        const groupPrefix = `[群聊] ${groupName}`;
+        if (settings && settings.naming_rule === 'char_only') {
+            return groupPrefix;
+        }
+
+        let chatTitle = '';
+        if (ctx.chatMetadata && typeof ctx.chatMetadata === 'object' && ctx.chatMetadata.title) {
+            chatTitle = String(ctx.chatMetadata.title).trim();
+        }
+        if (!chatTitle) {
+            const cId = ctx.chatId || (typeof window !== 'undefined' ? window.chat_id : null);
+            if (cId && typeof cId === 'string') {
+                chatTitle = cId.replace(/\.jsonl$/i, '').trim();
+            }
+        }
+
+        if (chatTitle) {
+            if (chatTitle.startsWith(groupPrefix + ' - ') || chatTitle.startsWith(groupPrefix + '_')) {
+                return chatTitle;
+            }
+            return `${groupPrefix} - ${chatTitle}`;
+        }
+        return groupPrefix;
+    }
+
+    // 2. 单角色对话逻辑
     let charName = '我的小说连载';
     const charList = ctx.characters || characters_raw || window.characters || [];
     const chid = (typeof ctx.this_chid !== 'undefined') ? ctx.this_chid : (typeof this_chid_raw !== 'undefined' ? this_chid_raw : window.this_chid);
@@ -180,6 +238,11 @@ const INLINE_TAGS = new Set(['b', 'i', 'u', 's', 'em', 'strong', 'span', 'sub', 
 function cleanNovelText(rawText, settings = {}) {
     if (!rawText || typeof rawText !== 'string') return '';
     let text = rawText;
+
+    // 前置清洗：彻底过滤 HTML 注释 (如 <!-- Lorebook: ... -->) 与 Markdown 多媒体图片
+    text = text.replace(/<!--[\s\S]*?-->/g, '');
+    text = text.replace(/!\[.*?\]\(.*?\)/g, '');
+    text = text.replace(/<img[^>]*>/gi, '');
 
     // 阶段零【通用前置无头标签与思维链智能清洗】：
     // 应对任何反代、Prefill、插件导致的“开篇无起始标签、仅有闭标签”问题（无论标签名叫什么，均可自动识别并切除）
@@ -382,6 +445,7 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
     }
 
     const mesSnippet = novelText.slice(0, 80);
+    // 判断是否为完全重复的内容（同一条消息且内容一模一样）
     if (
         lastSavedSignature.messageId === messageIndex &&
         lastSavedSignature.characterName === bookTitle &&
@@ -390,10 +454,29 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         return;
     }
 
-    const chapterNumber = chatLog.filter((m, idx) => idx <= messageIndex && (!m.is_user || settings.include_user_dialogue)).length || 1;
+    // 智能识别“重新生成 (Regenerate)”或“滑动分支 (Swipe)”：
+    // 当消息序号等于上一次保存的序号，但内容不同，说明用户重新生成了该条回复，需要更新替换末尾章节
+    const isRegenerate = (
+        lastSavedSignature.messageId === messageIndex &&
+        lastSavedSignature.characterName === bookTitle &&
+        lastSavedSignature.mesSnippet !== '' &&
+        lastSavedSignature.mesSnippet !== mesSnippet
+    );
+
+    // 精确计算有效章节序号（跳过被过滤为空白的消息，确保与全本同步序号 100% 一致）
+    let chapterNumber = 0;
+    for (let i = 0; i <= messageIndex; i++) {
+        const m = chatLog[i];
+        if (!m) continue;
+        if (m.is_user && !settings.include_user_dialogue) continue;
+        const c = cleanNovelText(m.mes || '', settings);
+        if (c) chapterNumber++;
+    }
+    chapterNumber = chapterNumber || 1;
 
     // 1. 设置状态为更新中（顶栏指示灯与面板卡片即时响应）
-    updateRecentStatus('updating', `正在将第 ${chapterNumber} 节 · ${speakerName} 编排写入小说...`);
+    const actionText = isRegenerate ? '正在替换更新' : '正在编排写入';
+    updateRecentStatus('updating', `${actionText}第 ${chapterNumber} 节 · ${speakerName}...`);
 
     const payload = {
         name: speakerName,
@@ -402,7 +485,8 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         characterName: bookTitle,
         chapterNumber: chapterNumber,
         chapterStyle: settings.chapter_style || 'numbered',
-        save_dir: settings.save_dir || ''
+        save_dir: settings.save_dir || '',
+        is_regenerate: isRegenerate
     };
 
     const res = await postChapterToServer(payload);
@@ -419,6 +503,14 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
             updateRecentStatus('skipped', `第 ${chapterNumber} 节末尾内容重复，已自动略过写入`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
                 window.toastr.info(`第 ${chapterNumber} 节内容与前文重复，已略过`, '小说连载提示', { timeOut: 2500 });
+            }
+        } else if (res.is_regenerate) {
+            updateRecentStatus('success', `第 ${chapterNumber} 节 · ${speakerName}（重新生成已替换更新）`, targetFile);
+            if (settings.show_toast !== false && window.toastr) {
+                window.toastr.success(`第 ${chapterNumber} 节已更新为最新生成版本！`, '小说连载已更新', {
+                    timeOut: 3000,
+                    preventDuplicates: true
+                });
             }
         } else {
             // 2. 更新完成提示（顶栏指示灯与面板卡片）
@@ -658,9 +750,9 @@ async function renderSettingsUI() {
     const previewEl = panel.querySelector('#novel_save_dir_preview');
     const updatePreview = () => {
         if (!previewEl) return;
+        const currentTitle = getBookTitle(settings);
         const prefix = settings.save_dir ? (settings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
-        const fileExample = settings.naming_rule === 'char_only' ? '<角色名>.txt' : '<角色名> - <对话名>.txt';
-        previewEl.textContent = `${prefix}${fileExample}`;
+        previewEl.textContent = `${prefix}${currentTitle}.txt`;
     };
 
     if (inputSaveDir) {
@@ -768,7 +860,7 @@ async function renderSettingsUI() {
         });
     }
 
-    // 纯前端一键导出整本小说
+    // 纯前端一键导出整本小说（自动附加 UTF-8 BOM，彻底解决手机阅读器/老Windows乱码）
     const exportBtn = panel.querySelector('#novel_export_all_btn');
     if (exportBtn) {
         exportBtn.addEventListener('click', () => {
@@ -804,11 +896,12 @@ async function renderSettingsUI() {
                 return;
             }
 
-            const blob = new Blob([novelText], { type: 'text/plain;charset=utf-8' });
+            const safeFileName = sanitizeFilename(bookTitle);
+            const blob = new Blob(['\uFEFF' + novelText], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${bookTitle}.txt`;
+            a.download = `${safeFileName}.txt`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -905,5 +998,18 @@ jQuery(async () => {
         eventSource.on(event_types.MESSAGE_SENT, (data) => {
             handleMessageSave(data, true);
         });
+
+        if (event_types.CHAT_CHANGED) {
+            eventSource.on(event_types.CHAT_CHANGED, () => {
+                lastSavedSignature = { messageId: null, characterName: '', mesSnippet: '' };
+                const curPreview = document.getElementById('novel_save_dir_preview');
+                if (curPreview) {
+                    const curSettings = getSettings();
+                    const curTitle = getBookTitle(curSettings);
+                    const prefix = curSettings.save_dir ? (curSettings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
+                    curPreview.textContent = `${prefix}${curTitle}.txt`;
+                }
+            });
+        }
     }
 });

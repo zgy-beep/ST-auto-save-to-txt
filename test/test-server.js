@@ -66,7 +66,7 @@ async function runTests() {
     try {
         // 测试 0: 服务端健康状态探针 (/status)
         const res0 = await router.dispatch('GET', '/status', {});
-        assert(res0.status === 200 && res0.data.ready === true, '测试 0: 服务端状态探针正常响应');
+        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.5.0', '测试 0: 服务端状态探针正常响应且版本为 1.5.0');
 
         const testChar = '我的仙侠传奇';
         const testPayload1 = {
@@ -78,32 +78,47 @@ async function runTests() {
             chapterStyle: 'numbered'
         };
 
-        // 测试 1: 正常生成第一节
+        // 测试 1: 首次创建小说文件，自动生成 UTF-8 BOM 与《书名》扉页
         const res1 = await router.dispatch('POST', '/append', testPayload1);
         assert(res1.status === 200 && res1.data.success === true, '测试 1: 成功连载第一节');
 
         const filePath1 = path.join(logsDir, `${testChar}.txt`);
         assert(fs.existsSync(filePath1), '测试 1.1: 确认小说文件已生成');
         const content1 = fs.readFileSync(filePath1, 'utf8');
-        assert(content1.includes('第 1 节 · 青云道长') && content1.includes('山风拂面'), '测试 1.2: 小说章节格式规范正确');
+        assert(content1.startsWith('\uFEFF《我的仙侠传奇》'), '测试 1.2: 小说文件首部正确写入 UTF-8 BOM 与《书名》扉页');
+        assert(content1.includes('第 1 节 · 青云道长') && content1.includes('山风拂面'), '测试 1.3: 小说章节格式规范正确');
 
-        // 测试 2: 防重检测
+        // 测试 2: 精准防重检测（相同内容直接跳过）
         const res2 = await router.dispatch('POST', '/append', testPayload1);
-        assert(res2.status === 200 && res2.data.skipped === true, '测试 2: 重复段落成功防重跳过');
+        assert(res2.status === 200 && res2.data.skipped === true, '测试 2: 完全相同内容成功防重跳过');
 
-        // 测试 3: 连载第二节
+        // 测试 2.1: 消除误杀测试（即使新章节开头与前文有相同语句，只要是新内容绝不能被误判跳过）
         const testPayload2 = {
             name: '青云道长',
-            mes: '　　只见道长并指如剑，一道青光冲天而起，直贯云霄。',
+            mes: '　　山风拂面，竹林沙沙作响。但这一次，远方却传来了惊雷般的兽吼！',
             is_user: false,
             characterName: testChar,
             chapterNumber: 2,
             chapterStyle: 'numbered'
         };
-        const res3 = await router.dispatch('POST', '/append', testPayload2);
-        assert(res3.status === 200 && res3.data.success === true, '测试 3: 成功连载第二节');
+        const res2_1 = await router.dispatch('POST', '/append', testPayload2);
+        assert(res2_1.status === 200 && res2_1.data.skipped === false, '测试 2.1: 前置同名短句的新章节正常写入，未被误判跳过');
 
-        const content2 = fs.readFileSync(filePath1, 'utf8');
+        // 测试 3: 重新生成 / Swipe 分支智能替换测试 (is_regenerate = true)
+        const testPayloadRegen = {
+            name: '青云道长',
+            mes: '　　山风拂面，竹林沙沙作响。重新生成的分支：天边划过一道金色剑芒！',
+            is_user: false,
+            characterName: testChar,
+            chapterNumber: 2,
+            chapterStyle: 'numbered',
+            is_regenerate: true
+        };
+        const res3 = await router.dispatch('POST', '/append', testPayloadRegen);
+        assert(res3.status === 200 && res3.data.is_regenerate === true, '测试 3: 成功执行重新生成替换');
+        const contentRegen = fs.readFileSync(filePath1, 'utf8');
+        assert(contentRegen.includes('金色剑芒') && !contentRegen.includes('兽吼'), '测试 3.1: 最后一节成功被新分支替换，旧分支无残留');
+
         // 测试 4: 自定义保存文件夹路径 (如外部书库/同步盘目录)
         const customDir = path.join(__dirname, '../plugins/auto-save/custom_novels');
         const testPayloadCustom = {
@@ -122,7 +137,7 @@ async function runTests() {
         if (fs.existsSync(customFilePath)) fs.unlinkSync(customFilePath);
         if (fs.existsSync(customDir)) fs.rmdirSync(customDir);
 
-        // 测试 5: 全量历史小说同步 (/sync-all)
+        // 测试 5: 全量历史小说同步 (/sync-all) 自动补全 UTF-8 BOM
         const syncPayload = {
             characterName: '全书同步测试',
             fullText: '《全书同步测试》\n\n第 1 节 · 序章\n\n　　这是第一章。\n\n\n第 2 节 · 终章\n\n　　这是第二章。\n\n\n',
@@ -133,7 +148,8 @@ async function runTests() {
         const syncFilePath = path.join(logsDir, '全书同步测试.txt');
         assert(fs.existsSync(syncFilePath), '测试 5.1: 确认同步生成的全本小说存在');
         const syncContent = fs.readFileSync(syncFilePath, 'utf8');
-        assert(syncContent.includes('第 1 节 · 序章') && syncContent.includes('第 2 节 · 终章'), '测试 5.2: 全本章节内容完整准确');
+        assert(syncContent.startsWith('\uFEFF'), '测试 5.2: 全本同步自动补全 UTF-8 BOM 杜绝乱码');
+        assert(syncContent.includes('第 1 节 · 序章') && syncContent.includes('第 2 节 · 终章'), '测试 5.3: 全本章节内容完整准确');
         if (fs.existsSync(syncFilePath)) fs.unlinkSync(syncFilePath);
 
         // 清理测试文件

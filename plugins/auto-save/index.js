@@ -1,12 +1,14 @@
 /**
- * SillyTavern 聊天小说连载阅读服务端插件
+ * SillyTavern 聊天小说连载阅读服务端插件 (v1.5.0)
  * 
  * 文件路径：plugins/auto-save/index.js
  * 
  * 核心功能：
  * - 接收前端章节内容，以高雅、规范的小说排版格式追加写入 TXT。
  * - 格式完美适配微信读书、掌阅、ReadEra、多看等主流阅读器，自动识别“第 X 节”为可点击的目录。
- * - 严格防路径穿越、100KB 容量防护与末尾条目防重复机制。
+ * - 首次创建小说自动补充 UTF-8 BOM 编码标识与《书名》扉页，彻底杜绝乱码。
+ * - 智能防重与“重新生成 (Regenerate)”分支自动替换末尾章节，避免剧情堆叠。
+ * - 严格防路径穿越、100KB 单章容量防护与异步并发文件写入锁机制。
  */
 
 const fs = require('fs');
@@ -15,6 +17,23 @@ const path = require('path');
 const pluginName = 'auto-save';
 const MAX_MESSAGE_BYTES = 100 * 1024; // 100KB
 const LOGS_DIR = path.join(__dirname, 'logs');
+const UTF8_BOM = '\uFEFF';
+
+// 异步文件写入队列，确保同一小说的并发写入严格按序执行
+const fileQueues = new Map();
+
+function runInFileQueue(filePath, task) {
+    const currentQueue = fileQueues.get(filePath) || Promise.resolve();
+    const nextQueue = currentQueue
+        .then(task, task)
+        .finally(() => {
+            if (fileQueues.get(filePath) === nextQueue) {
+                fileQueues.delete(filePath);
+            }
+        });
+    fileQueues.set(filePath, nextQueue);
+    return nextQueue;
+}
 
 async function ensureLogsDir() {
     try {
@@ -26,15 +45,28 @@ async function ensureLogsDir() {
     }
 }
 
+/**
+ * 健壮的文件名清洗
+ * 防路径穿越、清理非法字符、剔除末尾空格与句点、防 Windows 保留设备名
+ */
 function sanitizeFilename(rawName) {
     if (!rawName || typeof rawName !== 'string') {
         return '我的小说连载';
     }
     let safeName = rawName
         .replace(/[/\\?%*:|"<>]/g, '_')
+        .replace(/[\r\n\t]/g, ' ')
         .replace(/\.{2,}/g, '_')
         .trim();
-    safeName = safeName.slice(0, 150);
+
+    // 截断长度并去除 Windows 不允许的末尾空格和句点
+    safeName = safeName.slice(0, 150).replace(/[. ]+$/, '');
+
+    // 防御 Windows 经典保留设备名 (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(safeName)) {
+        safeName = `${safeName}_novel`;
+    }
+
     return safeName || '我的小说连载';
 }
 
@@ -61,7 +93,8 @@ function resolveTargetDirectory(customDir) {
 }
 
 /**
- * 防重复写入检查：防止 Swipe 或重新生成在小说末尾连续堆叠相同段落
+ * 精准末尾防重复写入检查：
+ * 仅对比文件最末尾的实际章节内容，绝不在整个 4KB 范围内做前文误伤匹配
  */
 async function isDuplicateTail(filePath, mes) {
     try {
@@ -80,9 +113,53 @@ async function isDuplicateTail(filePath, mes) {
         }
 
         const tailContent = buffer.toString('utf8');
-        const mesSnippet = mes.slice(0, 60).trim();
-        return tailContent.includes(mesSnippet);
+        const cleanMes = mes.trim();
+        const tailTrimmed = tailContent.trim();
+
+        // 1. 如果文件末尾完全以此段正文结尾
+        if (tailTrimmed.endsWith(cleanMes)) {
+            return true;
+        }
+
+        // 2. 检查文件最末尾 200 个字符内是否包含该正文的尾部特征片段（确保是同一章末尾重复）
+        const tailSnippet = cleanMes.slice(-60);
+        if (tailSnippet && tailTrimmed.slice(-200).includes(tailSnippet)) {
+            return true;
+        }
+
+        return false;
     } catch (err) {
+        return false;
+    }
+}
+
+/**
+ * 替换文件末尾的最后一章节（用于支持 Regenerate / Swipe 重新生成替换）
+ */
+async function replaceLastChapter(filePath, newFormattedChapter) {
+    try {
+        const content = await fs.promises.readFile(filePath, 'utf8');
+        // 匹配章节标题起始位置：第 X 节、* * *、或【角色名】
+        const regex = /(?:^|\r?\n\r?\n)(第 \d+ 节 · [^\r\n]+|\* \* \*|【[^\r\n]+】)\r?\n\r?\n/g;
+        let lastMatch = null;
+        let match;
+        while ((match = regex.exec(content)) !== null) {
+            lastMatch = match;
+        }
+
+        if (lastMatch && lastMatch.index >= 0) {
+            const baseContent = content.slice(0, lastMatch.index).trimEnd();
+            const separator = baseContent ? '\n\n\n' : '';
+            await fs.promises.writeFile(filePath, baseContent + separator + newFormattedChapter, { encoding: 'utf8' });
+            return true;
+        } else {
+            // 未匹配到章节头，则安全追加
+            await fs.promises.appendFile(filePath, newFormattedChapter, { encoding: 'utf8' });
+            return false;
+        }
+    } catch (err) {
+        // 出错降级为追加
+        await fs.promises.appendFile(filePath, newFormattedChapter, { encoding: 'utf8' });
         return false;
     }
 }
@@ -119,7 +196,7 @@ async function init(router) {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.4.0',
+            version: '1.5.0',
             logsDir: LOGS_DIR
         });
     });
@@ -131,7 +208,7 @@ async function init(router) {
                 return res.status(400).json({ error: '无效请求' });
             }
 
-            const { name, mes, is_user, characterName, chapterNumber, chapterStyle, save_dir } = body;
+            const { name, mes, is_user, characterName, chapterNumber, chapterStyle, save_dir, is_regenerate } = body;
 
             if (!mes || typeof mes !== 'string') {
                 return res.status(400).json({ error: '正文内容不能为空' });
@@ -157,37 +234,61 @@ async function init(router) {
 
             const targetFilePath = path.join(targetDir, targetFileName);
 
-            // 检查末尾防重
-            const duplicate = await isDuplicateTail(targetFilePath, mes);
-            if (duplicate) {
-                console.log(`[${pluginName}] 检测到末尾已有相同段落，跳过重复写入`);
-                return res.json({
-                    success: true,
-                    skipped: true,
-                    reason: '重复段落已自动跳过',
-                    file: path.relative(process.cwd(), targetFilePath)
+            // 排队进入写入队列，确保并发写操作安全有序
+            const result = await runInFileQueue(targetFilePath, async () => {
+                const stat = await fs.promises.stat(targetFilePath).catch(() => null);
+                const isNewFile = !stat || stat.size === 0;
+
+                // 非新建且非重新生成模式下，检查末尾防重
+                if (!isNewFile && !is_regenerate) {
+                    const duplicate = await isDuplicateTail(targetFilePath, mes);
+                    if (duplicate) {
+                        console.log(`[${pluginName}] 检测到末尾已有相同段落，跳过重复写入`);
+                        return {
+                            skipped: true,
+                            reason: '重复段落已自动跳过',
+                            file: path.relative(process.cwd(), targetFilePath)
+                        };
+                    }
+                }
+
+                // 编排成小说章节
+                const formattedNovel = formatNovelChapter({
+                    name: name || '故事',
+                    mes,
+                    is_user,
+                    chapterNumber,
+                    chapterStyle
                 });
-            }
 
-            // 编排成小说章节
-            const formattedNovel = formatNovelChapter({
-                name: name || '故事',
-                mes,
-                is_user,
-                chapterNumber,
-                chapterStyle
+                if (isNewFile) {
+                    // 首次创建文件：写入 UTF-8 BOM 标识与《书名》扉页，完美适配阅读器目录与中文编码
+                    const fileHeader = `${UTF8_BOM}《${bookTitle}》\n\n\n`;
+                    await fs.promises.writeFile(targetFilePath, fileHeader + formattedNovel, { encoding: 'utf8' });
+                } else if (is_regenerate) {
+                    // 用户重新生成或滑动分支：智能替换末尾章节，避免残留旧草稿
+                    await replaceLastChapter(targetFilePath, formattedNovel);
+                } else {
+                    // 正常追加新章节
+                    await fs.promises.appendFile(targetFilePath, formattedNovel, { encoding: 'utf8' });
+                }
+
+                const relPath = path.relative(process.cwd(), targetFilePath);
+                console.log(`[${pluginName}] 📖 成功连载新章节 -> ${relPath}${is_regenerate ? ' (重写替换)' : ''}`);
+
+                return {
+                    skipped: false,
+                    file: relPath,
+                    is_regenerate: !!is_regenerate
+                };
             });
-
-            // 以 UTF-8 格式追加写入小说文件
-            await fs.promises.appendFile(targetFilePath, formattedNovel, { encoding: 'utf8' });
-
-            const relPath = path.relative(process.cwd(), targetFilePath);
-            console.log(`[${pluginName}] 📖 成功连载新章节 -> ${relPath}`);
 
             return res.json({
                 success: true,
-                skipped: false,
-                file: relPath
+                skipped: result.skipped,
+                reason: result.reason,
+                file: result.file,
+                is_regenerate: result.is_regenerate
             });
         } catch (error) {
             console.error(`[${pluginName}] 连载写入异常:`, error);
@@ -229,8 +330,11 @@ async function init(router) {
 
             const targetFilePath = path.join(targetDir, targetFileName);
 
-            // 完整写入小说文件（覆盖初始化）
-            await fs.promises.writeFile(targetFilePath, fullText, { encoding: 'utf8' });
+            await runInFileQueue(targetFilePath, async () => {
+                // 确保包含 UTF-8 BOM 标识
+                const contentWithBom = fullText.startsWith(UTF8_BOM) ? fullText : (UTF8_BOM + fullText);
+                await fs.promises.writeFile(targetFilePath, contentWithBom, { encoding: 'utf8' });
+            });
 
             const relPath = path.relative(process.cwd(), targetFilePath);
             console.log(`[${pluginName}] 📚 成功全量同步历史小说 -> ${relPath}`);

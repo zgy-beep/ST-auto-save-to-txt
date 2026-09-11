@@ -15,6 +15,11 @@ function cleanNovelTextUniversal(rawText, settings = {}) {
     // 无论是 think, cot, scratchpad, analysis, plan, 还是类似 think_fox~, my_tag~ 等任意自定义标签
     // =========================================================================
 
+    // 前置清洗：彻底过滤 HTML 注释与 Markdown 图片/多媒体
+    text = text.replace(/<!--[\s\S]*?-->/g, '');
+    text = text.replace(/!\[.*?\]\(.*?\)/g, '');
+    text = text.replace(/<img[^>]*>/gi, '');
+
     // 1. 通用开篇孤立闭标签检测：
     // 当消息以思考、分析、Prompt 元数据开篇，但开标签被反代或预设 prefill 省略，仅以 </tag_name> 闭合时
     // 自动切除从第 0 个字符到该闭合标签的全部内容
@@ -181,6 +186,16 @@ const cases = [
         name: '测试7: 普通正文内含合法标签不被误伤（如 <b>加粗</b> 与 <i>斜体</i>）',
         input: '他大喊一声：<b>快走！</b>随后冲入<i>暴风雨</i>中。',
         expected: '　　他大喊一声：快走！随后冲入暴风雨中。'
+    },
+    {
+        name: '测试8: HTML 隐藏注释过滤（如 <!-- Lorebook: 世界观提示 -->）',
+        input: '<!-- [Lorebook: 艾莉丝对主角的好感度+10] -->\n艾莉丝微笑着递来一杯热茶。<!-- 隐藏心理描写 -->',
+        expected: '　　艾莉丝微笑着递来一杯热茶。'
+    },
+    {
+        name: '测试9: Markdown 表情图片与 img 标签过滤',
+        input: '艾莉丝露出了笑容。![微笑表情](https://example.com/smile.png)\n<img src="avatar.jpg" alt="头像" />“今天天气真好呀。”',
+        expected: '　　艾莉丝露出了笑容。\n\n　　“今天天气真好呀。”'
     }
 ];
 
