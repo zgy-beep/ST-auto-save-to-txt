@@ -148,6 +148,12 @@ function sanitizeFilename(rawName) {
         .replace(/\.{2,}/g, '_')
         .trim();
     safeName = safeName.slice(0, 150).replace(/[. ]+$/, '');
+
+    // 防御 Windows 经典保留设备名 (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(safeName)) {
+        safeName = `${safeName}_novel`;
+    }
+
     return safeName || '我的小说连载';
 }
 
@@ -618,7 +624,7 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
     }
 }
 
-async function renderSettingsUI() {
+async function renderSettingsUI(cachedStatus = null) {
     const settings = getSettings();
     const container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
     if (!container) return;
@@ -799,20 +805,25 @@ async function renderSettingsUI() {
     if (enableEl) {
         enableEl.addEventListener('change', async (e) => {
             if (e.target.checked) {
-                // 用户尝试手动开启连载时，前置探测服务端是否可用
-                const probe = await checkServerPluginStatus();
-                if (!probe.ready) {
-                    e.target.checked = false;
-                    settings.enabled = false;
-                    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
-                    if (window.toastr) {
-                        window.toastr.warning(
-                            '服务端插件未就绪（未安装或未启动），已自动取消勾选（防止 404 报错）。您可以直接点击下方【导出整本小说 TXT】下载，或参考下方指引部署插件。',
-                            '连载服务未就绪',
-                            { timeOut: 5500 }
-                        );
+                enableEl.disabled = true;
+                try {
+                    // 用户尝试手动开启连载时，前置探测服务端是否可用
+                    const probe = await checkServerPluginStatus();
+                    if (!probe.ready) {
+                        e.target.checked = false;
+                        settings.enabled = false;
+                        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+                        if (window.toastr) {
+                            window.toastr.warning(
+                                '服务端插件未就绪（未安装或未启动），已自动取消勾选（防止 404 报错）。您可以直接点击下方【导出整本小说 TXT】下载，或参考下方指引部署插件。',
+                                '连载服务未就绪',
+                                { timeOut: 5500 }
+                            );
+                        }
+                        return;
                     }
-                    return;
+                } finally {
+                    enableEl.disabled = false;
                 }
             }
             settings.enabled = e.target.checked;
@@ -1086,7 +1097,7 @@ async function renderSettingsUI() {
 
     const badge = panel.querySelector('#novel_save_status_badge');
     const guideEl = panel.querySelector('#novel_deploy_guide');
-    const status = await checkServerPluginStatus();
+    const status = cachedStatus || await checkServerPluginStatus();
 
     if (status.ready) {
         badge.className = 'novel-alert success';
@@ -1229,7 +1240,7 @@ jQuery(async () => {
     }
 
     setTimeout(() => {
-        renderSettingsUI();
+        renderSettingsUI(bootStatus);
     }, 500);
 
     if (eventSource && event_types) {

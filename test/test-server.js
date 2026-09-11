@@ -171,6 +171,60 @@ async function runTests() {
         assert(syncContent.includes('第 1 节 · 序章') && syncContent.includes('第 2 节 · 终章'), '测试 5.3: 全本章节内容完整准确');
         if (fs.existsSync(syncFilePath)) fs.unlinkSync(syncFilePath);
 
+        // 测试 6: 第一章直接重新生成（Swipe 分支），验证首部 UTF-8 BOM 与《书名》扉页完好保留
+        const swipeChar = '第一章重生成测试';
+        const swipeFile = path.join(logsDir, `${swipeChar}.txt`);
+        await router.dispatch('POST', '/append', {
+            name: '艾莉丝',
+            mes: '第一版开篇内容。',
+            is_user: false,
+            characterName: swipeChar,
+            chapterNumber: 1,
+            chapterStyle: 'numbered_floor',
+            floor: 1,
+            is_regenerate: false
+        });
+        const resSwipe = await router.dispatch('POST', '/append', {
+            name: '艾莉丝',
+            mes: '第二版重新生成的开篇新内容！',
+            is_user: false,
+            characterName: swipeChar,
+            chapterNumber: 1,
+            chapterStyle: 'numbered_floor',
+            floor: 1,
+            is_regenerate: true
+        });
+        assert(resSwipe.status === 200 && resSwipe.data.is_regenerate === true, '测试 6: 第一章重新生成请求成功');
+        const contentSwipe = fs.readFileSync(swipeFile, 'utf8');
+        assert(contentSwipe.startsWith('\uFEFF《第一章重生成测试》'), '测试 6.1: 第一章重新生成后首部 UTF-8 BOM 与《书名》扉页完好保留');
+        assert(contentSwipe.includes('第二版重新生成的开篇新内容！') && !contentSwipe.includes('第一版开篇内容。'), '测试 6.2: 旧第一版内容被完全替换');
+        if (fs.existsSync(swipeFile)) fs.unlinkSync(swipeFile);
+
+        // 测试 7: Windows 保留设备名作为角色名 (CON, AUX, PRN) 防御
+        const reservedChar = 'aux';
+        const resReserved = await router.dispatch('POST', '/append', {
+            name: '助手',
+            mes: '这是辅助角色的对白。',
+            is_user: false,
+            characterName: reservedChar,
+            chapterNumber: 1,
+            chapterStyle: 'numbered_floor',
+            floor: 1
+        });
+        assert(resReserved.status === 200 && resReserved.data.success === true, '测试 7: Windows 保留设备名成功写入');
+        const expectedReservedFile = path.join(logsDir, 'aux_novel.txt');
+        assert(fs.existsSync(expectedReservedFile), '测试 7.1: 保留名自动附加 _novel 后缀安全防护');
+        if (fs.existsSync(expectedReservedFile)) fs.unlinkSync(expectedReservedFile);
+
+        // 测试 8: 空内容与非法入参拦截 (HTTP 400)
+        const resEmpty = await router.dispatch('POST', '/append', { name: '测试', mes: '', characterName: '空测试' });
+        assert(resEmpty.status === 400, '测试 8: 空正文请求被严格拦截 (HTTP 400)');
+
+        // 测试 9: 超出 100KB 篇幅限制拦截 (HTTP 413)
+        const hugeText = '超大篇幅测试'.repeat(20000);
+        const resHuge = await router.dispatch('POST', '/append', { name: '测试', mes: hugeText, characterName: '超大测试' });
+        assert(resHuge.status === 413, '测试 9: 超出 100KB 限制被安全拦截 (HTTP 413)');
+
         // 清理测试文件
         if (fs.existsSync(filePath1)) fs.unlinkSync(filePath1);
         console.log('\n临时测试小说文件已清理。');
