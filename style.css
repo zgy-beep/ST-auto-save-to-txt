@@ -78,6 +78,38 @@
     line-height: 1;
 }
 
+/* 抽屉顶栏当前连载文件 Badge */
+.novel-header-file-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-family: Consolas, Monaco, monospace;
+    color: #f1c40f;
+    max-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    user-select: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.novel-header-file-badge:hover {
+    background: rgba(0, 0, 0, 0.45);
+    border-color: rgba(241, 196, 15, 0.5);
+}
+
+.novel-header-file-badge i {
+    font-size: 10px;
+    color: #f1c40f;
+    opacity: 0.85;
+}
+
 /* 复选框及文字 */
 #auto-save-to-txt-settings label.checkbox_label {
     display: flex !important;
@@ -138,16 +170,79 @@
     font-size: 11px;
 }
 
-/* 按钮 */
-#auto-save-to-txt-settings button.menu_button {
-    width: 100%;
-    padding: 9px;
-    font-weight: bold;
-    cursor: pointer;
+/* 操作按钮区：精致适中标准尺寸 */
+.novel-action-buttons {
     display: flex;
+    gap: 8px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+}
+
+.novel-btn {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--SmartThemeEmColor, #eeeeee);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+    white-space: nowrap;
+    box-sizing: border-box;
+    height: 32px;
+    line-height: 1;
+}
+
+.novel-btn:hover {
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #ffffff;
+}
+
+.novel-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed !important;
+    filter: grayscale(40%);
+    pointer-events: none;
+}
+
+.novel-btn.btn-sync {
+    background: rgba(39, 174, 96, 0.22);
+    border-color: rgba(39, 174, 96, 0.5);
+    color: #2ecc71;
+}
+.novel-btn.btn-sync:hover {
+    background: rgba(39, 174, 96, 0.4);
+    border-color: #2ecc71;
+    color: #ffffff;
+}
+
+.novel-btn.btn-export {
+    background: rgba(41, 128, 185, 0.22);
+    border-color: rgba(41, 128, 185, 0.5);
+    color: #3498db;
+}
+.novel-btn.btn-export:hover {
+    background: rgba(41, 128, 185, 0.4);
+    border-color: #3498db;
+    color: #ffffff;
+}
+
+.novel-btn.btn-test {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: var(--SmartThemeEmColor, #cccccc);
+}
+.novel-btn.btn-test:hover {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #ffffff;
 }
 
 /* 部署与使用引导区域 */

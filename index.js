@@ -625,10 +625,51 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
     }
 }
 
+/**
+ * 实时更新抽屉顶栏（header）当前聊天对应的连载文件名 Badge
+ * 无论是切换聊天、切换角色卡、群聊切换还是修改命名规则，均能毫秒级同步响应
+ */
+function updateDrawerHeaderFileBadge(settings = null) {
+    const curSettings = settings || getSettings();
+    const rawTitle = getBookTitle(curSettings);
+    const fileName = `${sanitizeFilename(rawTitle)}.txt`;
+    const prefix = curSettings.save_dir 
+        ? (curSettings.save_dir.replace(/[\\/]+$/, '') + '/') 
+        : 'SillyTavern/plugins/auto-save/logs/';
+    const fullPath = `${prefix}${fileName}`;
+
+    const fileBadgeText = document.getElementById('novel_header_file_text');
+    const fileBadge = document.getElementById('novel_header_file_badge');
+    const previewEl = document.getElementById('novel_save_dir_preview');
+
+    if (fileBadgeText) {
+        fileBadgeText.textContent = fileName;
+    }
+    if (fileBadge) {
+        fileBadge.title = `当前聊天连载文件：${fullPath}（点击可复制完整路径）`;
+    }
+    if (previewEl) {
+        previewEl.textContent = fullPath;
+    }
+}
+
 async function renderSettingsUI(cachedStatus = null) {
     const settings = getSettings();
     const container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
     if (!container) return;
+
+    const status = cachedStatus || await checkServerPluginStatus();
+
+    // 如果服务端已就绪且非用户刻意主动关闭，全自动激活开启连载状态
+    if (status.ready && !settings.enabled && !settings.userDisabled) {
+        settings.enabled = true;
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        updateRecentStatus('ready', '连载服务已就绪，已自动开启小说连载');
+    }
+
+    const rawTitle = getBookTitle(settings);
+    const initialFileName = `${sanitizeFilename(rawTitle)}.txt`;
+    const initialDir = settings.save_dir ? (settings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
 
     let panel = document.getElementById('auto-save-to-txt-settings');
     if (panel) panel.remove();
@@ -637,12 +678,19 @@ async function renderSettingsUI(cachedStatus = null) {
     panel.id = 'auto-save-to-txt-settings';
     panel.className = 'inline-drawer';
 
-    // 默认折叠（移除 down 类名，内容设为 display: none，移除 emoji 保持对齐）
+    // 默认折叠，顶栏清晰显示扩展名称 + 当前聊天连载文件名 Badge + 动态状态
     panel.innerHTML = `
-        <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center;">
-            <b>小说连载阅读 (Novel Stream)</b>
-            <span id="novel_header_status" style="margin-left: auto; margin-right: 8px; font-size: 11px; opacity: 0.85;"></span>
-            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
+        <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
+            <div style="display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+                <b style="white-space: nowrap;">小说连载阅读 (Novel Stream)</b>
+                <span id="novel_header_file_badge" class="novel-header-file-badge" title="当前聊天连载文件：${initialDir}${initialFileName}（点击可复制完整路径）">
+                    <i class="fa-solid fa-book"></i> <span id="novel_header_file_text">${initialFileName}</span>
+                </span>
+            </div>
+            <div style="display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                <span id="novel_header_status" style="font-size: 11px; opacity: 0.85;"></span>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
+            </div>
         </div>
         <div class="inline-drawer-content" style="display: none;">
             <div class="novel-drawer-inner">
@@ -752,19 +800,19 @@ async function renderSettingsUI(cachedStatus = null) {
                 <!-- 存储位置说明 -->
                 <div class="novel-book-info">
                     <i class="fa-solid fa-book-bookmark"></i>
-                    <span>实时连载保存于：<code id="novel_save_dir_preview">${settings.save_dir ? (settings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/'}${settings.naming_rule === 'char_only' ? '<角色名>.txt' : '<角色名> - <对话名>.txt'}</code><br>
-                    <small style="opacity: 0.8;">若未配置服务端插件，也可随时点击下方<b>“导出整本小说”</b>直接下载。</small></span>
+                    <span>实时连载保存于：<code id="novel_save_dir_preview">${initialDir}${initialFileName}</code><br>
+                    <small style="opacity: 0.8;">若未配置服务端插件，也可随时点击下方<b>“导出整本 TXT”</b>直接下载。</small></span>
                 </div>
 
-                <!-- 操作按钮组 -->
-                <div style="display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap;">
-                    <button id="novel_sync_all_btn" class="menu_button" style="flex: 1; min-width: 130px; background: var(--SmartThemeEmColor, #27ae60); color: #fff;" title="半路使用插件时，一键将之前的全部历史聊天记录完整编排并同步保存到服务端的 txt 文件中！">
-                        <i class="fa-solid fa-file-import"></i> 同步历史到连载文件
+                <!-- 操作按钮组：精致适中标准尺寸 -->
+                <div class="novel-action-buttons">
+                    <button type="button" id="novel_sync_all_btn" class="novel-btn btn-sync" style="flex: 1;" title="将当前聊天所有历史章节完整编排并同步写入服务端文件">
+                        <i class="fa-solid fa-file-import"></i> 同步历史连载
                     </button>
-                    <button id="novel_export_all_btn" class="menu_button" style="flex: 1; min-width: 120px; background: var(--SmartThemeQuoteColor, #2980b9); color: #fff;" title="即使没有安装服务端插件，也可以一键将当前所有聊天按小说章节排版并下载为 txt！">
-                        <i class="fa-solid fa-download"></i> 导出整本小说 TXT
+                    <button type="button" id="novel_export_all_btn" class="novel-btn btn-export" style="flex: 1;" title="无需服务端插件，直接在浏览器中将所有聊天编排为小说 TXT 并下载">
+                        <i class="fa-solid fa-download"></i> 导出整本 TXT
                     </button>
-                    <button id="novel_test_btn" class="menu_button" style="flex: 1; min-width: 90px;" title="测试服务端插件连通性">
+                    <button type="button" id="novel_test_btn" class="novel-btn btn-test" style="flex: 0 0 auto;" title="测试服务端插件连通性与标签清洗效果">
                         <i class="fa-solid fa-feather-pointed"></i> 试写一章
                     </button>
                 </div>
@@ -773,6 +821,38 @@ async function renderSettingsUI(cachedStatus = null) {
     `;
 
     container.appendChild(panel);
+
+    // 绑定顶栏连载文件 Badge 点击复制事件
+    const fileBadge = panel.querySelector('#novel_header_file_badge');
+    if (fileBadge) {
+        fileBadge.addEventListener('click', async (e) => {
+            e.stopPropagation(); // 阻止触发展开/折叠抽屉
+            const curSettings = getSettings();
+            const curTitle = getBookTitle(curSettings);
+            const curFileName = `${sanitizeFilename(curTitle)}.txt`;
+            const curPrefix = curSettings.save_dir ? (curSettings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
+            const fullPath = `${curPrefix}${curFileName}`;
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(fullPath);
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = fullPath;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                }
+                if (window.toastr) {
+                    window.toastr.info(`连载文件路径已复制：<br><code>${fullPath}</code>`, '当前小说连载文件', { timeOut: 3500 });
+                }
+            } catch (err) {
+                if (window.toastr) {
+                    window.toastr.info(`当前连载文件：${fullPath}`, '小说连载文件');
+                }
+            }
+        });
+    }
 
     // 同步更新顶栏状态指示
     if (recentStatus.state !== 'idle') {
@@ -876,10 +956,7 @@ async function renderSettingsUI(cachedStatus = null) {
     const inputSaveDir = panel.querySelector('#novel_save_dir');
     const previewEl = panel.querySelector('#novel_save_dir_preview');
     const updatePreview = () => {
-        if (!previewEl) return;
-        const currentTitle = getBookTitle(settings);
-        const prefix = settings.save_dir ? (settings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
-        previewEl.textContent = `${prefix}${currentTitle}.txt`;
+        updateDrawerHeaderFileBadge(settings);
     };
 
     if (inputSaveDir) {
@@ -939,7 +1016,7 @@ async function renderSettingsUI(cachedStatus = null) {
 
             if (chapterCount === 0) {
                 syncAllBtn.disabled = false;
-                syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史到连载文件';
+                syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史连载';
                 updateRecentStatus('skipped', '没有可同步的有效剧情章节');
                 if (window.toastr) window.toastr.warning('没有可同步的有效剧情章节。', '小说连载');
                 return;
@@ -962,9 +1039,6 @@ async function renderSettingsUI(cachedStatus = null) {
                     }),
                 });
 
-                syncAllBtn.disabled = false;
-                syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史到连载文件';
-
                 if (response.ok) {
                     const data = await response.json().catch(() => ({}));
                     const targetFile = data.file || '小说文件';
@@ -983,10 +1057,11 @@ async function renderSettingsUI(cachedStatus = null) {
                     }
                 }
             } catch (err) {
-                syncAllBtn.disabled = false;
-                syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史到连载文件';
                 updateRecentStatus('error', `同步异常: ${err.message}`);
                 if (window.toastr) window.toastr.error(`同步异常: ${err.message}`, '小说连载更新失败');
+            } finally {
+                syncAllBtn.disabled = false;
+                syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史连载';
             }
         });
     }
@@ -1079,23 +1154,30 @@ async function renderSettingsUI(cachedStatus = null) {
                 floor: 1
             };
 
-            const res = await postChapterToServer(testPayload);
-            testBtn.disabled = false;
-            testBtn.innerHTML = '<i class="fa-solid fa-feather-pointed"></i> 试写一章';
-
-            if (res && res.success) {
-                const targetText = res.file || (settings.save_dir ? settings.save_dir : 'plugins/auto-save/logs/');
-                updateRecentStatus('success', '试读章节已连载成功！', targetText);
-                if (settings.show_toast !== false && window.toastr) {
-                    window.toastr.success(`试读章节已连载！文件：${targetText}`, '小说连载更新完成');
-                } else if (!window.toastr) {
-                    alert(`试读章节已连载！文件：${targetText}`);
+            try {
+                const res = await postChapterToServer(testPayload);
+                if (res && res.success) {
+                    const targetText = res.file || (settings.save_dir ? settings.save_dir : 'plugins/auto-save/logs/');
+                    updateRecentStatus('success', '试读章节已连载成功！', targetText);
+                    if (settings.show_toast !== false && window.toastr) {
+                        window.toastr.success(`试读章节已连载！文件：${targetText}`, '小说连载更新完成');
+                    } else if (!window.toastr) {
+                        alert(`试读章节已连载！文件：${targetText}`);
+                    }
+                } else {
+                    updateRecentStatus('error', '试读章节写入失败，请检查服务插件');
+                    if (settings.show_toast !== false && window.toastr) {
+                        window.toastr.error('试写失败，请确认服务端插件已启动。', '小说连载更新失败');
+                    }
                 }
-            } else {
-                updateRecentStatus('error', '试读章节写入失败，请检查服务插件');
+            } catch (err) {
+                updateRecentStatus('error', `试写异常: ${err.message}`);
                 if (settings.show_toast !== false && window.toastr) {
-                    window.toastr.error('试写失败，请确认服务端插件已启动。', '小说连载更新失败');
+                    window.toastr.error(`试写异常: ${err.message}`, '小说连载更新失败');
                 }
+            } finally {
+                testBtn.disabled = false;
+                testBtn.innerHTML = '<i class="fa-solid fa-feather-pointed"></i> 试写一章';
             }
         });
     }
@@ -1319,23 +1401,30 @@ jQuery(async () => {
     if (eventSource && event_types) {
         eventSource.on(event_types.MESSAGE_RECEIVED, (data) => {
             handleMessageSave(data, false);
+            updateDrawerHeaderFileBadge();
         });
 
         eventSource.on(event_types.MESSAGE_SENT, (data) => {
             handleMessageSave(data, true);
+            updateDrawerHeaderFileBadge();
         });
 
+        const refreshContext = () => {
+            lastSavedSignature = { messageId: null, characterName: '', mesSnippet: '' };
+            updateDrawerHeaderFileBadge();
+        };
+
         if (event_types.CHAT_CHANGED) {
-            eventSource.on(event_types.CHAT_CHANGED, () => {
-                lastSavedSignature = { messageId: null, characterName: '', mesSnippet: '' };
-                const curPreview = document.getElementById('novel_save_dir_preview');
-                if (curPreview) {
-                    const curSettings = getSettings();
-                    const curTitle = getBookTitle(curSettings);
-                    const prefix = curSettings.save_dir ? (curSettings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
-                    curPreview.textContent = `${prefix}${curTitle}.txt`;
-                }
-            });
+            eventSource.on(event_types.CHAT_CHANGED, refreshContext);
+        }
+        if (event_types.CHARACTER_PAGE_LOADED) {
+            eventSource.on(event_types.CHARACTER_PAGE_LOADED, refreshContext);
+        }
+        if (event_types.CHARACTER_EDITED) {
+            eventSource.on(event_types.CHARACTER_EDITED, refreshContext);
+        }
+        if (event_types.GROUP_UPDATED) {
+            eventSource.on(event_types.GROUP_UPDATED, refreshContext);
         }
     }
 });
