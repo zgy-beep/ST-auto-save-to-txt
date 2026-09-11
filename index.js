@@ -1126,9 +1126,9 @@ async function renderSettingsUI(cachedStatus = null) {
 
         if (guideEl) {
             guideEl.style.display = 'flex';
-            // 超轻量高精度部署命令：0 外网依赖、0 慢速磁盘遍历，定向秒级完成
-            const cmdDocker = `docker exec -it $(docker ps -q --filter "name=sillytavern" | head -n 1) sh -c 'for s in /home/node/app/data/*/extensions/*auto-save*/plugins/auto-save /home/node/app/public/scripts/extensions/*/*auto-save*/plugins/auto-save; do [ -d "$s" ] && cp -r "$s" /home/node/app/plugins/ && echo "✅ 部署完成: /home/node/app/plugins/auto-save" && exit 0; done; echo "❌ 未在容器内找到插件目录"'`;
-            const cmdLinux = `for s in data/*/extensions/*auto-save*/plugins/auto-save public/scripts/extensions/*/*auto-save*/plugins/auto-save; do [ -d "$s" ] && cp -r "$s" plugins/ && echo "✅ 部署完成: plugins/auto-save" && exit 0; done; echo "❌ 请先 cd 进 SillyTavern 根目录后执行"`;
+            // 超轻量高精度部署命令：0 外网依赖、0 慢速磁盘遍历，内核级进程/容器自感知瞬间定位
+            const cmdDocker = `docker exec -it $(docker ps -q --filter "name=sillytavern" 2>/dev/null | head -n 1) sh -c 'for s in /home/node/app/data/*/extensions/*auto-save*/plugins/auto-save /home/node/app/public/scripts/extensions/*/*auto-save*/plugins/auto-save; do [ -d "$s" ] && cp -r "$s" /home/node/app/plugins/ && echo "✅ 部署完成: /home/node/app/plugins/auto-save" && exit 0; done; echo "❌ 未在容器内找到插件目录"'`;
+            const cmdLinux = `P=$(readlink -f /proc/$(pgrep -f "server.js" 2>/dev/null | head -n 1)/cwd 2>/dev/null); [ -z "$P" ] && P="."; for s in "$P"/data/*/extensions/*auto-save*/plugins/auto-save "$P"/public/scripts/extensions/*/*auto-save*/plugins/auto-save; do [ -d "$s" ] && cp -r "$s" "$P/plugins/" && echo "✅ 成功部署至: $P/plugins/auto-save" && exit 0; done; echo "❌ 未能自动感知到酒馆目录，请确认酒馆正在运行或手动进入酒馆目录"`;
             const cmdWindows = `$s = Get-ChildItem -Path @("data", "public") -Recurse -Filter "auto-save" -Directory -Depth 5 -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*ST-auto-save*" } | Select-Object -First 1; if ($s) { Copy-Item -Recurse -Force $s.FullName "plugins/"; Write-Host "✅ 部署完成: plugins/auto-save" } else { Write-Host "❌ 请在 SillyTavern 根目录执行此命令" }`;
 
             guideEl.innerHTML = `
