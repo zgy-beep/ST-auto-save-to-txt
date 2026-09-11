@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.5.2',             // 扩展版本号
+    version: '1.6.0',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -115,14 +115,14 @@ function updateRecentStatus(state, text, file = '') {
 function getSettings() {
     const extSettings = ctx.extension_settings || ext_settings_raw || window.extension_settings || {};
     if (!extSettings[EXTENSION_NAME]) {
-        extSettings[EXTENSION_NAME] = { ...DEFAULT_SETTINGS, version: '1.5.2' };
+        extSettings[EXTENSION_NAME] = { ...DEFAULT_SETTINGS, version: '1.6.0' };
     } else {
         // 版本平滑迁移：针对升级用户，如果仍为历史默认值 'numbered'，自动切换至推荐的 'numbered_floor'
-        if (extSettings[EXTENSION_NAME].version !== '1.5.2') {
+        if (extSettings[EXTENSION_NAME].version !== '1.6.0') {
             if (extSettings[EXTENSION_NAME].chapter_style === 'numbered') {
                 extSettings[EXTENSION_NAME].chapter_style = 'numbered_floor';
             }
-            extSettings[EXTENSION_NAME].version = '1.5.2';
+            extSettings[EXTENSION_NAME].version = '1.6.0';
             if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
         }
 
@@ -370,21 +370,59 @@ function cleanNovelText(rawText, settings = {}) {
     return paragraphs.join('\n\n');
 }
 
+/**
+ * 动态获取当前扩展相对于酒馆 Web 根目录的相对路径（彻底杜绝硬编码目录名）
+ */
+function getExtensionRelativePath() {
+    try {
+        const scriptUrl = new URL(import.meta.url);
+        const pathName = scriptUrl.pathname;
+        const dir = pathName.substring(0, pathName.lastIndexOf('/'));
+        return dir.replace(/^\/+/, '');
+    } catch (e) {
+        return 'scripts/extensions/third-party/ST-auto-save-to-txt';
+    }
+}
+
+/**
+ * 检测服务端连载插件运行状态（优先探测状态探针，降级探测 append 接口）
+ */
 async function checkServerPluginStatus() {
     try {
         const headers = (typeof getRequestHeaders === 'function') 
             ? getRequestHeaders() 
             : { 'Content-Type': 'application/json' };
 
-        const response = await fetch('/api/plugins/auto-save/append', {
+        // 优先探测专用的状态探针接口
+        const statusResp = await fetch('/api/plugins/auto-save/status', {
+            method: 'GET',
+            headers: headers
+        }).catch(() => null);
+
+        if (statusResp && statusResp.ok) {
+            const data = await statusResp.json().catch(() => ({}));
+            return { ready: true, version: data.version, is404: false };
+        }
+
+        if (statusResp && statusResp.status === 404) {
+            return { ready: false, is404: true, code: 404 };
+        }
+
+        // 降级使用 append 接口探测
+        const appendResp = await fetch('/api/plugins/auto-save/append', {
             method: 'POST',
             headers: headers,
             body: JSON.stringify({}),
-        });
+        }).catch(() => null);
 
-        return response.status === 400 ? { ready: true } : { ready: false, code: response.status };
+        if (appendResp && appendResp.status === 400) {
+            return { ready: true, is404: false };
+        }
+
+        const is404 = appendResp ? appendResp.status === 404 : false;
+        return { ready: false, is404, code: appendResp ? appendResp.status : 0 };
     } catch (err) {
-        return { ready: false, code: err.message };
+        return { ready: false, is404: false, code: err.message };
     }
 }
 
@@ -550,6 +588,25 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
             }
         }
     } else {
+        const is404 = res && (res.status === 404 || (res.error && String(res.error).includes('404')));
+        if (is404) {
+            settings.enabled = false;
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            const enableCheckbox = document.getElementById('novel_save_enabled');
+            if (enableCheckbox) enableCheckbox.checked = false;
+
+            updateRecentStatus('idle', '未检测到服务端插件 (HTTP 404)，已自动暂停实时连载以防报错');
+
+            if (settings.show_toast !== false && window.toastr) {
+                window.toastr.warning(
+                    '未检测到服务端插件 (HTTP 404)，已自动为您取消勾选连载，防止频繁报错。您可以随时使用【导出整本小说 TXT】一键下载，或参考指引安装插件。',
+                    '连载功能已自动暂停',
+                    { timeOut: 6000, preventDuplicates: true }
+                );
+            }
+            return;
+        }
+
         const errMsg = (res && res.error) ? res.error : (res && res.status ? `HTTP ${res.status}` : '连接服务端插件异常');
         updateRecentStatus('error', `${sectionLabel}写入失败: ${errMsg}`);
 
@@ -587,6 +644,9 @@ async function renderSettingsUI() {
                     <i class="fa-solid fa-circle-notch fa-spin"></i>
                     <div class="novel-alert-text">正在检查连载服务状态...</div>
                 </div>
+
+                <!-- 未安装服务端插件时的部署与方案引导 (A + C) -->
+                <div id="novel_deploy_guide" class="novel-guide-section" style="display: none;"></div>
 
                 <!-- 最近连载动态卡片 (更新中/更新完成实时展示) -->
                 <div id="novel_recent_status" class="novel-status-card" style="border-left: 3px solid ${recentStatus.state === 'error' ? '#e74c3c' : (recentStatus.state === 'updating' ? 'var(--SmartThemeQuoteColor, #3498db)' : (recentStatus.state === 'skipped' ? '#f39c12' : 'var(--SmartThemeEmColor, #2ecc71)'))};">
@@ -734,7 +794,32 @@ async function renderSettingsUI() {
         }
     };
 
-    bindCheck('novel_save_enabled', 'enabled');
+    // 主开关绑定：附带未安装服务端的防误触检测
+    const enableEl = panel.querySelector('#novel_save_enabled');
+    if (enableEl) {
+        enableEl.addEventListener('change', async (e) => {
+            if (e.target.checked) {
+                // 用户尝试手动开启连载时，前置探测服务端是否可用
+                const probe = await checkServerPluginStatus();
+                if (!probe.ready) {
+                    e.target.checked = false;
+                    settings.enabled = false;
+                    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+                    if (window.toastr) {
+                        window.toastr.warning(
+                            '服务端插件未就绪（未安装或未启动），已自动取消勾选（防止 404 报错）。您可以直接点击下方【导出整本小说 TXT】下载，或参考下方指引部署插件。',
+                            '连载服务未就绪',
+                            { timeOut: 5500 }
+                        );
+                    }
+                    return;
+                }
+            }
+            settings.enabled = e.target.checked;
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+
     bindCheck('novel_show_toast', 'show_toast');
     bindCheck('novel_include_user', 'include_user_dialogue');
     bindCheck('novel_indent_paragraphs', 'indent_paragraphs');
@@ -1000,26 +1085,148 @@ async function renderSettingsUI() {
     }
 
     const badge = panel.querySelector('#novel_save_status_badge');
+    const guideEl = panel.querySelector('#novel_deploy_guide');
     const status = await checkServerPluginStatus();
+
     if (status.ready) {
         badge.className = 'novel-alert success';
         badge.innerHTML = `
             <i class="fa-solid fa-circle-check"></i>
             <div class="novel-alert-text"><b>连载服务已就绪：</b>每次 AI 回复将自动像小说一样顺畅续写。</div>
         `;
+        if (guideEl) guideEl.style.display = 'none';
     } else {
+        // 未安装服务端插件时：强制取消勾选并保存，彻底杜绝后续网络 404 报错
+        if (settings.enabled) {
+            settings.enabled = false;
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            const enableCb = panel.querySelector('#novel_save_enabled');
+            if (enableCb) enableCb.checked = false;
+        }
+
         badge.className = 'novel-alert warning';
         badge.innerHTML = `
             <i class="fa-solid fa-triangle-exclamation"></i>
-            <div class="novel-alert-text"><b>服务插件未运行：</b>实时追加需配置服务端；或可直接点击下方<b>“导出整本小说”</b>一键下载。</div>
+            <div class="novel-alert-text">
+                <b>未检测到服务端插件：</b>已自动取消勾选自动连载（防止产生网络 404 错误）。<br>
+                您可直接使用下方<b>【导出整本小说 TXT】</b>一键下载，或参考下方引导复制命令部署插件。
+            </div>
         `;
+
+        if (guideEl) {
+            guideEl.style.display = 'flex';
+            const extRel = getExtensionRelativePath();
+            const pluginSrc = `public/${extRel}/plugins/auto-save`;
+
+            const cmdDocker = `cp -r "${pluginSrc}" "plugins/"`;
+            const cmdWindows = `Copy-Item -Recurse -Force "${pluginSrc}" "plugins/"`;
+            const cmdLinux = `cp -r "${pluginSrc}" "plugins/"`;
+
+            guideEl.innerHTML = `
+                <!-- 方案 C：零门槛免配置导出高亮 -->
+                <div class="novel-plan-c-card">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
+                        <i class="fa-solid fa-circle-check" style="color: #2ecc71;"></i>
+                        <b>方案 C：零配置免安装（推荐直接使用）</b>
+                    </div>
+                    无需折腾服务器或 Docker 挂载！随时点击下方<b>【📥 导出整本小说 TXT】</b>，前端会直接编排排版、生成带楼层/目录的完整小说并一键下载，零门槛、零网络报错！
+                </div>
+
+                <!-- 方案 A：一键部署服务端插件 -->
+                <div class="novel-deploy-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: bold; opacity: 0.95;"><i class="fa-solid fa-plug"></i> 方案 A：一键配置每轮自动落盘</span>
+                        <small style="opacity: 0.7; font-size: 11px;">两步完成</small>
+                    </div>
+                    <div class="novel-tab-bar">
+                        <button type="button" class="novel-tab-btn active" data-tab="docker"><i class="fa-brands fa-docker"></i> Docker / 容器终端</button>
+                        <button type="button" class="novel-tab-btn" data-tab="windows"><i class="fa-brands fa-windows"></i> Windows 本机</button>
+                        <button type="button" class="novel-tab-btn" data-tab="linux"><i class="fa-brands fa-linux"></i> Linux / 云服务器</button>
+                    </div>
+                    <div class="novel-code-wrapper">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 11px; opacity: 0.75;" id="novel_tab_hint">在容器面板（群晖/1Panel/Portainer）打开“终端”，粘贴执行：</span>
+                            <button type="button" class="novel-copy-btn" id="novel_copy_cmd_btn"><i class="fa-solid fa-copy"></i> 复制命令</button>
+                        </div>
+                        <code class="novel-code-text" id="novel_cmd_display">${cmdDocker}</code>
+                    </div>
+                    <small style="opacity: 0.75; font-size: 11px; line-height: 1.4;">
+                        <b>第 1 步：</b>在酒馆运行环境（终端）中粘贴执行上述命令；<br>
+                        <b>第 2 步：</b>确认酒馆 <code>config.yaml</code> 中 <code>enableServerPlugins: true</code> 并重启酒馆。
+                    </small>
+                </div>
+            `;
+
+            // 绑定 Tab 切换与复制事件
+            const tabBtns = guideEl.querySelectorAll('.novel-tab-btn');
+            const cmdDisplay = guideEl.querySelector('#novel_cmd_display');
+            const tabHint = guideEl.querySelector('#novel_tab_hint');
+            const copyBtn = guideEl.querySelector('#novel_copy_cmd_btn');
+
+            let currentCmd = cmdDocker;
+
+            tabBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    tabBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    const tab = btn.getAttribute('data-tab');
+                    if (tab === 'windows') {
+                        currentCmd = cmdWindows;
+                        if (tabHint) tabHint.textContent = '在酒馆根目录打开 PowerShell，粘贴执行：';
+                    } else if (tab === 'linux') {
+                        currentCmd = cmdLinux;
+                        if (tabHint) tabHint.textContent = '在酒馆根目录 Bash 终端中粘贴执行：';
+                    } else {
+                        currentCmd = cmdDocker;
+                        if (tabHint) tabHint.textContent = '在容器面板（群晖/1Panel/Portainer）打开“终端”，粘贴执行：';
+                    }
+                    if (cmdDisplay) cmdDisplay.textContent = currentCmd;
+                });
+            });
+
+            if (copyBtn) {
+                copyBtn.addEventListener('click', async () => {
+                    try {
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            await navigator.clipboard.writeText(currentCmd);
+                        } else {
+                            const ta = document.createElement('textarea');
+                            ta.value = currentCmd;
+                            document.body.appendChild(ta);
+                            ta.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(ta);
+                        }
+                        copyBtn.classList.add('copied');
+                        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> 已复制命令！';
+                        if (window.toastr) {
+                            window.toastr.success('安装命令已复制到剪贴板！', '小说连载');
+                        }
+                        setTimeout(() => {
+                            copyBtn.classList.remove('copied');
+                            copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i> 复制命令';
+                        }, 2000);
+                    } catch (e) {
+                        alert('复制失败，请手动选中文本复制：\n' + currentCmd);
+                    }
+                });
+            }
+        }
     }
 }
 
 jQuery(async () => {
     console.log('[AutoSaveTxt] 小说连载阅读扩展正在初始化...');
 
-    getSettings();
+    const bootSettings = getSettings();
+    const bootStatus = await checkServerPluginStatus();
+
+    // 如果服务端未就绪，强制将 enabled 置为 false，防止首次加载时产生 404 网络请求
+    if (!bootStatus.ready && bootSettings.enabled) {
+        bootSettings.enabled = false;
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        updateRecentStatus('idle', '未检测到服务端插件，已自动取消勾选实时连载（可直接导出整本小说）');
+    }
 
     setTimeout(() => {
         renderSettingsUI();

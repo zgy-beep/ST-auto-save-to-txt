@@ -243,7 +243,7 @@ async function init(router) {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.5.2',
+            version: '1.6.0',
             logsDir: LOGS_DIR
         });
     });
