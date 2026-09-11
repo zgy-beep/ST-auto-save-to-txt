@@ -655,8 +655,22 @@ function updateDrawerHeaderFileBadge(settings = null) {
 
 async function renderSettingsUI(cachedStatus = null) {
     const settings = getSettings();
-    const container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
-    if (!container) return;
+    let container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
+    if (!container) {
+        let retries = 0;
+        const checkTimer = setInterval(() => {
+            retries++;
+            container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
+            if (container) {
+                clearInterval(checkTimer);
+                renderSettingsUI(cachedStatus);
+            } else if (retries > 15) {
+                clearInterval(checkTimer);
+                console.warn('[AutoSaveTxt] 未能定位到 extensions_settings 容器');
+            }
+        }, 300);
+        return;
+    }
 
     const status = cachedStatus || await checkServerPluginStatus();
 
@@ -1184,7 +1198,6 @@ async function renderSettingsUI(cachedStatus = null) {
 
     const badge = panel.querySelector('#novel_save_status_badge');
     const guideEl = panel.querySelector('#novel_deploy_guide');
-    const status = cachedStatus || await checkServerPluginStatus();
 
     if (status.ready) {
         badge.className = 'novel-alert success';
@@ -1380,7 +1393,12 @@ jQuery(async () => {
     console.log('[AutoSaveTxt] 小说连载阅读扩展正在初始化...');
 
     const bootSettings = getSettings();
-    const bootStatus = await checkServerPluginStatus();
+    let bootStatus = { ready: false };
+    try {
+        bootStatus = await checkServerPluginStatus();
+    } catch (e) {
+        console.warn('[AutoSaveTxt] 启动探针检测异常:', e);
+    }
 
     // 如果服务端未就绪，强制将 enabled 置为 false，防止产生 404 网络请求
     if (!bootStatus.ready && bootSettings.enabled) {
@@ -1394,6 +1412,8 @@ jQuery(async () => {
         updateRecentStatus('ready', '服务端连载服务已就绪，已全自动开启连载功能');
     }
 
+    // 立即执行并配合短延迟补救，确保 100% 渲染至酒馆扩展列表
+    renderSettingsUI(bootStatus);
     setTimeout(() => {
         renderSettingsUI(bootStatus);
     }, 500);
