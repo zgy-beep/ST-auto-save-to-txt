@@ -651,7 +651,7 @@ async function renderSettingsUI(cachedStatus = null) {
                     <div class="novel-alert-text">正在检查连载服务状态...</div>
                 </div>
 
-                <!-- 未安装服务端插件时的部署与方案引导 (A + C) -->
+                <!-- 未安装服务端插件时的部署与使用指引 -->
                 <div id="novel_deploy_guide" class="novel-guide-section" style="display: none;"></div>
 
                 <!-- 最近连载动态卡片 (更新中/更新完成实时展示) -->
@@ -1134,19 +1134,19 @@ async function renderSettingsUI(cachedStatus = null) {
             const cmdLinux = `cp -r "${pluginSrc}" "plugins/"`;
 
             guideEl.innerHTML = `
-                <!-- 方案 C：零门槛免配置导出高亮 -->
+                <!-- 零配置免安装直接导出高亮卡片 -->
                 <div class="novel-plan-c-card">
                     <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
                         <i class="fa-solid fa-circle-check" style="color: #2ecc71;"></i>
-                        <b>方案 C：零配置免安装（推荐直接使用）</b>
+                        <b>即开即用：零配置直接导出（推荐）</b>
                     </div>
-                    无需折腾服务器或 Docker 挂载！随时点击下方<b>【📥 导出整本小说 TXT】</b>，前端会直接编排排版、生成带楼层/目录的完整小说并一键下载，零门槛、零网络报错！
+                    无需配置服务器或 Docker 挂载！随时点击下方<b>【📥 导出整本小说 TXT】</b>，浏览器可直接排版、生成带楼层/目录的完整小说并一键下载，零门槛、零网络报错！
                 </div>
 
-                <!-- 方案 A：一键部署服务端插件 -->
+                <!-- 进阶可选：一键部署服务端自动连载插件 -->
                 <div class="novel-deploy-card">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: bold; opacity: 0.95;"><i class="fa-solid fa-plug"></i> 方案 A：一键配置每轮自动落盘</span>
+                        <span style="font-weight: bold; opacity: 0.95;"><i class="fa-solid fa-plug"></i> 进阶配置：开启每轮自动落盘（可选）</span>
                         <small style="opacity: 0.7; font-size: 11px;">两步完成</small>
                     </div>
                     <div class="novel-tab-bar">

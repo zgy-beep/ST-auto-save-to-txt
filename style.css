@@ -150,7 +150,7 @@
     gap: 6px;
 }
 
-/* 部署与使用引导区域 (A + C 结合) */
+/* 部署与使用引导区域 */
 .novel-guide-section {
     display: flex;
     flex-direction: column;
@@ -158,7 +158,7 @@
     margin-top: 4px;
 }
 
-/* 方案 C：零配置免安装高亮卡片 */
+/* 零配置免安装直接导出高亮卡片 */
 .novel-plan-c-card {
     background: rgba(39, 174, 96, 0.12);
     border: 1px solid rgba(39, 174, 96, 0.4);
@@ -173,7 +173,7 @@
     color: #2ecc71;
 }
 
-/* 方案 A：一键部署引导卡片 */
+/* 一键部署引导卡片 */
 .novel-deploy-card {
     background: rgba(0, 0, 0, 0.22);
     border: 1px solid rgba(255, 255, 255, 0.12);
