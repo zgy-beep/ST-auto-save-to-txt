@@ -39,12 +39,13 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.6.2',             // 扩展版本号
+    version: '1.6.3',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
     naming_rule: 'char_chat',     // 文件命名规则: 'char_chat' (角色名 - 对话名), 'char_only' (仅角色名)
     indent_paragraphs: true,      // 自动段落首行空两格（中文小说规范排版）
+    buffer_latest_message: false, // 延迟归档最新楼层（草稿缓冲：最后一楼不立刻写入，待下一轮剧情推进时正式定稿入书）
     include_tags: '',             // 【白名单】：指定正文标签（留空代表整篇保留；填入如 story 则只提取 <story>...</story>）
     exclude_tags: 'status,memory,details,variables,analysis,ooc,note,draft,system,log', // 【黑名单】：需剔除的标签块内容
     save_dir: '',                 // 自定义保存文件夹路径（留空则保存至默认 plugins/auto-save/logs；支持任意绝对路径如 D:\MyNovels）
@@ -57,6 +58,7 @@ let lastSavedSignature = {
     characterName: '',
     mesSnippet: ''
 };
+let lastSettledSavedIndex = -1; // 记录最近已定稿落盘入书的最高楼层序号
 
 let recentStatus = {
     state: 'idle', // 'idle' | 'updating' | 'success' | 'skipped' | 'error'
@@ -116,16 +118,17 @@ function updateRecentStatus(state, text, file = '') {
 function getSettings() {
     const extSettings = ctx.extension_settings || ext_settings_raw || window.extension_settings || {};
     if (!extSettings[EXTENSION_NAME]) {
-        extSettings[EXTENSION_NAME] = { ...DEFAULT_SETTINGS, version: '1.6.0' };
+        extSettings[EXTENSION_NAME] = { ...DEFAULT_SETTINGS };
     } else {
-        // 版本平滑迁移：针对升级用户，如果仍为历史默认值 'numbered'，自动切换至推荐的 'numbered_floor'
-        if (extSettings[EXTENSION_NAME].version !== '1.6.0') {
+        // 版本平滑迁移：针对升级用户，如果版本低于 1.6.0，自动切换历史默认值至 'numbered_floor'
+        const curVer = extSettings[EXTENSION_NAME].version;
+        if (!curVer || curVer < '1.6.0') {
             if (extSettings[EXTENSION_NAME].chapter_style === 'numbered') {
                 extSettings[EXTENSION_NAME].chapter_style = 'numbered_floor';
             }
-            extSettings[EXTENSION_NAME].version = '1.6.0';
             if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
         }
+        extSettings[EXTENSION_NAME].version = DEFAULT_SETTINGS.version;
 
         for (const key of Object.keys(DEFAULT_SETTINGS)) {
             if (extSettings[EXTENSION_NAME][key] === undefined) {
@@ -266,7 +269,7 @@ function cleanNovelText(rawText, settings = {}) {
     let prevLeadText = '';
     while (prevLeadText !== text) {
         prevLeadText = text;
-        const match = text.match(/^([\s\S]*?)<\/\s*([a-zA-Z0-9_\-~.:#]+)\s*>\s*/i);
+        const match = text.match(/^([\s\S]*?)<\/\s*([a-zA-Z][a-zA-Z0-9_\-~.:#]*)\s*>\s*/i);
         if (match) {
             const beforeClosing = match[1];
             const tagName = match[2].toLowerCase();
@@ -472,26 +475,55 @@ async function postChapterToServer(payload) {
     }
 }
 
-async function handleMessageSave(messageIdOrData, isFromUser = false) {
+function seedLastSavedSignature() {
     const settings = getSettings();
-    if (!settings.enabled) return;
-
-    if (isFromUser && !settings.include_user_dialogue) {
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    if (!chatLog || chatLog.length === 0) {
+        lastSavedSignature = { messageId: null, characterName: '', mesSnippet: '' };
+        lastSettledSavedIndex = -1;
         return;
     }
-
-    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
-    if (!chatLog || chatLog.length === 0) return;
-
-    let messageIndex = -1;
-    if (typeof messageIdOrData === 'number') {
-        messageIndex = messageIdOrData;
-    } else if (messageIdOrData && typeof messageIdOrData.messageId === 'number') {
-        messageIndex = messageIdOrData.messageId;
-    } else {
-        messageIndex = chatLog.length - 1;
+    for (let i = chatLog.length - 1; i >= 0; i--) {
+        const m = chatLog[i];
+        if (!m) continue;
+        if (m.is_user && !settings.include_user_dialogue) continue;
+        const clean = cleanNovelText(m.mes || '', settings);
+        if (clean) {
+            const speaker = m.name || (m.is_user ? '你' : '旁白');
+            lastSavedSignature = {
+                messageId: i,
+                characterName: getBookTitle(settings, speaker),
+                mesSnippet: clean.slice(0, 80)
+            };
+            lastSettledSavedIndex = i;
+            break;
+        }
     }
+}
 
+async function checkAndSaveBufferedTurn(settings, chatLog) {
+    if (!chatLog || chatLog.length < 2) return;
+
+    // 倒序寻找最新一楼之前的最后一个有效回复进行定稿落盘
+    for (let i = chatLog.length - 2; i >= 0; i--) {
+        const m = chatLog[i];
+        if (!m) continue;
+        if (m.is_user && !settings.include_user_dialogue) continue;
+        const clean = cleanNovelText(m.mes || '', settings);
+        if (!clean) continue;
+
+        // 如果该楼层已经在之前定稿落盘过，无需重复写入
+        if (lastSettledSavedIndex >= i) {
+            break;
+        }
+
+        // 执行定稿写入
+        await saveSpecificMessage(i, settings, chatLog);
+        break;
+    }
+}
+
+async function saveSpecificMessage(messageIndex, settings, chatLog) {
     const message = chatLog[messageIndex];
     if (!message) return;
 
@@ -566,6 +598,7 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
             characterName: bookTitle,
             mesSnippet: mesSnippet
         };
+        lastSettledSavedIndex = Math.max(lastSettledSavedIndex, messageIndex);
 
         const targetFile = res.file || `${bookTitle}.txt`;
 
@@ -625,6 +658,48 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
     }
 }
 
+async function handleMessageSave(messageIdOrData, isFromUser = false) {
+    const settings = getSettings();
+    if (!settings.enabled) return;
+
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    if (!chatLog || chatLog.length === 0) return;
+
+    let messageIndex = -1;
+    if (typeof messageIdOrData === 'number') {
+        messageIndex = messageIdOrData;
+    } else if (messageIdOrData && typeof messageIdOrData.messageId === 'number') {
+        messageIndex = messageIdOrData.messageId;
+    } else {
+        messageIndex = chatLog.length - 1;
+    }
+
+    if (isFromUser && !settings.include_user_dialogue) {
+        // 用户消息且不包含用户对白：
+        // 如果开启了草稿缓冲，用户发送新消息意味着上一轮的 AI 回复已经正式定稿！
+        if (settings.buffer_latest_message) {
+            await checkAndSaveBufferedTurn(settings, chatLog);
+        }
+        return;
+    }
+
+    if (settings.buffer_latest_message) {
+        // 草稿缓冲模式：首先定稿落盘上一轮已确认的回复
+        await checkAndSaveBufferedTurn(settings, chatLog);
+
+        // 最新一楼暂作为草稿，不写入磁盘
+        const latestMsg = chatLog[chatLog.length - 1];
+        if (latestMsg) {
+            const speaker = latestMsg.name || (latestMsg.is_user ? '你' : '旁白');
+            updateRecentStatus('idle', `草稿缓冲中 (#${chatLog.length}) · ${speaker}（随时可 Roll 点/修改，下一轮对话推进时定稿入书）`);
+        }
+        return;
+    }
+
+    // 默认模式（即时连载）：直接保存当前 messageIndex
+    await saveSpecificMessage(messageIndex, settings, chatLog);
+}
+
 /**
  * 实时更新抽屉顶栏（header）当前聊天对应的连载文件名 Badge
  * 无论是切换聊天、切换角色卡、群聊切换还是修改命名规则，均能毫秒级同步响应
@@ -653,19 +728,154 @@ function updateDrawerHeaderFileBadge(settings = null) {
     }
 }
 
+let silentSyncTimer = null;
+
+async function executeSyncAll(isSilent = false) {
+    const settings = getSettings();
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    if (!chatLog || chatLog.length === 0) {
+        if (!isSilent && window.toastr) window.toastr.info('当前没有任何聊天内容可供同步。', '小说连载');
+        return;
+    }
+
+    if (!isSilent) {
+        if (typeof confirm === 'function' && !confirm('是否将当前全部历史聊天记录完整编排并同步保存到连载小说文件中？\n（这会生成包含前置所有章节的完整小说，后续回复将自动接着连载）')) {
+            return;
+        }
+    }
+
+    const syncAllBtn = document.getElementById('novel_sync_all_btn');
+    if (syncAllBtn && !isSilent) {
+        syncAllBtn.disabled = true;
+        syncAllBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在同步历史...';
+    }
+
+    if (!isSilent) {
+        updateRecentStatus('updating', '正在编排全量历史章节并同步至连载文件...');
+        if (settings.show_toast !== false && window.toastr) {
+            window.toastr.info('正在编排历史聊天并写入连载文件...', '小说连载更新中', { timeOut: 2000 });
+        }
+    }
+
+    let bookTitle = getBookTitle(settings);
+    let novelText = `《${bookTitle}》\n\n`;
+    let chapterCount = 0;
+
+    for (let i = 0; i < chatLog.length; i++) {
+        const msg = chatLog[i];
+        if (msg.is_user && !settings.include_user_dialogue) continue;
+        const cleanMes = cleanNovelText(msg.mes || '', settings);
+        if (!cleanMes) continue;
+
+        chapterCount++;
+        const speaker = msg.name || (msg.is_user ? '你' : '旁白');
+        const floor = i + 1;
+        if (settings.chapter_style === 'separator') {
+            novelText += `* * *\n\n${cleanMes}\n\n\n`;
+        } else if (settings.chapter_style === 'dialogue') {
+            novelText += `【${speaker}】\n\n${cleanMes}\n\n\n`;
+        } else if (settings.chapter_style === 'numbered') {
+            novelText += `第 ${chapterCount} 节 · ${speaker}\n\n${cleanMes}\n\n\n`;
+        } else {
+            novelText += `第 ${chapterCount} 章 · ${speaker} (原楼层: ${floor})\n\n${cleanMes}\n\n\n`;
+        }
+    }
+
+    if (chapterCount === 0) {
+        if (syncAllBtn && !isSilent) {
+            syncAllBtn.disabled = false;
+            syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史连载';
+        }
+        if (!isSilent) {
+            updateRecentStatus('skipped', '没有可同步的有效剧情章节');
+            if (window.toastr) window.toastr.warning('没有可同步的有效剧情章节。', '小说连载');
+        }
+        return;
+    }
+
+    try {
+        const headers = (typeof getRequestHeaders === 'function') 
+            ? getRequestHeaders() 
+            : { 'Content-Type': 'application/json' };
+
+        if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+
+        const response = await fetch('/api/plugins/auto-save/sync-all', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+                characterName: bookTitle,
+                fullText: novelText,
+                save_dir: settings.save_dir || ''
+            }),
+        });
+
+        if (response.ok) {
+            const data = await response.json().catch(() => ({}));
+            const targetFile = data.file || `${bookTitle}.txt`;
+            seedLastSavedSignature();
+            if (!isSilent) {
+                updateRecentStatus('success', `全书共 ${chapterCount} 个章节已完整同步！`, targetFile);
+                if (window.toastr) {
+                    window.toastr.success(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！后续 AI 回复将接着往后连载。`, '小说连载更新完成');
+                } else {
+                    alert(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！`);
+                }
+            } else {
+                updateRecentStatus('success', `连载已自动校准同步（共 ${chapterCount} 章）`, targetFile);
+            }
+        } else {
+            const errData = await response.json().catch(() => ({}));
+            const errMsg = errData.error || `HTTP ${response.status}`;
+            if (!isSilent) {
+                updateRecentStatus('error', `同步失败: ${errMsg}`);
+                if (window.toastr) window.toastr.error(`同步失败: ${errMsg}`, '小说连载更新失败');
+            } else {
+                console.warn('[AutoSaveTxt] 自动校准同步失败:', errMsg);
+            }
+        }
+    } catch (err) {
+        if (!isSilent) {
+            updateRecentStatus('error', `同步异常: ${err.message}`);
+            if (window.toastr) window.toastr.error(`同步异常: ${err.message}`, '小说连载更新失败');
+        } else {
+            console.warn('[AutoSaveTxt] 自动校准同步异常:', err);
+        }
+    } finally {
+        if (syncAllBtn && !isSilent) {
+            syncAllBtn.disabled = false;
+            syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史连载';
+        }
+    }
+}
+
+function debouncedSilentSyncAll() {
+    if (silentSyncTimer) clearTimeout(silentSyncTimer);
+    silentSyncTimer = setTimeout(async () => {
+        const settings = getSettings();
+        if (!settings.enabled) return;
+        await executeSyncAll(true);
+    }, 1500);
+}
+
+let renderRetryTimer = null;
+
 async function renderSettingsUI(cachedStatus = null) {
     const settings = getSettings();
     let container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
     if (!container) {
+        if (renderRetryTimer) clearInterval(renderRetryTimer);
         let retries = 0;
-        const checkTimer = setInterval(() => {
+        renderRetryTimer = setInterval(() => {
             retries++;
             container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
             if (container) {
-                clearInterval(checkTimer);
+                clearInterval(renderRetryTimer);
+                renderRetryTimer = null;
                 renderSettingsUI(cachedStatus);
             } else if (retries > 15) {
-                clearInterval(checkTimer);
+                clearInterval(renderRetryTimer);
+                renderRetryTimer = null;
                 console.warn('[AutoSaveTxt] 未能定位到 extensions_settings 容器');
             }
         }, 300);
@@ -814,6 +1024,12 @@ async function renderSettingsUI(cachedStatus = null) {
                     <span>段落首行空两格（中文小说规范缩进）</span>
                 </label>
 
+                <!-- 草稿缓冲（延迟归档最新楼层） -->
+                <label class="checkbox_label" title="开启后，最新一楼暂不写入连载文件，留出充分的 Roll 点与修改空间；待下一轮剧情推进时再正式定稿入书">
+                    <input type="checkbox" id="novel_buffer_latest" ${settings.buffer_latest_message ? 'checked' : ''} />
+                    <span>延迟归档最新楼层（草稿缓冲：下一轮对话推进时再正式定稿入书）</span>
+                </label>
+
                 <!-- 【保存文件夹设置】：自定义存储路径 -->
                 <div class="novel-form-group">
                     <span class="novel-label">指定保存文件夹（可选）：</span>
@@ -847,27 +1063,29 @@ async function renderSettingsUI(cachedStatus = null) {
 
     container.appendChild(panel);
 
-    // 绑定置顶作品卡片【复制路径】按钮
+    // 绑定置顶作品卡片【复制路径】按钮与书名大触控区
     const copyPathBtn = panel.querySelector('#novel_copy_filepath_btn');
-    if (copyPathBtn) {
-        copyPathBtn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const curSettings = getSettings();
-            const curTitle = getBookTitle(curSettings);
-            const curFileName = `${sanitizeFilename(curTitle)}.txt`;
-            const curPrefix = curSettings.save_dir ? (curSettings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
-            const fullPath = `${curPrefix}${curFileName}`;
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(fullPath);
-                } else {
-                    const ta = document.createElement('textarea');
-                    ta.value = fullPath;
-                    document.body.appendChild(ta);
-                    ta.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(ta);
-                }
+    const drawerFilenameEl = panel.querySelector('#novel_drawer_filename');
+
+    const handleCopyPath = async (e) => {
+        if (e) e.stopPropagation();
+        const curSettings = getSettings();
+        const curTitle = getBookTitle(curSettings);
+        const curFileName = `${sanitizeFilename(curTitle)}.txt`;
+        const curPrefix = curSettings.save_dir ? (curSettings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
+        const fullPath = `${curPrefix}${curFileName}`;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(fullPath);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = fullPath;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+            if (copyPathBtn) {
                 const originalHtml = copyPathBtn.innerHTML;
                 copyPathBtn.innerHTML = `<i class="fa-solid fa-check"></i> 已复制`;
                 copyPathBtn.classList.add('copied');
@@ -875,16 +1093,25 @@ async function renderSettingsUI(cachedStatus = null) {
                     copyPathBtn.innerHTML = originalHtml;
                     copyPathBtn.classList.remove('copied');
                 }, 2000);
-                if (window.toastr) {
-                    window.toastr.info(`连载文件路径已复制：<br><code>${fullPath}</code>`, '当前连载文件', { timeOut: 3500 });
-                }
-            } catch (err) {
-                if (window.toastr) {
-                    window.toastr.info(`当前连载文件：${fullPath}`, '连载文件路径');
-                }
             }
-        });
-    }
+            if (drawerFilenameEl) {
+                drawerFilenameEl.classList.add('copy-success-flash');
+                setTimeout(() => {
+                    drawerFilenameEl.classList.remove('copy-success-flash');
+                }, 1200);
+            }
+            if (window.toastr) {
+                window.toastr.info(`连载文件路径已复制：<br><code>${fullPath}</code>`, '当前连载文件', { timeOut: 3500 });
+            }
+        } catch (err) {
+            if (window.toastr) {
+                window.toastr.info(`当前连载文件：${fullPath}`, '连载文件路径');
+            }
+        }
+    };
+
+    if (copyPathBtn) copyPathBtn.addEventListener('click', handleCopyPath);
+    if (drawerFilenameEl) drawerFilenameEl.addEventListener('click', handleCopyPath);
 
     // 同步更新顶栏状态指示
     if (recentStatus.state !== 'idle') {
@@ -951,6 +1178,7 @@ async function renderSettingsUI(cachedStatus = null) {
     bindCheck('novel_show_toast', 'show_toast');
     bindCheck('novel_include_user', 'include_user_dialogue');
     bindCheck('novel_indent_paragraphs', 'indent_paragraphs');
+    bindCheck('novel_buffer_latest', 'buffer_latest_message');
 
     const selectStyle = panel.querySelector('#novel_chapter_style');
     if (selectStyle) {
@@ -1003,98 +1231,8 @@ async function renderSettingsUI(cachedStatus = null) {
     // 一键将全部历史同步写入服务端连载文件
     const syncAllBtn = panel.querySelector('#novel_sync_all_btn');
     if (syncAllBtn) {
-        syncAllBtn.addEventListener('click', async () => {
-            const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
-            if (!chatLog || chatLog.length === 0) {
-                if (window.toastr) window.toastr.info('当前没有任何聊天内容可供同步。', '小说连载');
-                return;
-            }
-
-            if (typeof confirm === 'function' && !confirm('是否将当前全部历史聊天记录完整编排并同步保存到连载小说文件中？\n（这会生成包含前置所有章节的完整小说，后续回复将自动接着连载）')) {
-                return;
-            }
-
-            syncAllBtn.disabled = true;
-            syncAllBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在同步历史...';
-            updateRecentStatus('updating', '正在编排全量历史章节并同步至连载文件...');
-            if (settings.show_toast !== false && window.toastr) {
-                window.toastr.info('正在编排历史聊天并写入连载文件...', '小说连载更新中', { timeOut: 2000 });
-            }
-
-            let bookTitle = getBookTitle(settings);
-
-            let novelText = `《${bookTitle}》\n\n`;
-            let chapterCount = 0;
-
-            for (let i = 0; i < chatLog.length; i++) {
-                const msg = chatLog[i];
-                if (msg.is_user && !settings.include_user_dialogue) continue;
-                const cleanMes = cleanNovelText(msg.mes || '', settings);
-                if (!cleanMes) continue;
-
-                chapterCount++;
-                const speaker = msg.name || (msg.is_user ? '你' : '旁白');
-                const floor = i + 1;
-                if (settings.chapter_style === 'separator') {
-                    novelText += `* * *\n\n${cleanMes}\n\n\n`;
-                } else if (settings.chapter_style === 'dialogue') {
-                    novelText += `【${speaker}】\n\n${cleanMes}\n\n\n`;
-                } else if (settings.chapter_style === 'numbered') {
-                    novelText += `第 ${chapterCount} 节 · ${speaker}\n\n${cleanMes}\n\n\n`;
-                } else {
-                    novelText += `第 ${chapterCount} 章 · ${speaker} (原楼层: ${floor})\n\n${cleanMes}\n\n\n`;
-                }
-            }
-
-            if (chapterCount === 0) {
-                syncAllBtn.disabled = false;
-                syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史连载';
-                updateRecentStatus('skipped', '没有可同步的有效剧情章节');
-                if (window.toastr) window.toastr.warning('没有可同步的有效剧情章节。', '小说连载');
-                return;
-            }
-
-            try {
-                const headers = (typeof getRequestHeaders === 'function') 
-                    ? getRequestHeaders() 
-                    : { 'Content-Type': 'application/json' };
-
-                if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
-
-                const response = await fetch('/api/plugins/auto-save/sync-all', {
-                    method: 'POST',
-                    headers: headers,
-                    body: JSON.stringify({
-                        characterName: bookTitle,
-                        fullText: novelText,
-                        save_dir: settings.save_dir || ''
-                    }),
-                });
-
-                if (response.ok) {
-                    const data = await response.json().catch(() => ({}));
-                    const targetFile = data.file || '小说文件';
-                    updateRecentStatus('success', `全书共 ${chapterCount} 个章节已完整同步！`, targetFile);
-                    if (window.toastr) {
-                        window.toastr.success(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！后续 AI 回复将接着往后连载。`, '小说连载更新完成');
-                    } else {
-                        alert(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！`);
-                    }
-                } else {
-                    const errData = await response.json().catch(() => ({}));
-                    const errMsg = errData.error || `HTTP ${response.status}`;
-                    updateRecentStatus('error', `同步失败: ${errMsg}`);
-                    if (window.toastr) {
-                        window.toastr.error(`同步失败: ${errMsg}`, '小说连载更新失败');
-                    }
-                }
-            } catch (err) {
-                updateRecentStatus('error', `同步异常: ${err.message}`);
-                if (window.toastr) window.toastr.error(`同步异常: ${err.message}`, '小说连载更新失败');
-            } finally {
-                syncAllBtn.disabled = false;
-                syncAllBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 同步历史连载';
-            }
+        syncAllBtn.addEventListener('click', () => {
+            executeSyncAll(false);
         });
     }
 
@@ -1436,6 +1574,8 @@ jQuery(async () => {
         renderSettingsUI(bootStatus);
     }, 500);
 
+    seedLastSavedSignature();
+
     if (eventSource && event_types) {
         eventSource.on(event_types.MESSAGE_RECEIVED, (data) => {
             handleMessageSave(data, false);
@@ -1447,8 +1587,27 @@ jQuery(async () => {
             updateDrawerHeaderFileBadge();
         });
 
+        if (event_types.MESSAGE_SWIPED) {
+            eventSource.on(event_types.MESSAGE_SWIPED, (data) => {
+                const settings = getSettings();
+                if (settings.buffer_latest_message) {
+                    updateRecentStatus('idle', '草稿缓冲中（所选分支将在开启下一轮对话时定稿入书）');
+                    return;
+                }
+                handleMessageSave(data, false);
+                updateDrawerHeaderFileBadge();
+            });
+        }
+
+        if (event_types.MESSAGE_DELETED) {
+            eventSource.on(event_types.MESSAGE_DELETED, () => {
+                debouncedSilentSyncAll();
+                updateDrawerHeaderFileBadge();
+            });
+        }
+
         const refreshContext = () => {
-            lastSavedSignature = { messageId: null, characterName: '', mesSnippet: '' };
+            seedLastSavedSignature();
             updateDrawerHeaderFileBadge();
         };
 

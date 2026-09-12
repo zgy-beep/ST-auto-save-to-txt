@@ -157,6 +157,18 @@
     font-family: Consolas, Monaco, monospace;
     word-break: break-all;
     line-height: 1.45;
+    cursor: pointer;
+    transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.novel-book-filename:hover {
+    color: #ffd166;
+    text-decoration: underline;
+    opacity: 0.95;
+}
+
+.novel-book-filename.copy-success-flash {
+    color: #2ecc71 !important;
 }
 
 .novel-book-path-info {

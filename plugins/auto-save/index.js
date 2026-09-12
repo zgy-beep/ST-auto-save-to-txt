@@ -1,5 +1,5 @@
 /**
- * SillyTavern 聊天小说连载阅读服务端插件 (v1.6.0)
+ * SillyTavern 聊天小说连载阅读服务端插件 (v1.6.3)
  * 
  * 文件路径：plugins/auto-save/index.js
  * 

@@ -1,6 +1,6 @@
 {
   "name": "auto-save",
-  "version": "1.6.0",
+  "version": "1.6.3",
   "description": "SillyTavern 小说连载阅读 (Novel Stream) 服务端插件",
   "main": "index.js",
   "author": "zgy-beep",
