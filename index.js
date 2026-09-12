@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.6.1',             // 扩展版本号
+    version: '1.6.2',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -638,15 +638,15 @@ function updateDrawerHeaderFileBadge(settings = null) {
         : 'SillyTavern/plugins/auto-save/logs/';
     const fullPath = `${prefix}${fileName}`;
 
-    const fileBadgeText = document.getElementById('novel_header_file_text');
-    const fileBadge = document.getElementById('novel_header_file_badge');
+    const drawerFilenameEl = document.getElementById('novel_drawer_filename');
+    const drawerFilepathEl = document.getElementById('novel_drawer_filepath');
     const previewEl = document.getElementById('novel_save_dir_preview');
 
-    if (fileBadgeText) {
-        fileBadgeText.textContent = fileName;
+    if (drawerFilenameEl) {
+        drawerFilenameEl.textContent = fileName;
     }
-    if (fileBadge) {
-        fileBadge.title = `当前聊天连载文件：${fullPath}（点击可复制完整路径）`;
+    if (drawerFilepathEl) {
+        drawerFilepathEl.textContent = fullPath;
     }
     if (previewEl) {
         previewEl.textContent = fullPath;
@@ -692,31 +692,34 @@ async function renderSettingsUI(cachedStatus = null) {
     panel.id = 'auto-save-to-txt-settings';
     panel.className = 'inline-drawer';
 
-    // 默认折叠，顶栏清晰显示扩展名称 + 当前聊天连载文件名 Badge + 动态状态
+    // 默认折叠，顶栏极简整洁（与酒馆原生抽屉 1:1 一致），书名置顶沉淀于展开内容首位
     panel.innerHTML = `
-        <div class="inline-drawer-toggle inline-drawer-header novel-drawer-header">
-            <div class="novel-header-title-box">
-                <b class="novel-header-title">
-                    <span class="novel-title-main">小说连载阅读</span>
-                    <span class="novel-title-sub">(Novel Stream)</span>
-                </b>
-            </div>
-            <div class="novel-header-file-box">
-                <span id="novel_header_file_badge" class="novel-header-file-badge" title="当前聊天连载文件：${initialDir}${initialFileName}（点击可复制完整路径）">
-                    <span class="novel-header-file-content">
-                        <i class="fa-solid fa-book"></i>
-                        <span id="novel_header_file_text" class="novel-header-file-text">${initialFileName}</span>
-                    </span>
-                    <span class="novel-header-file-copy-hint"><i class="fa-regular fa-copy"></i> 复制</span>
-                </span>
-            </div>
-            <div class="novel-header-right">
-                <span id="novel_header_status"></span>
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>小说连载阅读 (Novel Stream)</b>
+            <div style="display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                <span id="novel_header_status" style="font-size: 11px; opacity: 0.85;"></span>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
             </div>
         </div>
         <div class="inline-drawer-content" style="display: none;">
             <div class="novel-drawer-inner">
+                <!-- 置顶当前连载作品卡片 -->
+                <div class="novel-current-book-card">
+                    <div class="novel-book-card-header">
+                        <div class="novel-book-title-group">
+                            <i class="fa-solid fa-book-bookmark"></i>
+                            <span class="novel-book-title-label">当前连载小说</span>
+                        </div>
+                        <button type="button" id="novel_copy_filepath_btn" class="novel-copy-pill" title="复制完整文件保存路径">
+                            <i class="fa-regular fa-copy"></i> 复制路径
+                        </button>
+                    </div>
+                    <div class="novel-book-filename" id="novel_drawer_filename">${initialFileName}</div>
+                    <div class="novel-book-path-info">
+                        <span class="novel-path-label">保存位置：</span><code id="novel_drawer_filepath">${initialDir}${initialFileName}</code>
+                    </div>
+                </div>
+
                 <!-- 连通性提示 -->
                 <div id="novel_save_status_badge" class="novel-alert checking">
                     <i class="fa-solid fa-circle-notch fa-spin"></i>
@@ -820,11 +823,10 @@ async function renderSettingsUI(cachedStatus = null) {
                     </small>
                 </div>
 
-                <!-- 存储位置说明 -->
-                <div class="novel-book-info">
-                    <i class="fa-solid fa-book-bookmark"></i>
-                    <span>实时连载保存于：<code id="novel_save_dir_preview">${initialDir}${initialFileName}</code><br>
-                    <small style="opacity: 0.8;">若未配置服务端插件，也可随时点击下方<b>“导出整本 TXT”</b>直接下载。</small></span>
+                <!-- 存储位置说明（轻量保留，保持与设置同步） -->
+                <div class="novel-book-info" style="opacity: 0.85; font-size: 11px;">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <span>当前连载保存路径：<code id="novel_save_dir_preview">${initialDir}${initialFileName}</code>。若未部署服务端，可随时点击<b>【导出整本 TXT】</b>一键下载。</span>
                 </div>
 
                 <!-- 操作按钮组：精致适中标准尺寸 -->
@@ -845,11 +847,11 @@ async function renderSettingsUI(cachedStatus = null) {
 
     container.appendChild(panel);
 
-    // 绑定顶栏连载文件 Badge 点击复制事件
-    const fileBadge = panel.querySelector('#novel_header_file_badge');
-    if (fileBadge) {
-        fileBadge.addEventListener('click', async (e) => {
-            e.stopPropagation(); // 阻止触发展开/折叠抽屉
+    // 绑定置顶作品卡片【复制路径】按钮
+    const copyPathBtn = panel.querySelector('#novel_copy_filepath_btn');
+    if (copyPathBtn) {
+        copyPathBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
             const curSettings = getSettings();
             const curTitle = getBookTitle(curSettings);
             const curFileName = `${sanitizeFilename(curTitle)}.txt`;
@@ -866,12 +868,19 @@ async function renderSettingsUI(cachedStatus = null) {
                     document.execCommand('copy');
                     document.body.removeChild(ta);
                 }
+                const originalHtml = copyPathBtn.innerHTML;
+                copyPathBtn.innerHTML = `<i class="fa-solid fa-check"></i> 已复制`;
+                copyPathBtn.classList.add('copied');
+                setTimeout(() => {
+                    copyPathBtn.innerHTML = originalHtml;
+                    copyPathBtn.classList.remove('copied');
+                }, 2000);
                 if (window.toastr) {
-                    window.toastr.info(`连载文件路径已复制：<br><code>${fullPath}</code>`, '当前小说连载文件', { timeOut: 3500 });
+                    window.toastr.info(`连载文件路径已复制：<br><code>${fullPath}</code>`, '当前连载文件', { timeOut: 3500 });
                 }
             } catch (err) {
                 if (window.toastr) {
-                    window.toastr.info(`当前连载文件：${fullPath}`, '小说连载文件');
+                    window.toastr.info(`当前连载文件：${fullPath}`, '连载文件路径');
                 }
             }
         });
