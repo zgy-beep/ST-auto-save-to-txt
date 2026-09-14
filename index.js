@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.7.4',             // 扩展版本号
+    version: '1.7.5',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -334,12 +334,14 @@ function getChipTooltip() {
 }
 
 /**
- * 提取某标签在会话中首次成对出现的内部内容（供悬浮预览判断是否保留）
+ * 提取某标签在会话中【最近一次】成对出现的内部内容（供悬浮预览判断是否保留）
  */
 function extractTagSample(chatLog, tag, maxLen = 300) {
     const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const pairRegex = new RegExp(`<\\s*${safeTag}[^>]*>([\\s\\S]*?)<\\/\\s*${safeTag}\\s*>`, 'i');
-    for (const m of chatLog) {
+    // 从最新一条往前找：只展示最近一次的标签块内容
+    for (let i = chatLog.length - 1; i >= 0; i--) {
+        const m = chatLog[i];
         const text = (m && typeof m.mes === 'string') ? m.mes : '';
         if (!text || text.indexOf('<') === -1) continue;
         const match = text.match(pairRegex);
@@ -356,7 +358,7 @@ function showChipTooltip(chipEl, chatLog) {
     const sample = extractTagSample(chatLog, tag);
     const tip = getChipTooltip();
     tip.innerHTML = sample
-        ? `<span class="novel-chip-tooltip-tag">&lt;${escapeHtml(tag)}&gt;</span> 块内的实际内容：<br>${escapeHtml(sample)}${sample.length >= 300 ? '…' : ''}`
+        ? `<span class="novel-chip-tooltip-tag">&lt;${escapeHtml(tag)}&gt;</span> 块内的最新内容：<br>${escapeHtml(sample)}${sample.length >= 300 ? '…' : ''}`
         : `<span class="novel-chip-tooltip-tag">&lt;${escapeHtml(tag)}&gt;</span> 在会话中暂无成对标签内容（可能为自闭合标签或仅有闭标签）`;
     tip.style.display = 'block';
 

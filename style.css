@@ -671,12 +671,11 @@
 }
 
 /* ==================== 可读性提升（标签醒目 / 说明弱化 / 字号上调） ==================== */
-/* 标签：加粗、提亮、全尺寸 —— 与下方灰化说明文本形成鲜明层次，告别眼花缭乱 */
+/* 标签：加粗、字号到位 —— 颜色继承酒馆主题默认文本色（不再强制灰色变量），与下方灰化说明文本形成鲜明层次 */
 .novel-label {
     font-size: 13px;
     font-weight: 600;
-    color: var(--SmartThemeEmColor, #eeeeee);
-    opacity: 1;
+    color: inherit;
     letter-spacing: 0.2px;
 }
 
@@ -707,19 +706,17 @@
     line-height: 1.55 !important;
 }
 
-/* 会话标签 chip 悬浮提示：展示标签块内的实际内容，快速判断是否保留 */
+/* 会话标签 chip 悬浮提示：展示标签块内的实际内容（最新一次，不可滚动，超长截断），快速判断是否保留 */
 .novel-chip-tooltip {
     position: fixed;
     max-width: 340px;
-    max-height: 220px;
-    overflow-y: auto;
     background: var(--SmartThemeBlurTintColor, rgba(20, 22, 28, 0.97));
     border: 1px solid rgba(255, 255, 255, 0.18);
     border-radius: 6px;
     padding: 8px 10px;
     font-size: 12px;
     line-height: 1.6;
-    color: var(--SmartThemeEmColor, #ddd);
+    color: inherit;
     z-index: 100000;
     pointer-events: none;
     white-space: pre-wrap;
