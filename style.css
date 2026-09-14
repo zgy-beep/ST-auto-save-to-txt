@@ -489,4 +489,141 @@
     }
 }
 
+/* ==================== 会话标签检测器 & 过滤效果预览 ==================== */
+.novel-tag-scanner {
+    gap: 6px;
+}
+
+.novel-tag-scanner-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.novel-tag-scanner-header .novel-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.novel-tag-scanner-header .novel-label i {
+    color: var(--SmartThemeQuoteColor, #3498db);
+}
+
+.novel-tag-scanner-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    opacity: 0.75;
+}
+
+.novel-tag-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 5px;
+    min-height: 36px;
+    box-sizing: border-box;
+}
+
+.novel-tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 4px 3px 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.novel-tag-chip code {
+    background: transparent !important;
+    padding: 0 !important;
+    color: #ffd166;
+}
+
+.novel-chip-count {
+    opacity: 0.6;
+    font-size: 10px;
+}
+
+.novel-chip-btn {
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--SmartThemeEmColor, #ccc);
+    border-radius: 9px;
+    font-size: 10px;
+    padding: 1px 7px;
+    cursor: pointer;
+    line-height: 1.6;
+    transition: all 0.15s ease;
+}
+
+.novel-chip-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+}
+
+.novel-chip-btn.chip-white.active {
+    background: rgba(39, 174, 96, 0.35);
+    border-color: #2ecc71;
+    color: #2ecc71;
+    font-weight: bold;
+}
+
+.novel-chip-btn.chip-black.active {
+    background: rgba(231, 76, 60, 0.3);
+    border-color: #e74c3c;
+    color: #ff6b6b;
+    font-weight: bold;
+}
+
+#novel_rescan_tags_btn {
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+}
+
+.novel-tag-empty {
+    font-size: 11px;
+    opacity: 0.6;
+    padding: 4px 2px;
+    line-height: 1.5;
+    width: 100%;
+}
+
+.novel-preview-box {
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-left: 3px solid var(--SmartThemeQuoteColor, #3498db);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.7;
+    max-height: 160px;
+    overflow-y: auto;
+    word-break: break-word;
+    color: var(--SmartThemeEmColor, #ddd);
+    box-sizing: border-box;
+}
+
+.novel-preview-stat {
+    font-size: 11px;
+    opacity: 0.7;
+    color: var(--SmartThemeEmColor, #aaa);
+}
+
+@media (max-width: 600px) {
+    .novel-tag-scanner-header {
+        flex-wrap: wrap;
+    }
+}
+
 

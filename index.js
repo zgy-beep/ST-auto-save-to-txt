@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.6.3',             // 扩展版本号
+    version: '1.7.0',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -252,6 +252,118 @@ function getBookTitle(settings, speakerName = '') {
 
 const INLINE_TAGS = new Set(['b', 'i', 'u', 's', 'em', 'strong', 'span', 'sub', 'sup', 'small', 'del', 'mark']);
 
+// 标签扫描时忽略的 HTML 结构标签（这些不属于"自定义标签"，不展示在检测器中）
+const SCAN_IGNORE_TAGS = new Set([
+    ...INLINE_TAGS,
+    'html', 'head', 'body', 'div', 'p', 'br', 'hr', 'img', 'a',
+    'script', 'style', 'pre', 'code', 'ul', 'ol', 'li',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'table', 'thead', 'tbody', 'tr', 'td', 'th',
+    'font', 'center', 'blockquote', 'video', 'audio', 'source', 'iframe',
+]);
+
+/**
+ * 解析标签名单字符串为标签数组（白名单/黑名单输入框与检测器 chips 共用，防止逻辑漂移）
+ */
+function parseTagList(str) {
+    if (typeof str !== 'string' || !str.trim()) return [];
+    return str
+        .split(/[,，\s]+/)
+        .map(t => t.trim().replace(/^<|>$/g, ''))
+        .filter(Boolean);
+}
+
+/**
+ * 扫描会话中出现过的自定义标签，按出现次数降序返回（供"会话标签检测器"展示）
+ * 天然跳过闭标签 </tag>、HTML 注释 <!-- --> 与 DOCTYPE；details/summary 不排除（默认黑名单含 details）
+ * 返回 { tags: 前 15 条 [{tag, count}], total: 总会话标签种数 }
+ */
+function scanChatTags(chatLog) {
+    const counts = new Map();
+    if (!Array.isArray(chatLog)) return { tags: [], total: 0 };
+    const tagRegex = /<\s*([a-zA-Z][a-zA-Z0-9_\-~.:#]*)[^>]*>/g;
+    for (const m of chatLog) {
+        const text = (m && typeof m.mes === 'string') ? m.mes : '';
+        if (!text) continue;
+        tagRegex.lastIndex = 0;
+        let match;
+        while ((match = tagRegex.exec(text)) !== null) {
+            const tag = match[1].toLowerCase();
+            if (SCAN_IGNORE_TAGS.has(tag)) continue;
+            counts.set(tag, (counts.get(tag) || 0) + 1);
+        }
+    }
+    const sorted = [...counts.entries()]
+        .map(([tag, count]) => ({ tag, count }))
+        .sort((a, b) => (b.count - a.count) || a.tag.localeCompare(b.tag));
+    return { tags: sorted.slice(0, 15), total: sorted.length };
+}
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// 清洗结果缓存：同一会话内避免每条消息被 cleanNovelText 重复全量正则清洗（O(n²) 性能优化）
+const cleanTextCache = { sig: '', map: new Map() };
+
+function getCleanMessageSig(settings) {
+    return `${settings.include_tags || ''}|${settings.exclude_tags || ''}|${settings.indent_paragraphs !== false}`;
+}
+
+/**
+ * 带缓存的消息清洗：设置签名变化、消息对象被替换（Regenerate/滑动分支）或 mes 被原地改写
+ * （酒馆编辑消息/切换分支均直接改写 msg.mes）时自动重洗，确保缓存绝不失真
+ */
+function getCleanedMessage(msg, index, settings) {
+    if (!msg) return '';
+    const sig = getCleanMessageSig(settings);
+    if (cleanTextCache.sig !== sig) {
+        cleanTextCache.sig = sig;
+        cleanTextCache.map.clear();
+    }
+    const cached = cleanTextCache.map.get(index);
+    if (cached && cached.src === msg && cached.mes === msg.mes) return cached.text;
+    const text = cleanNovelText(msg.mes || '', settings);
+    cleanTextCache.map.set(index, { src: msg, mes: msg.mes, text });
+    return text;
+}
+
+/**
+ * 将全部聊天编排为整本小说文本（executeSyncAll 与"导出整本 TXT"共用）
+ */
+function buildNovelText(settings, chatLog) {
+    const bookTitle = getBookTitle(settings);
+    let novelText = `《${bookTitle}》\n\n`;
+    let chapterCount = 0;
+
+    for (let i = 0; i < chatLog.length; i++) {
+        const msg = chatLog[i];
+        if (!msg) continue;
+        if (msg.is_user && !settings.include_user_dialogue) continue;
+        const cleanMes = getCleanedMessage(msg, i, settings);
+        if (!cleanMes) continue;
+
+        chapterCount++;
+        const speaker = msg.name || (msg.is_user ? '你' : '旁白');
+        const floor = i + 1;
+        if (settings.chapter_style === 'separator') {
+            novelText += `* * *\n\n${cleanMes}\n\n\n`;
+        } else if (settings.chapter_style === 'dialogue') {
+            novelText += `【${speaker}】\n\n${cleanMes}\n\n\n`;
+        } else if (settings.chapter_style === 'numbered') {
+            novelText += `第 ${chapterCount} 节 · ${speaker}\n\n${cleanMes}\n\n\n`;
+        } else {
+            novelText += `第 ${chapterCount} 章 · ${speaker} (原楼层: ${floor})\n\n${cleanMes}\n\n\n`;
+        }
+    }
+
+    return { bookTitle, novelText, chapterCount };
+}
+
 /**
  * 通用小说正文排版与全能标签清洗引擎
  */
@@ -295,42 +407,33 @@ function cleanNovelText(rawText, settings = {}) {
     text = text.replace(unclosedAuxPattern, '');
 
     // 阶段一【白名单模式】：优先提取指定标签内的正文
-    const includeInput = (typeof settings.include_tags === 'string') ? settings.include_tags.trim() : '';
-    if (includeInput) {
-        const includeTags = includeInput
-            .split(/[,，\s]+/)
-            .map(t => t.trim().replace(/^<|>$/g, ''))
-            .filter(Boolean);
+    const includeTags = parseTagList(settings.include_tags);
 
-        if (includeTags.length > 0) {
-            const extractedParts = [];
-            for (const tag of includeTags) {
-                const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const tagRegex = new RegExp(`<\\s*(${safeTag})[^>]*>([\\s\\S]*?)<\\/\\s*\\1\\s*>`, 'gi');
-                let match;
-                while ((match = tagRegex.exec(text)) !== null) {
-                    if (match[2] && match[2].trim()) {
-                        extractedParts.push(match[2].trim());
-                    }
+    if (includeTags.length > 0) {
+        const extractedParts = [];
+        for (const tag of includeTags) {
+            const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const tagRegex = new RegExp(`<\\s*(${safeTag})[^>]*>([\\s\\S]*?)<\\/\\s*\\1\\s*>`, 'gi');
+            let match;
+            while ((match = tagRegex.exec(text)) !== null) {
+                if (match[2] && match[2].trim()) {
+                    extractedParts.push(match[2].trim());
                 }
             }
-            if (extractedParts.length > 0) {
-                text = extractedParts.join('\n\n');
-            }
+        }
+        if (extractedParts.length > 0) {
+            text = extractedParts.join('\n\n');
         }
     }
 
     // 阶段二【黑名单模式】：深度剔除不要的标签块（支持成对、开篇无开标签、尾部未闭合等各类异常形态）
-    const excludeInput = (typeof settings.exclude_tags === 'string') 
-        ? settings.exclude_tags 
-        : (DEFAULT_SETTINGS.exclude_tags || '');
+    const excludeTags = parseTagList(
+        (typeof settings.exclude_tags === 'string')
+            ? settings.exclude_tags
+            : (DEFAULT_SETTINGS.exclude_tags || '')
+    );
 
-    if (excludeInput && excludeInput.trim()) {
-        const excludeTags = excludeInput
-            .split(/[,，\s]+/)
-            .map(t => t.trim().replace(/^<|>$/g, ''))
-            .filter(Boolean);
-
+    if (excludeTags.length > 0) {
         for (const tag of excludeTags) {
             const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             // 1. 成对标签块排除
@@ -487,7 +590,7 @@ function seedLastSavedSignature() {
         const m = chatLog[i];
         if (!m) continue;
         if (m.is_user && !settings.include_user_dialogue) continue;
-        const clean = cleanNovelText(m.mes || '', settings);
+        const clean = getCleanedMessage(m, i, settings);
         if (clean) {
             const speaker = m.name || (m.is_user ? '你' : '旁白');
             lastSavedSignature = {
@@ -509,7 +612,7 @@ async function checkAndSaveBufferedTurn(settings, chatLog) {
         const m = chatLog[i];
         if (!m) continue;
         if (m.is_user && !settings.include_user_dialogue) continue;
-        const clean = cleanNovelText(m.mes || '', settings);
+        const clean = getCleanedMessage(m, i, settings);
         if (!clean) continue;
 
         // 如果该楼层已经在之前定稿落盘过，无需重复写入
@@ -565,7 +668,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
         const m = chatLog[i];
         if (!m) continue;
         if (m.is_user && !settings.include_user_dialogue) continue;
-        const c = cleanNovelText(m.mes || '', settings);
+        const c = getCleanedMessage(m, i, settings);
         if (c) chapterNumber++;
     }
     chapterNumber = chapterNumber || 1;
@@ -610,7 +713,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
         } else if (res.is_regenerate || isRegenerate) {
             updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel}（重新生成已替换更新）`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
-                window.toastr.success(`${sectionLabel}${floorLabel}已更新为最新生成版本！`, '小说连载已更新', {
+                throttledNovelSuccessToast(`${sectionLabel}${floorLabel}已更新为最新生成版本！`, '小说连载已更新', {
                     timeOut: 3000,
                     preventDuplicates: true
                 });
@@ -621,7 +724,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
 
             // 3. 屏幕 Toast 提示通知
             if (settings.show_toast !== false && window.toastr) {
-                window.toastr.success(`${sectionLabel} · ${speakerName}${floorLabel} 已自动写入《${bookTitle}》`, '小说连载更新完成', {
+                throttledNovelSuccessToast(`${sectionLabel} · ${speakerName}${floorLabel} 已自动写入《${bookTitle}》`, '小说连载更新完成', {
                     timeOut: 3500,
                     preventDuplicates: true
                 });
@@ -757,29 +860,7 @@ async function executeSyncAll(isSilent = false) {
         }
     }
 
-    let bookTitle = getBookTitle(settings);
-    let novelText = `《${bookTitle}》\n\n`;
-    let chapterCount = 0;
-
-    for (let i = 0; i < chatLog.length; i++) {
-        const msg = chatLog[i];
-        if (msg.is_user && !settings.include_user_dialogue) continue;
-        const cleanMes = cleanNovelText(msg.mes || '', settings);
-        if (!cleanMes) continue;
-
-        chapterCount++;
-        const speaker = msg.name || (msg.is_user ? '你' : '旁白');
-        const floor = i + 1;
-        if (settings.chapter_style === 'separator') {
-            novelText += `* * *\n\n${cleanMes}\n\n\n`;
-        } else if (settings.chapter_style === 'dialogue') {
-            novelText += `【${speaker}】\n\n${cleanMes}\n\n\n`;
-        } else if (settings.chapter_style === 'numbered') {
-            novelText += `第 ${chapterCount} 节 · ${speaker}\n\n${cleanMes}\n\n\n`;
-        } else {
-            novelText += `第 ${chapterCount} 章 · ${speaker} (原楼层: ${floor})\n\n${cleanMes}\n\n\n`;
-        }
-    }
+    const { bookTitle, novelText, chapterCount } = buildNovelText(settings, chatLog);
 
     if (chapterCount === 0) {
         if (syncAllBtn && !isSilent) {
@@ -856,6 +937,137 @@ function debouncedSilentSyncAll() {
         if (!settings.enabled) return;
         await executeSyncAll(true);
     }, 1500);
+}
+
+/**
+ * 渲染会话标签检测器 chips 与过滤效果预览（扫描 / 名单变更 / 收到新消息后统一走这里）
+ */
+function renderTagTools() {
+    const container = document.getElementById('novel_tag_chips');
+    if (!container) return;
+    const settings = getSettings();
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    const { tags, total } = scanChatTags(chatLog);
+    const includeSet = new Set(parseTagList(settings.include_tags).map(t => t.toLowerCase()));
+    const excludeSet = new Set(parseTagList(settings.exclude_tags).map(t => t.toLowerCase()));
+
+    const countEl = document.getElementById('novel_tag_scan_count');
+    if (countEl) {
+        countEl.textContent = total > 0 ? `已扫描出 ${total} 个标签${total > tags.length ? '，仅显示前 15 个' : ''}` : '';
+    }
+
+    if (!tags.length) {
+        container.innerHTML = '<div class="novel-tag-empty">未检测到自定义标签——AI 回复中带 &lt;标签&gt; 的内容会自动出现在这里</div>';
+    } else {
+        container.innerHTML = tags.map(({ tag, count }) => `
+            <div class="novel-tag-chip" data-tag="${tag}">
+                <code>${tag}</code><span class="novel-chip-count">×${count}</span>
+                <button type="button" class="novel-chip-btn chip-white ${includeSet.has(tag) ? 'active' : ''}" data-action="include" title="加入白名单：只保留该标签内的正文">白</button>
+                <button type="button" class="novel-chip-btn chip-black ${excludeSet.has(tag) ? 'active' : ''}" data-action="exclude" title="加入黑名单：彻底剔除该标签块">黑</button>
+            </div>`).join('');
+
+        container.querySelectorAll('.novel-chip-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const chip = btn.closest('.novel-tag-chip');
+                const tagName = chip ? chip.getAttribute('data-tag') : '';
+                if (tagName) toggleTagInList(tagName, btn.getAttribute('data-action'));
+            });
+        });
+    }
+
+    renderFilterPreview();
+}
+
+/**
+ * 将标签加入/移出白名单或黑名单（两侧互斥），并同步输入框显示
+ */
+function toggleTagInList(tag, action) {
+    const settings = getSettings();
+    let includeList = parseTagList(settings.include_tags).map(t => t.toLowerCase());
+    let excludeList = parseTagList(settings.exclude_tags).map(t => t.toLowerCase());
+
+    if (action === 'include') {
+        if (includeList.includes(tag)) {
+            includeList = includeList.filter(t => t !== tag);
+        } else {
+            includeList.push(tag);
+            excludeList = excludeList.filter(t => t !== tag);
+        }
+    } else {
+        if (excludeList.includes(tag)) {
+            excludeList = excludeList.filter(t => t !== tag);
+        } else {
+            excludeList.push(tag);
+            includeList = includeList.filter(t => t !== tag);
+        }
+    }
+
+    settings.include_tags = includeList.join(', ');
+    settings.exclude_tags = excludeList.join(', ');
+
+    const incEl = document.getElementById('novel_include_tags');
+    const excEl = document.getElementById('novel_exclude_tags');
+    if (incEl) incEl.value = settings.include_tags;
+    if (excEl) excEl.value = settings.exclude_tags;
+    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+
+    renderTagTools();
+}
+
+/**
+ * 过滤效果预览：展示最近一条 AI 回复经当前白/黑名单过滤后的实际效果
+ */
+function renderFilterPreview() {
+    const box = document.getElementById('novel_filter_preview');
+    const statEl = document.getElementById('novel_filter_preview_stat');
+    if (!box) return;
+    const settings = getSettings();
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+
+    let target = null;
+    let targetIndex = -1;
+    for (let i = chatLog.length - 1; i >= 0; i--) {
+        const m = chatLog[i];
+        if (m && !m.is_user) { target = m; targetIndex = i; break; }
+    }
+
+    if (!target) {
+        box.innerHTML = '<div class="novel-tag-empty">暂无 AI 回复可供预览</div>';
+        if (statEl) statEl.textContent = '';
+        return;
+    }
+
+    const raw = target.mes || '';
+    const cleaned = getCleanedMessage(target, targetIndex, settings);
+    if (statEl) statEl.textContent = `原文 ${raw.length} 字 → 过滤后 ${cleaned.length} 字`;
+    box.innerHTML = cleaned
+        ? escapeHtml(cleaned.slice(0, 400)).replace(/\n/g, '<br>')
+        : '<div class="novel-tag-empty" style="color: #f39c12;">过滤后无正文，请检查白名单配置（白名单填错会导致提取不到内容）</div>';
+}
+
+let tagScanTimer = null;
+function debouncedRenderTagTools(delay = 1000) {
+    if (tagScanTimer) clearTimeout(tagScanTimer);
+    tagScanTimer = setTimeout(() => {
+        if (document.getElementById('auto-save-to-txt-settings')) renderTagTools();
+    }, delay);
+}
+
+let settingsSaveTimer = null;
+function debouncedSaveSettings() {
+    if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
+    settingsSaveTimer = setTimeout(() => {
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+    }, 600);
+}
+
+// 成功类连载 Toast 节流（群聊多角色连续回复时避免弹窗刷屏）
+let lastNovelToastAt = 0;
+function throttledNovelSuccessToast(message, title, opts = {}) {
+    const now = Date.now();
+    if (now - lastNovelToastAt < 2500) return;
+    lastNovelToastAt = now;
+    if (window.toastr) window.toastr.success(message, title, opts);
 }
 
 let renderRetryTimer = null;
@@ -1010,6 +1222,28 @@ async function renderSettingsUI(cachedStatus = null) {
                     <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
                         无论在整篇还是在正文标签内部，都会彻底剔除这些类似 <code>&lt;status&gt;...&lt;/status&gt;</code> 的干扰块。
                     </small>
+                </div>
+
+                <!-- 【会话标签检测】：自动扫描当前聊天出现的标签，一键加入白/黑名单 -->
+                <div class="novel-form-group novel-tag-scanner">
+                    <div class="novel-tag-scanner-header">
+                        <span class="novel-label"><i class="fa-solid fa-tags"></i> 会话标签检测</span>
+                        <span class="novel-tag-scanner-meta">
+                            <span id="novel_tag_scan_count"></span>
+                            <button type="button" id="novel_rescan_tags_btn" class="novel-chip-btn" title="重新扫描当前会话中出现的标签"><i class="fa-solid fa-rotate"></i> 重新扫描</button>
+                        </span>
+                    </div>
+                    <div id="novel_tag_chips" class="novel-tag-chip-list"></div>
+                    <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
+                        点「白」= 只保留该标签内的正文；点「黑」= 彻底剔除该标签块；再次点击可移除；两侧互斥。
+                    </small>
+                </div>
+
+                <!-- 【过滤效果预览】：实时展示最近一条 AI 回复经标签过滤后的效果 -->
+                <div class="novel-form-group">
+                    <span class="novel-label"><i class="fa-solid fa-eye"></i> 过滤效果预览（最近一条 AI 回复）</span>
+                    <div class="novel-preview-box" id="novel_filter_preview"></div>
+                    <small id="novel_filter_preview_stat" class="novel-preview-stat"></small>
                 </div>
 
                 <!-- 包含主角互动开关 -->
@@ -1201,7 +1435,8 @@ async function renderSettingsUI(cachedStatus = null) {
     if (inputInclude) {
         inputInclude.addEventListener('input', (e) => {
             settings.include_tags = e.target.value.trim();
-            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            debouncedSaveSettings();
+            debouncedRenderTagTools(400);
         });
     }
 
@@ -1209,7 +1444,8 @@ async function renderSettingsUI(cachedStatus = null) {
     if (inputExclude) {
         inputExclude.addEventListener('input', (e) => {
             settings.exclude_tags = e.target.value.trim();
-            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            debouncedSaveSettings();
+            debouncedRenderTagTools(400);
         });
     }
 
@@ -1224,7 +1460,7 @@ async function renderSettingsUI(cachedStatus = null) {
             const val = e.target.value.trim();
             settings.save_dir = val;
             updatePreview();
-            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            debouncedSaveSettings();
         });
     }
 
@@ -1233,6 +1469,14 @@ async function renderSettingsUI(cachedStatus = null) {
     if (syncAllBtn) {
         syncAllBtn.addEventListener('click', () => {
             executeSyncAll(false);
+        });
+    }
+
+    // 「重新扫描」按钮：手动触发会话标签检测与过滤预览刷新
+    const rescanBtn = panel.querySelector('#novel_rescan_tags_btn');
+    if (rescanBtn) {
+        rescanBtn.addEventListener('click', () => {
+            renderTagTools();
         });
     }
 
@@ -1246,30 +1490,7 @@ async function renderSettingsUI(cachedStatus = null) {
                 return;
             }
 
-            let bookTitle = getBookTitle(settings);
-
-            let novelText = `《${bookTitle}》\n\n`;
-            let chapterCount = 0;
-
-            for (let i = 0; i < chatLog.length; i++) {
-                const msg = chatLog[i];
-                if (msg.is_user && !settings.include_user_dialogue) continue;
-                const cleanMes = cleanNovelText(msg.mes || '', settings);
-                if (!cleanMes) continue;
-
-                chapterCount++;
-                const speaker = msg.name || (msg.is_user ? '你' : '旁白');
-                const floor = i + 1;
-                if (settings.chapter_style === 'separator') {
-                    novelText += `* * *\n\n${cleanMes}\n\n\n`;
-                } else if (settings.chapter_style === 'dialogue') {
-                    novelText += `【${speaker}】\n\n${cleanMes}\n\n\n`;
-                } else if (settings.chapter_style === 'numbered') {
-                    novelText += `第 ${chapterCount} 节 · ${speaker}\n\n${cleanMes}\n\n\n`;
-                } else {
-                    novelText += `第 ${chapterCount} 章 · ${speaker} (原楼层: ${floor})\n\n${cleanMes}\n\n\n`;
-                }
-            }
+            const { bookTitle, novelText, chapterCount } = buildNovelText(settings, chatLog);
 
             if (chapterCount === 0) {
                 if (window.toastr) window.toastr.warning('没有可导出的有效剧情章节。', '小说连载');
@@ -1543,6 +1764,9 @@ async function renderSettingsUI(cachedStatus = null) {
             }
         }
     }
+
+    // 面板渲染完成后立即扫描一次会话标签并刷新过滤效果预览
+    renderTagTools();
 }
 
 jQuery(async () => {
@@ -1571,7 +1795,10 @@ jQuery(async () => {
     // 立即执行并配合短延迟补救，确保 100% 渲染至酒馆扩展列表
     renderSettingsUI(bootStatus);
     setTimeout(() => {
-        renderSettingsUI(bootStatus);
+        // 若用户已展开面板（如正在输入），跳过重复渲染，避免清空其输入与部署指引 tab 状态
+        if (!document.getElementById('auto-save-to-txt-settings')) {
+            renderSettingsUI(bootStatus);
+        }
     }, 500);
 
     seedLastSavedSignature();
@@ -1580,11 +1807,13 @@ jQuery(async () => {
         eventSource.on(event_types.MESSAGE_RECEIVED, (data) => {
             handleMessageSave(data, false);
             updateDrawerHeaderFileBadge();
+            debouncedRenderTagTools();
         });
 
         eventSource.on(event_types.MESSAGE_SENT, (data) => {
             handleMessageSave(data, true);
             updateDrawerHeaderFileBadge();
+            debouncedRenderTagTools();
         });
 
         if (event_types.MESSAGE_SWIPED) {
@@ -1596,6 +1825,7 @@ jQuery(async () => {
                 }
                 handleMessageSave(data, false);
                 updateDrawerHeaderFileBadge();
+                debouncedRenderTagTools();
             });
         }
 
@@ -1606,8 +1836,18 @@ jQuery(async () => {
             });
         }
 
+        // 消息被编辑时酒馆会原地改写 mes：重扫标签并刷新过滤预览（老版本酒馆无此事件则自动跳过，缓存指纹仍保证正确性）
+        if (event_types.MESSAGE_EDITED) {
+            eventSource.on(event_types.MESSAGE_EDITED, () => {
+                debouncedRenderTagTools();
+                updateDrawerHeaderFileBadge();
+            });
+        }
+
         const refreshContext = () => {
             seedLastSavedSignature();
+            cleanTextCache.map.clear();
+            renderTagTools();
             updateDrawerHeaderFileBadge();
         };
 
