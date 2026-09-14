@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.7.5',             // 扩展版本号
+    version: '1.7.6',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -352,9 +352,11 @@ function extractTagSample(chatLog, tag, maxLen = 300) {
     return '';
 }
 
-function showChipTooltip(chipEl, chatLog) {
+function showChipTooltip(chipEl) {
     const tag = chipEl.getAttribute('data-tag') || '';
     if (!tag) return;
+    // 实时解析当前会话：避免面板未重建时悬浮取样命中旧聊天的缓存引用
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
     const sample = extractTagSample(chatLog, tag);
     const tip = getChipTooltip();
     tip.innerHTML = sample
@@ -1077,7 +1079,7 @@ function renderTagTools() {
 
             // 悬浮 chip 即展示标签块内的实际内容，无需点入即可快速判断是否保留
             container.querySelectorAll('.novel-tag-chip').forEach(chipEl => {
-                chipEl.addEventListener('mouseenter', () => showChipTooltip(chipEl, chatLog));
+                chipEl.addEventListener('mouseenter', () => showChipTooltip(chipEl));
                 chipEl.addEventListener('mouseleave', hideChipTooltip);
             });
         }
@@ -1124,7 +1126,7 @@ function toggleTagInList(tag, action) {
 }
 
 // 供弹窗展示用的最近一次预览数据（完整正文，不截断）
-let lastFilterPreview = { rawLength: 0, cleaned: '', speaker: '', floor: 0 };
+let lastFilterPreview = { rawLength: 0, cleaned: '', speaker: '', floor: 0, whitelistMissed: false, isDraft: false };
 
 /**
  * 过滤效果预览：刷新面板中"查看预览"按钮的状态与字数统计，正文全文在点击弹窗中展示
@@ -1148,7 +1150,7 @@ function renderFilterPreview() {
         btn.disabled = true;
         if (labelEl) labelEl.textContent = '暂无 AI 回复可供预览';
         if (statEl) statEl.textContent = '';
-        lastFilterPreview = { rawLength: 0, cleaned: '' };
+        lastFilterPreview = { rawLength: 0, cleaned: '', speaker: '', floor: 0, whitelistMissed: false, isDraft: false };
         return;
     }
 
@@ -1156,16 +1158,31 @@ function renderFilterPreview() {
     if (labelEl) labelEl.textContent = '查看过滤效果预览';
     const raw = target.mes || '';
     const cleaned = getCleanedMessage(target, targetIndex, settings);
+
+    // 白名单静默失效检测：填了白名单但当前消息一个都没匹配上时，引擎会整篇保留而不报错
+    const includeList = parseTagList(settings.include_tags);
+    let whitelistMissed = false;
+    if (includeList.length > 0 && raw) {
+        whitelistMissed = !includeList.some(t => {
+            const safeT = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return new RegExp(`<\\s*${safeT}[^>]*>[\\s\\S]*?<\\/\\s*${safeT}\\s*>`, 'i').test(raw);
+        });
+    }
+    // 草稿缓冲模式下，最新一楼尚未定稿入书
+    const isDraft = !!(settings.buffer_latest_message && targetIndex > lastSettledSavedIndex);
+
     lastFilterPreview = {
         rawLength: raw.length,
         cleaned,
         speaker: target.name || '旁白',
-        floor: targetIndex + 1
+        floor: targetIndex + 1,
+        whitelistMissed,
+        isDraft
     };
     if (statEl) {
-        statEl.textContent = cleaned
+        statEl.textContent = (cleaned
             ? `原文 ${raw.length} 字 → 过滤后 ${cleaned.length} 字`
-            : '过滤后无正文（点击查看详情）';
+            : '过滤后无正文（点击查看详情）') + (isDraft ? ' · 草稿未定稿' : '');
     }
 }
 
@@ -1179,13 +1196,16 @@ function openFilterPreviewModal() {
     const stat = document.getElementById('novel_modal_stat');
     if (stat) {
         stat.textContent = lastFilterPreview.cleaned
-            ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor} ｜ 原文 ${lastFilterPreview.rawLength} 字 → 过滤后 ${lastFilterPreview.cleaned.length} 字`
-            : (lastFilterPreview.speaker ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor}` : '');
+            ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor}${lastFilterPreview.isDraft ? '（草稿未定稿）' : ''} ｜ 原文 ${lastFilterPreview.rawLength} 字 → 过滤后 ${lastFilterPreview.cleaned.length} 字`
+            : (lastFilterPreview.speaker ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor}${lastFilterPreview.isDraft ? '（草稿未定稿）' : ''}` : '');
     }
     if (body) {
-        body.innerHTML = lastFilterPreview.cleaned
+        const warnHtml = lastFilterPreview.whitelistMissed
+            ? '<div class="novel-tag-empty" style="color: #f39c12; margin-bottom: 6px;">⚠️ 白名单标签在当前消息中一个都没匹配到——引擎已<b>整篇保留</b>原文。请检查白名单拼写，或直接用上方检测器点选标签。</div>'
+            : '';
+        body.innerHTML = warnHtml + (lastFilterPreview.cleaned
             ? escapeHtml(lastFilterPreview.cleaned).replace(/\n/g, '<br>')
-            : '<div class="novel-tag-empty" style="color: #f39c12;">过滤后无正文，请检查白名单配置（白名单填错会导致提取不到内容）</div>';
+            : '<div class="novel-tag-empty" style="color: #f39c12;">过滤后无正文，请检查白名单配置（白名单填错会导致提取不到内容）</div>');
     }
     overlay.style.display = 'flex';
 }
@@ -1387,6 +1407,9 @@ async function renderSettingsUI(cachedStatus = null) {
                         <option value="separator" ${settings.chapter_style === 'separator' ? 'selected' : ''}>优雅分割线（* * * 散文小说连续阅读）</option>
                         <option value="dialogue" ${settings.chapter_style === 'dialogue' ? 'selected' : ''}>纯净戏剧体（角色名: 正文）</option>
                     </select>
+                    <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
+                        切换后仅对<b>新写入章节</b>生效；想让已写内容统一为新样式，切换后点一次【同步历史连载】即可全书重写。
+                    </small>
                 </div>
 
                 <!-- 小说文件命名规则 -->
