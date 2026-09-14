@@ -670,4 +670,67 @@
     }
 }
 
+/* ==================== 可读性提升（标签醒目 / 说明弱化 / 字号上调） ==================== */
+/* 标签：加粗、提亮、全尺寸 —— 与下方灰化说明文本形成鲜明层次，告别眼花缭乱 */
+.novel-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--SmartThemeEmColor, #eeeeee);
+    opacity: 1;
+    letter-spacing: 0.2px;
+}
+
+/* 整体字号上调一档：面板上大量 11px 小字统一提升至 12-14px */
+#auto-save-to-txt-settings .novel-drawer-inner { font-size: 13px; }
+.novel-alert { font-size: 13px; }
+.novel-status-card { font-size: 13px; }
+.novel-book-title-group { font-size: 12px; }
+.novel-book-filename { font-size: 14px; }
+.novel-book-path-info { font-size: 12px; }
+.novel-btn { font-size: 13px; }
+.novel-tab-btn { font-size: 12px; }
+.novel-code-text { font-size: 12px; }
+.novel-copy-btn { font-size: 12px; }
+.novel-tag-chip { font-size: 12px; }
+.novel-chip-count { font-size: 11px; }
+.novel-chip-auto { font-size: 10px; }
+.novel-chip-btn { font-size: 11px; }
+.novel-tag-empty { font-size: 12px; }
+#auto-save-to-txt-settings code { font-size: 12px; }
+.novel-modal-body { font-size: 14px; }
+.novel-preview-stat { font-size: 12px; }
+
+/* 说明小字（内联 11px 样式由 !important 统一接管）：更大、更柔和的行高，弱化处理 */
+#auto-save-to-txt-settings small {
+    font-size: 12px !important;
+    opacity: 0.85 !important;
+    line-height: 1.55 !important;
+}
+
+/* 会话标签 chip 悬浮提示：展示标签块内的实际内容，快速判断是否保留 */
+.novel-chip-tooltip {
+    position: fixed;
+    max-width: 340px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--SmartThemeBlurTintColor, rgba(20, 22, 28, 0.97));
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--SmartThemeEmColor, #ddd);
+    z-index: 100000;
+    pointer-events: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    box-sizing: border-box;
+}
+
+.novel-chip-tooltip .novel-chip-tooltip-tag {
+    color: #ffd166;
+    font-family: Consolas, Monaco, monospace;
+}
+
 

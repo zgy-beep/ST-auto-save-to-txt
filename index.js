@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.7.3',             // 扩展版本号
+    version: '1.7.4',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -318,6 +318,64 @@ function escapeHtml(str) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+// 会话标签 chip 悬浮提示：单例 tooltip 元素，随面板存在周期复用
+let chipTooltipEl = null;
+
+function getChipTooltip() {
+    if (!chipTooltipEl || !document.body.contains(chipTooltipEl)) {
+        chipTooltipEl = document.createElement('div');
+        chipTooltipEl.className = 'novel-chip-tooltip';
+        chipTooltipEl.style.display = 'none';
+        document.body.appendChild(chipTooltipEl);
+    }
+    return chipTooltipEl;
+}
+
+/**
+ * 提取某标签在会话中首次成对出现的内部内容（供悬浮预览判断是否保留）
+ */
+function extractTagSample(chatLog, tag, maxLen = 300) {
+    const safeTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pairRegex = new RegExp(`<\\s*${safeTag}[^>]*>([\\s\\S]*?)<\\/\\s*${safeTag}\\s*>`, 'i');
+    for (const m of chatLog) {
+        const text = (m && typeof m.mes === 'string') ? m.mes : '';
+        if (!text || text.indexOf('<') === -1) continue;
+        const match = text.match(pairRegex);
+        if (match && match[1] && match[1].trim()) {
+            return match[1].trim().slice(0, maxLen);
+        }
+    }
+    return '';
+}
+
+function showChipTooltip(chipEl, chatLog) {
+    const tag = chipEl.getAttribute('data-tag') || '';
+    if (!tag) return;
+    const sample = extractTagSample(chatLog, tag);
+    const tip = getChipTooltip();
+    tip.innerHTML = sample
+        ? `<span class="novel-chip-tooltip-tag">&lt;${escapeHtml(tag)}&gt;</span> 块内的实际内容：<br>${escapeHtml(sample)}${sample.length >= 300 ? '…' : ''}`
+        : `<span class="novel-chip-tooltip-tag">&lt;${escapeHtml(tag)}&gt;</span> 在会话中暂无成对标签内容（可能为自闭合标签或仅有闭标签）`;
+    tip.style.display = 'block';
+
+    // 定位：优先显示在 chip 上方，空间不足则翻到下方；水平方向防溢出
+    const rect = chipEl.getBoundingClientRect();
+    const pad = 8;
+    tip.style.left = '0px';
+    tip.style.top = '0px';
+    const tw = tip.offsetWidth;
+    const th = tip.offsetHeight;
+    let left = Math.max(pad, Math.min(rect.left, window.innerWidth - tw - pad));
+    let top = rect.top - th - 6;
+    if (top < pad) top = rect.bottom + 6;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+}
+
+function hideChipTooltip() {
+    if (chipTooltipEl) chipTooltipEl.style.display = 'none';
 }
 
 // 清洗结果缓存：同一会话内避免每条消息被 cleanNovelText 重复全量正则清洗（O(n²) 性能优化）
@@ -1013,6 +1071,12 @@ function renderTagTools() {
                     const tagName = chip ? chip.getAttribute('data-tag') : '';
                     if (tagName) toggleTagInList(tagName, btn.getAttribute('data-action'));
                 });
+            });
+
+            // 悬浮 chip 即展示标签块内的实际内容，无需点入即可快速判断是否保留
+            container.querySelectorAll('.novel-tag-chip').forEach(chipEl => {
+                chipEl.addEventListener('mouseenter', () => showChipTooltip(chipEl, chatLog));
+                chipEl.addEventListener('mouseleave', hideChipTooltip);
             });
         }
     }
