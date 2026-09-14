@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.7.0',             // 扩展版本号
+    version: '1.7.1',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -64,7 +64,8 @@ let recentStatus = {
     state: 'idle', // 'idle' | 'updating' | 'success' | 'skipped' | 'error'
     text: '连载服务就绪（收到 AI 回复将自动排版写入）',
     time: '',
-    file: ''
+    file: '',
+    chapter: 0 // 最近成功写入的章节序号（进度感知：顶栏显示"已连载第 N 章"）
 };
 
 function updateRecentStatus(state, text, file = '') {
@@ -79,7 +80,7 @@ function updateRecentStatus(state, text, file = '') {
         if (state === 'updating') {
             headerStatus.innerHTML = `<span style="color: var(--SmartThemeQuoteColor, #3498db); font-weight: normal;"><i class="fa-solid fa-spinner fa-spin"></i> 连载更新中...</span>`;
         } else if (state === 'success') {
-            headerStatus.innerHTML = `<span style="color: var(--SmartThemeEmColor, #2ecc71); font-weight: normal;"><i class="fa-solid fa-circle-check"></i> 已连载 ${recentStatus.time}</span>`;
+            headerStatus.innerHTML = `<span style="color: var(--SmartThemeEmColor, #2ecc71); font-weight: normal;"><i class="fa-solid fa-circle-check"></i> 已连载${recentStatus.chapter > 0 ? '第 ' + recentStatus.chapter + ' 章 ·' : ''} ${recentStatus.time}</span>`;
         } else if (state === 'skipped') {
             headerStatus.innerHTML = `<span style="color: #f39c12; font-weight: normal;"><i class="fa-solid fa-circle-info"></i> 已跳过</span>`;
         } else if (state === 'error') {
@@ -298,6 +299,17 @@ function scanChatTags(chatLog) {
         .sort((a, b) => (b.count - a.count) || a.tag.localeCompare(b.tag));
     // 全量返回绝不截断：哪怕几十个标签也要全部展示，展示层用限高滚动容器承载
     return { tags: sorted, total: sorted.length };
+}
+
+// 思维链/草稿类标签的特征模式：与 cleanNovelText 内 genericAuxiliaryPattern 的标签名部分保持一致
+// （引擎正则本体已有测试锁定，勿单独修改此处或彼处之一）
+const AUX_TAG_NAME_PATTERN = /[a-zA-Z0-9_\-~.:#]*(?:think|thought|reasoning|cot|scratchpad|reflection|inner_thought|analysis|plan)[a-zA-Z0-9_\-~.:#]*/i;
+
+/**
+ * 判断标签是否属于思维链/草稿类（会被清洗引擎全自动剔除，检测器据此打「自动」徽标）
+ */
+function isAuxiliaryTag(tag) {
+    return typeof tag === 'string' && AUX_TAG_NAME_PATTERN.test(tag);
 }
 
 function escapeHtml(str) {
@@ -703,6 +715,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
             mesSnippet: mesSnippet
         };
         lastSettledSavedIndex = Math.max(lastSettledSavedIndex, messageIndex);
+        recentStatus.chapter = chapterNumber;
 
         const targetFile = res.file || `${bookTitle}.txt`;
 
@@ -895,6 +908,7 @@ async function executeSyncAll(isSilent = false) {
         if (response.ok) {
             const data = await response.json().catch(() => ({}));
             const targetFile = data.file || `${bookTitle}.txt`;
+            recentStatus.chapter = chapterCount;
             seedLastSavedSignature();
             if (!isSilent) {
                 updateRecentStatus('success', `全书共 ${chapterCount} 个章节已完整同步！`, targetFile);
@@ -943,6 +957,9 @@ function debouncedSilentSyncAll() {
 /**
  * 渲染会话标签检测器 chips 与过滤效果预览（扫描 / 名单变更 / 收到新消息后统一走这里）
  */
+// chips 渲染签名：扫描结果与白/黑名单均未变化时跳过 DOM 重建，避免用户正点击时被打断
+let lastChipsRenderSig = '';
+
 function renderTagTools() {
     const container = document.getElementById('novel_tag_chips');
     if (!container) return;
@@ -957,23 +974,28 @@ function renderTagTools() {
         countEl.textContent = total > 0 ? `已扫描出 ${total} 个标签` : '';
     }
 
-    if (!tags.length) {
-        container.innerHTML = '<div class="novel-tag-empty">未检测到自定义标签——AI 回复中带 &lt;标签&gt; 的内容会自动出现在这里</div>';
-    } else {
-        container.innerHTML = tags.map(({ tag, count }) => `
-            <div class="novel-tag-chip" data-tag="${tag}">
-                <code>${tag}</code><span class="novel-chip-count">×${count}</span>
-                <button type="button" class="novel-chip-btn chip-white ${includeSet.has(tag) ? 'active' : ''}" data-action="include" title="加入白名单：只保留该标签内的正文">白</button>
-                <button type="button" class="novel-chip-btn chip-black ${excludeSet.has(tag) ? 'active' : ''}" data-action="exclude" title="加入黑名单：彻底剔除该标签块">黑</button>
-            </div>`).join('');
+    const chipsSig = JSON.stringify(tags) + '|' + (settings.include_tags || '') + '|' + (settings.exclude_tags || '');
+    if (chipsSig !== lastChipsRenderSig) {
+        lastChipsRenderSig = chipsSig;
+        if (!tags.length) {
+            container.innerHTML = '<div class="novel-tag-empty">未检测到自定义标签——AI 回复中带 &lt;标签&gt; 的内容会自动出现在这里</div>';
+        } else {
+            container.innerHTML = tags.map(({ tag, count }) => `
+                <div class="novel-tag-chip" data-tag="${tag}">
+                    <code>${tag}</code><span class="novel-chip-count">×${count}</span>
+                    ${isAuxiliaryTag(tag) ? '<span class="novel-chip-auto" title="思维链/草稿类标签已被引擎自动过滤，无需加入黑名单">自动</span>' : ''}
+                    <button type="button" class="novel-chip-btn chip-white ${includeSet.has(tag) ? 'active' : ''}" data-action="include" title="加入白名单：只保留该标签内的正文">白</button>
+                    <button type="button" class="novel-chip-btn chip-black ${excludeSet.has(tag) ? 'active' : ''}" data-action="exclude" title="加入黑名单：彻底剔除该标签块">黑</button>
+                </div>`).join('');
 
-        container.querySelectorAll('.novel-chip-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const chip = btn.closest('.novel-tag-chip');
-                const tagName = chip ? chip.getAttribute('data-tag') : '';
-                if (tagName) toggleTagInList(tagName, btn.getAttribute('data-action'));
+            container.querySelectorAll('.novel-chip-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const chip = btn.closest('.novel-tag-chip');
+                    const tagName = chip ? chip.getAttribute('data-tag') : '';
+                    if (tagName) toggleTagInList(tagName, btn.getAttribute('data-action'));
+                });
             });
-        });
+        }
     }
 
     renderFilterPreview();
@@ -1017,7 +1039,7 @@ function toggleTagInList(tag, action) {
 }
 
 // 供弹窗展示用的最近一次预览数据（完整正文，不截断）
-let lastFilterPreview = { rawLength: 0, cleaned: '' };
+let lastFilterPreview = { rawLength: 0, cleaned: '', speaker: '', floor: 0 };
 
 /**
  * 过滤效果预览：刷新面板中"查看预览"按钮的状态与字数统计，正文全文在点击弹窗中展示
@@ -1049,7 +1071,12 @@ function renderFilterPreview() {
     if (labelEl) labelEl.textContent = '查看过滤效果预览';
     const raw = target.mes || '';
     const cleaned = getCleanedMessage(target, targetIndex, settings);
-    lastFilterPreview = { rawLength: raw.length, cleaned };
+    lastFilterPreview = {
+        rawLength: raw.length,
+        cleaned,
+        speaker: target.name || '旁白',
+        floor: targetIndex + 1
+    };
     if (statEl) {
         statEl.textContent = cleaned
             ? `原文 ${raw.length} 字 → 过滤后 ${cleaned.length} 字`
@@ -1067,8 +1094,8 @@ function openFilterPreviewModal() {
     const stat = document.getElementById('novel_modal_stat');
     if (stat) {
         stat.textContent = lastFilterPreview.cleaned
-            ? `原文 ${lastFilterPreview.rawLength} 字 → 过滤后 ${lastFilterPreview.cleaned.length} 字`
-            : '';
+            ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor} ｜ 原文 ${lastFilterPreview.rawLength} 字 → 过滤后 ${lastFilterPreview.cleaned.length} 字`
+            : (lastFilterPreview.speaker ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor}` : '');
     }
     if (body) {
         body.innerHTML = lastFilterPreview.cleaned
@@ -1350,6 +1377,8 @@ async function renderSettingsUI(cachedStatus = null) {
     `;
 
     container.appendChild(panel);
+    // 面板为全新 DOM：重置 chips 渲染签名，确保尾部 renderTagTools() 一定完成首次绘制
+    lastChipsRenderSig = '';
 
     // 绑定置顶作品卡片【复制路径】按钮与书名大触控区
     const copyPathBtn = panel.querySelector('#novel_copy_filepath_btn');
@@ -1408,7 +1437,7 @@ async function renderSettingsUI(cachedStatus = null) {
             if (recentStatus.state === 'updating') {
                 headerStatus.innerHTML = `<span style="color: var(--SmartThemeQuoteColor, #3498db);"><i class="fa-solid fa-spinner fa-spin"></i> 连载更新中...</span>`;
             } else if (recentStatus.state === 'success') {
-                headerStatus.innerHTML = `<span style="color: var(--SmartThemeEmColor, #2ecc71);"><i class="fa-solid fa-circle-check"></i> 已连载 ${recentStatus.time}</span>`;
+                headerStatus.innerHTML = `<span style="color: var(--SmartThemeEmColor, #2ecc71);"><i class="fa-solid fa-circle-check"></i> 已连载${recentStatus.chapter > 0 ? '第 ' + recentStatus.chapter + ' 章 ·' : ''} ${recentStatus.time}</span>`;
             } else if (recentStatus.state === 'skipped') {
                 headerStatus.innerHTML = `<span style="color: #f39c12;"><i class="fa-solid fa-circle-info"></i> 已跳过</span>`;
             } else if (recentStatus.state === 'error') {
@@ -1537,8 +1566,8 @@ async function renderSettingsUI(cachedStatus = null) {
                 const result = renderTagTools();
                 rescanBtn.disabled = false;
                 rescanBtn.innerHTML = originalHtml;
-                const scanSettings = getSettings();
-                if (scanSettings.show_toast !== false && window.toastr) {
+                // 主动操作的直接反馈：不受"连载更新提示"开关控制
+                if (window.toastr) {
                     const total = (result && result.total) ? result.total : 0;
                     window.toastr.info(
                         total > 0 ? `扫描完成：共检测到 ${total} 个自定义标签` : '扫描完成：未检测到自定义标签',

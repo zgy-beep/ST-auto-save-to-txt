@@ -556,6 +556,18 @@
     font-size: 10px;
 }
 
+/* 思维链/草稿类标签的「自动」徽标：引擎已自动过滤，无需加入黑名单 */
+.novel-chip-auto {
+    font-size: 9px;
+    padding: 0 5px;
+    border-radius: 7px;
+    background: rgba(52, 152, 219, 0.25);
+    border: 1px solid rgba(52, 152, 219, 0.45);
+    color: #7fb8e8;
+    line-height: 1.6;
+    user-select: none;
+}
+
 .novel-chip-btn {
     border: 1px solid rgba(255, 255, 255, 0.2);
     background: rgba(255, 255, 255, 0.05);

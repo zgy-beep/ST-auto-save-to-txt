@@ -56,6 +56,16 @@ function scanChatTags(chatLog) {
     return { tags: sorted, total: sorted.length };
 }
 
+// 思维链/草稿类标签的特征模式：与 index.js 中 cleanNovelText 内 genericAuxiliaryPattern 的标签名部分保持一致
+const AUX_TAG_NAME_PATTERN = /[a-zA-Z0-9_\-~.:#]*(?:think|thought|reasoning|cot|scratchpad|reflection|inner_thought|analysis|plan)[a-zA-Z0-9_\-~.:#]*/i;
+
+/**
+ * 判断标签是否属于思维链/草稿类（会被清洗引擎全自动剔除，检测器据此打「自动」徽标）
+ */
+function isAuxiliaryTag(tag) {
+    return typeof tag === 'string' && AUX_TAG_NAME_PATTERN.test(tag);
+}
+
 let passCount = 0;
 let failCount = 0;
 
@@ -173,6 +183,12 @@ assertDeepEqual(scanChatTags('not-an-array'), { tags: [], total: 0 }, '测试 8.
     const { tags } = scanChatTags(chatLog);
     assertDeepEqual(tags.map(r => r.tag), ['alpha', 'beta'], '测试 9.1: 计数相同时按名称升序排列');
 }
+
+// 测试 10: 思维链/草稿类标签识别（供 chips「自动」徽标使用，与清洗引擎行为保持一致）
+assert(isAuxiliaryTag('think') && isAuxiliaryTag('think_fox~') && isAuxiliaryTag('agent:cot'), '测试 10.1: think/think_fox~/agent:cot 判定为思维链标签');
+assert(isAuxiliaryTag('scratchpad') && isAuxiliaryTag('inner_thought') && isAuxiliaryTag('cot') && isAuxiliaryTag('analysis') && isAuxiliaryTag('plan'), '测试 10.2: scratchpad/inner_thought/cot/analysis/plan 判定为思维链标签');
+assert(!isAuxiliaryTag('story') && !isAuxiliaryTag('status') && !isAuxiliaryTag('response') && !isAuxiliaryTag('content') && !isAuxiliaryTag('details'), '测试 10.3: 普通正文标签不误标');
+assert(!isAuxiliaryTag('') && !isAuxiliaryTag(null) && !isAuxiliaryTag(123), '测试 10.4: 异常输入安全返回 false');
 
 console.log(`\n=== 会话标签检测器测试结果: 通过: ${passCount}, 失败: ${failCount} ===`);
 if (failCount > 0) {
