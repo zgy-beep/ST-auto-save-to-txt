@@ -528,6 +528,8 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 5px;
     min-height: 36px;
+    max-height: 180px;
+    overflow-y: auto;
     box-sizing: border-box;
 }
 
@@ -599,25 +601,55 @@
     width: 100%;
 }
 
-.novel-preview-box {
-    background: rgba(0, 0, 0, 0.28);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-left: 3px solid var(--SmartThemeQuoteColor, #3498db);
-    border-radius: 4px;
-    padding: 8px 10px;
-    font-size: 12px;
-    line-height: 1.7;
-    max-height: 160px;
-    overflow-y: auto;
-    word-break: break-word;
-    color: var(--SmartThemeEmColor, #ddd);
-    box-sizing: border-box;
-}
-
 .novel-preview-stat {
     font-size: 11px;
     opacity: 0.7;
     color: var(--SmartThemeEmColor, #aaa);
+}
+
+/* 过滤效果预览弹窗（完整正文，点遮罩 / 右上角 / Esc 均可关闭） */
+.novel-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.novel-modal {
+    background: var(--SmartThemeBlurTintColor, rgba(22, 24, 30, 0.97));
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    width: min(680px, 100%);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    box-sizing: border-box;
+}
+
+.novel-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 13px;
+}
+
+.novel-modal-body {
+    padding: 12px 14px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.8;
+    word-break: break-word;
+    color: var(--SmartThemeEmColor, #ddd);
 }
 
 @media (max-width: 600px) {

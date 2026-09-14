@@ -32,7 +32,7 @@ function parseTagList(str) {
 /**
  * 扫描会话中出现过的自定义标签，按出现次数降序返回（供"会话标签检测器"展示）
  * 天然跳过闭标签 </tag>、HTML 注释 <!-- --> 与 DOCTYPE；details/summary 不排除（默认黑名单含 details）
- * 返回 { tags: 前 15 条 [{tag, count}], total: 总会话标签种数 }
+ * 返回 { tags: 全部标签 [{tag, count}]（不截断，展示层限高滚动）, total: 总会话标签种数 }
  */
 function scanChatTags(chatLog) {
     const counts = new Map();
@@ -52,7 +52,8 @@ function scanChatTags(chatLog) {
     const sorted = [...counts.entries()]
         .map(([tag, count]) => ({ tag, count }))
         .sort((a, b) => (b.count - a.count) || a.tag.localeCompare(b.tag));
-    return { tags: sorted.slice(0, 15), total: sorted.length };
+    // 全量返回绝不截断：哪怕几十个标签也要全部展示，展示层用限高滚动容器承载
+    return { tags: sorted, total: sorted.length };
 }
 
 let passCount = 0;
@@ -143,15 +144,15 @@ assertDeepEqual(parseTagList('状态，记忆'), ['状态', '记忆'], '测试 1
     assertDeepEqual(tags.map(r => r.count), [1], '测试 6.2: 成对块的闭标签不重复计数（总计 1 次）');
 }
 
-// 测试 7: 结果最多 15 个（构造 20 个不同标签验证截断），total 保留真实种数
+// 测试 7: 标签全量展示绝不截断（构造 20 个不同标签，应全部返回）
 {
     const chatLog = [];
     for (let i = 0; i < 20; i++) {
         chatLog.push({ mes: `<tag${String(i).padStart(2, '0')}>内容</tag${String(i).padStart(2, '0')}>` });
     }
     const { tags, total } = scanChatTags(chatLog);
-    assert(tags.length === 15, '测试 7.1: 超过 15 个标签时结果被截断为 15 个');
-    assert(total === 20, '测试 7.2: total 保留完整标签种数 20（供"仅显示前 15 个"提示）');
+    assert(tags.length === 20, '测试 7.1: 超过 15 个标签时仍全部展示（不截断）');
+    assert(total === 20, '测试 7.2: total 与 tags 长度一致（全量返回）');
 }
 
 // 测试 8: 健壮性 —— 非数组输入与异常消息对象

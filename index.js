@@ -276,7 +276,7 @@ function parseTagList(str) {
 /**
  * 扫描会话中出现过的自定义标签，按出现次数降序返回（供"会话标签检测器"展示）
  * 天然跳过闭标签 </tag>、HTML 注释 <!-- --> 与 DOCTYPE；details/summary 不排除（默认黑名单含 details）
- * 返回 { tags: 前 15 条 [{tag, count}], total: 总会话标签种数 }
+ * 返回 { tags: 全部标签 [{tag, count}]（不截断，展示层限高滚动）, total: 总会话标签种数 }
  */
 function scanChatTags(chatLog) {
     const counts = new Map();
@@ -296,7 +296,8 @@ function scanChatTags(chatLog) {
     const sorted = [...counts.entries()]
         .map(([tag, count]) => ({ tag, count }))
         .sort((a, b) => (b.count - a.count) || a.tag.localeCompare(b.tag));
-    return { tags: sorted.slice(0, 15), total: sorted.length };
+    // 全量返回绝不截断：哪怕几十个标签也要全部展示，展示层用限高滚动容器承载
+    return { tags: sorted, total: sorted.length };
 }
 
 function escapeHtml(str) {
@@ -953,7 +954,7 @@ function renderTagTools() {
 
     const countEl = document.getElementById('novel_tag_scan_count');
     if (countEl) {
-        countEl.textContent = total > 0 ? `已扫描出 ${total} 个标签${total > tags.length ? '，仅显示前 15 个' : ''}` : '';
+        countEl.textContent = total > 0 ? `已扫描出 ${total} 个标签` : '';
     }
 
     if (!tags.length) {
@@ -976,6 +977,7 @@ function renderTagTools() {
     }
 
     renderFilterPreview();
+    return { tags, total };
 }
 
 /**
@@ -1014,13 +1016,17 @@ function toggleTagInList(tag, action) {
     renderTagTools();
 }
 
+// 供弹窗展示用的最近一次预览数据（完整正文，不截断）
+let lastFilterPreview = { rawLength: 0, cleaned: '' };
+
 /**
- * 过滤效果预览：展示最近一条 AI 回复经当前白/黑名单过滤后的实际效果
+ * 过滤效果预览：刷新面板中"查看预览"按钮的状态与字数统计，正文全文在点击弹窗中展示
  */
 function renderFilterPreview() {
-    const box = document.getElementById('novel_filter_preview');
-    const statEl = document.getElementById('novel_filter_preview_stat');
-    if (!box) return;
+    const btn = document.getElementById('novel_preview_btn');
+    if (!btn) return;
+    const labelEl = document.getElementById('novel_preview_btn_label');
+    const statEl = document.getElementById('novel_preview_btn_stat');
     const settings = getSettings();
     const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
 
@@ -1032,17 +1038,49 @@ function renderFilterPreview() {
     }
 
     if (!target) {
-        box.innerHTML = '<div class="novel-tag-empty">暂无 AI 回复可供预览</div>';
+        btn.disabled = true;
+        if (labelEl) labelEl.textContent = '暂无 AI 回复可供预览';
         if (statEl) statEl.textContent = '';
+        lastFilterPreview = { rawLength: 0, cleaned: '' };
         return;
     }
 
+    btn.disabled = false;
+    if (labelEl) labelEl.textContent = '查看过滤效果预览';
     const raw = target.mes || '';
     const cleaned = getCleanedMessage(target, targetIndex, settings);
-    if (statEl) statEl.textContent = `原文 ${raw.length} 字 → 过滤后 ${cleaned.length} 字`;
-    box.innerHTML = cleaned
-        ? escapeHtml(cleaned.slice(0, 400)).replace(/\n/g, '<br>')
-        : '<div class="novel-tag-empty" style="color: #f39c12;">过滤后无正文，请检查白名单配置（白名单填错会导致提取不到内容）</div>';
+    lastFilterPreview = { rawLength: raw.length, cleaned };
+    if (statEl) {
+        statEl.textContent = cleaned
+            ? `原文 ${raw.length} 字 → 过滤后 ${cleaned.length} 字`
+            : '过滤后无正文（点击查看详情）';
+    }
+}
+
+/**
+ * 打开过滤效果预览弹窗：完整展示过滤后正文 + 字数对比，支持点遮罩 / 右上角 / Esc 关闭
+ */
+function openFilterPreviewModal() {
+    const overlay = document.getElementById('novel_preview_modal');
+    if (!overlay) return;
+    const body = document.getElementById('novel_modal_body');
+    const stat = document.getElementById('novel_modal_stat');
+    if (stat) {
+        stat.textContent = lastFilterPreview.cleaned
+            ? `原文 ${lastFilterPreview.rawLength} 字 → 过滤后 ${lastFilterPreview.cleaned.length} 字`
+            : '';
+    }
+    if (body) {
+        body.innerHTML = lastFilterPreview.cleaned
+            ? escapeHtml(lastFilterPreview.cleaned).replace(/\n/g, '<br>')
+            : '<div class="novel-tag-empty" style="color: #f39c12;">过滤后无正文，请检查白名单配置（白名单填错会导致提取不到内容）</div>';
+    }
+    overlay.style.display = 'flex';
+}
+
+function closeFilterPreviewModal() {
+    const overlay = document.getElementById('novel_preview_modal');
+    if (overlay) overlay.style.display = 'none';
 }
 
 let tagScanTimer = null;
@@ -1239,11 +1277,27 @@ async function renderSettingsUI(cachedStatus = null) {
                     </small>
                 </div>
 
-                <!-- 【过滤效果预览】：实时展示最近一条 AI 回复经标签过滤后的效果 -->
+                <!-- 【过滤效果预览】：按钮弹窗展示最近一条 AI 回复经标签过滤后的完整效果 -->
                 <div class="novel-form-group">
                     <span class="novel-label"><i class="fa-solid fa-eye"></i> 过滤效果预览（最近一条 AI 回复）</span>
-                    <div class="novel-preview-box" id="novel_filter_preview"></div>
-                    <small id="novel_filter_preview_stat" class="novel-preview-stat"></small>
+                    <button type="button" id="novel_preview_btn" class="novel-btn btn-test" style="width: 100%;" title="弹窗展示最近一条 AI 回复经当前白/黑名单过滤后的完整正文">
+                        <i class="fa-solid fa-eye"></i> <span id="novel_preview_btn_label">查看过滤效果预览</span>
+                    </button>
+                    <small id="novel_preview_btn_stat" class="novel-preview-stat"></small>
+                </div>
+
+                <!-- 过滤效果预览弹窗（完整正文，点遮罩 / 右上角 / Esc 均可关闭） -->
+                <div id="novel_preview_modal" class="novel-modal-overlay" style="display: none;">
+                    <div class="novel-modal" role="dialog" aria-modal="true">
+                        <div class="novel-modal-header">
+                            <b><i class="fa-solid fa-eye"></i> 过滤效果预览（最近一条 AI 回复）</b>
+                            <span style="display: inline-flex; align-items: center; gap: 10px;">
+                                <small id="novel_modal_stat" class="novel-preview-stat"></small>
+                                <button type="button" id="novel_modal_close" class="novel-chip-btn" title="关闭预览"><i class="fa-solid fa-xmark"></i></button>
+                            </span>
+                        </div>
+                        <div id="novel_modal_body" class="novel-modal-body"></div>
+                    </div>
                 </div>
 
                 <!-- 包含主角互动开关 -->
@@ -1472,11 +1526,48 @@ async function renderSettingsUI(cachedStatus = null) {
         });
     }
 
-    // 「重新扫描」按钮：手动触发会话标签检测与过滤预览刷新
+    // 「重新扫描」按钮：手动触发会话标签检测与过滤预览刷新，带扫描中与完成反馈
     const rescanBtn = panel.querySelector('#novel_rescan_tags_btn');
     if (rescanBtn) {
         rescanBtn.addEventListener('click', () => {
-            renderTagTools();
+            const originalHtml = rescanBtn.innerHTML;
+            rescanBtn.disabled = true;
+            rescanBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 扫描中...';
+            setTimeout(() => {
+                const result = renderTagTools();
+                rescanBtn.disabled = false;
+                rescanBtn.innerHTML = originalHtml;
+                const scanSettings = getSettings();
+                if (scanSettings.show_toast !== false && window.toastr) {
+                    const total = (result && result.total) ? result.total : 0;
+                    window.toastr.info(
+                        total > 0 ? `扫描完成：共检测到 ${total} 个自定义标签` : '扫描完成：未检测到自定义标签',
+                        '会话标签检测',
+                        { timeOut: 2500 }
+                    );
+                }
+            }, 80);
+        });
+    }
+
+    // 「查看过滤效果预览」按钮 + 弹窗关闭（点遮罩 / 右上角 / Esc 键）
+    const previewBtn = panel.querySelector('#novel_preview_btn');
+    if (previewBtn) {
+        previewBtn.addEventListener('click', () => {
+            openFilterPreviewModal();
+        });
+    }
+    const modalOverlay = panel.querySelector('#novel_preview_modal');
+    if (modalOverlay) {
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) closeFilterPreviewModal();
+        });
+        const modalCloseBtn = modalOverlay.querySelector('#novel_modal_close');
+        if (modalCloseBtn) {
+            modalCloseBtn.addEventListener('click', () => closeFilterPreviewModal());
+        }
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeFilterPreviewModal();
         });
     }
 
