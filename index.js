@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.7.2',             // 扩展版本号
+    version: '1.7.3',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -657,6 +657,9 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
     }
 
     const mesSnippet = novelText.slice(0, 80);
+    // 存档内容摘要：写入提示里附带开头片段，方便用户核对归档的是哪一条回复
+    const previewSnippet = novelText.replace(/\n+/g, ' ').slice(0, 24);
+    const snippetSuffix = `：“${previewSnippet}${novelText.length > 24 ? '…' : ''}”`;
     // 判断是否为完全重复的内容（同一条消息且内容一模一样）
     if (
         lastSavedSignature.messageId === messageIndex &&
@@ -725,20 +728,20 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
                 window.toastr.info(`${sectionLabel}内容与前文重复，已略过`, '小说连载提示', { timeOut: 2500 });
             }
         } else if (res.is_regenerate || isRegenerate) {
-            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel}（重新生成已替换更新）`, targetFile);
+            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel}（重新生成已替换更新）${snippetSuffix}`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
-                throttledNovelSuccessToast(`${sectionLabel}${floorLabel}已更新为最新生成版本！`, '小说连载已更新', {
+                throttledNovelSuccessToast(`${sectionLabel}${floorLabel}已更新为最新生成版本${snippetSuffix}`, '小说连载已更新', {
                     timeOut: 3000,
                     preventDuplicates: true
                 });
             }
         } else {
             // 2. 更新完成提示（顶栏指示灯与面板卡片）
-            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel} 连载成功！`, targetFile);
+            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel} 连载成功！${snippetSuffix}`, targetFile);
 
             // 3. 屏幕 Toast 提示通知
             if (settings.show_toast !== false && window.toastr) {
-                throttledNovelSuccessToast(`${sectionLabel} · ${speakerName}${floorLabel} 已自动写入《${bookTitle}》`, '小说连载更新完成', {
+                throttledNovelSuccessToast(`${sectionLabel} · ${speakerName}${floorLabel} 已自动写入《${bookTitle}》${snippetSuffix}`, '小说连载更新完成', {
                     timeOut: 3500,
                     preventDuplicates: true
                 });
@@ -782,13 +785,29 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
     const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
     if (!chatLog || chatLog.length === 0) return;
 
+    // 解析目标楼层：仅当事件载荷是合法数组下标、且消息类型与事件匹配时才信任它；
+    // 否则回退到最近一条同类型消息（兼容不同 ST 版本的载荷语义、双触发、删除消息后的过期下标等边界）
     let messageIndex = -1;
+    let payloadIndex = -1;
     if (typeof messageIdOrData === 'number') {
-        messageIndex = messageIdOrData;
+        payloadIndex = messageIdOrData;
     } else if (messageIdOrData && typeof messageIdOrData.messageId === 'number') {
-        messageIndex = messageIdOrData.messageId;
-    } else {
-        messageIndex = chatLog.length - 1;
+        payloadIndex = messageIdOrData.messageId;
+    }
+    if (Number.isInteger(payloadIndex) && payloadIndex >= 0 && payloadIndex < chatLog.length) {
+        const target = chatLog[payloadIndex];
+        if (target && (isFromUser ? !!target.is_user : !target.is_user)) {
+            messageIndex = payloadIndex;
+        }
+    }
+    if (messageIndex < 0) {
+        for (let i = chatLog.length - 1; i >= 0; i--) {
+            const m = chatLog[i];
+            if (m && (isFromUser ? !!m.is_user : !m.is_user)) {
+                messageIndex = i;
+                break;
+            }
+        }
     }
 
     if (isFromUser && !settings.include_user_dialogue) {
