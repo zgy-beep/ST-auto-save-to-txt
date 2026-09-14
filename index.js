@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.7.1',             // 扩展版本号
+    version: '1.7.2',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -1110,6 +1110,51 @@ function closeFilterPreviewModal() {
     if (overlay) overlay.style.display = 'none';
 }
 
+/**
+ * 打开聊天时的连载状态提示：统计当前聊天的有效章节数，
+ * 顶栏即刻显示本书已有章节进度，并提示将从第 N+1 章继续（历史未同步时提醒可一键补全）
+ */
+function announceChatNovelStatus() {
+    const settings = getSettings();
+    if (!settings.enabled) return;
+
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    if (!chatLog || chatLog.length === 0) {
+        updateRecentStatus('idle', '当前聊天为空，收到 AI 回复后将自动开始连载');
+        return;
+    }
+
+    let chapterTotal = 0;
+    for (let i = 0; i < chatLog.length; i++) {
+        const m = chatLog[i];
+        if (!m) continue;
+        if (m.is_user && !settings.include_user_dialogue) continue;
+        if (getCleanedMessage(m, i, settings)) chapterTotal++;
+    }
+
+    recentStatus.chapter = chapterTotal;
+    const bookTitle = getBookTitle(settings);
+
+    // 顶栏指示灯：打开旧聊天立即显示本书进度（不依赖下一次写入）
+    const headerStatus = document.getElementById('novel_header_status');
+    if (headerStatus) {
+        headerStatus.innerHTML = chapterTotal > 0
+            ? `<span style="color: var(--SmartThemeEmColor, #2ecc71); font-weight: normal;"><i class="fa-solid fa-book-open"></i> 本书已 ${chapterTotal} 章</span>`
+            : `<span style="color: var(--SmartThemeEmColor, #2ecc71); font-weight: normal;"><i class="fa-solid fa-circle-check"></i> 连载就绪</span>`;
+    }
+
+    if (chapterTotal === 0) {
+        updateRecentStatus('idle', `《${bookTitle}》：当前聊天没有可连载的有效正文（可能被白/黑名单全部过滤）`);
+        return;
+    }
+
+    updateRecentStatus('idle', `《${bookTitle}》连载就绪：本聊天共 ${chapterTotal} 个有效章节，新回复将从第 ${chapterTotal + 1} 章开始${chapterTotal >= 3 ? '；若此前未同步过，点【同步历史连载】可一键补全全书' : ''}`);
+
+    if (settings.show_toast !== false && window.toastr) {
+        window.toastr.info(`《${bookTitle}》将从第 ${chapterTotal + 1} 章继续连载（已有 ${chapterTotal} 章）`, '小说连载', { timeOut: 4000 });
+    }
+}
+
 let tagScanTimer = null;
 function debouncedRenderTagTools(delay = 1000) {
     if (tagScanTimer) clearTimeout(tagScanTimer);
@@ -1965,14 +2010,17 @@ jQuery(async () => {
         }
 
         const refreshContext = () => {
-            seedLastSavedSignature();
             cleanTextCache.map.clear();
+            seedLastSavedSignature();
             renderTagTools();
             updateDrawerHeaderFileBadge();
         };
 
         if (event_types.CHAT_CHANGED) {
-            eventSource.on(event_types.CHAT_CHANGED, refreshContext);
+            eventSource.on(event_types.CHAT_CHANGED, () => {
+                refreshContext();
+                announceChatNovelStatus();
+            });
         }
         if (event_types.CHARACTER_PAGE_LOADED) {
             eventSource.on(event_types.CHARACTER_PAGE_LOADED, refreshContext);
