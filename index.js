@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.7.7',             // 扩展版本号
+    version: '1.7.8',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -418,7 +418,6 @@ function buildNovelText(settings, chatLog) {
     for (let i = 0; i < chatLog.length; i++) {
         const msg = chatLog[i];
         if (!msg) continue;
-        if (i === 0 && !msg.is_user) continue; // 角色问候语不入书（与逐章连载语义一致，防编号对撞）
         if (msg.is_user && !settings.include_user_dialogue) continue;
         const cleanMes = getCleanedMessage(msg, i, settings);
         if (!cleanMes) continue;
@@ -742,12 +741,11 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
         lastSavedSignature.mesSnippet !== mesSnippet
     );
 
-    // 精确计算有效章节序号（跳过被过滤为空白的消息与角色问候语，确保与全本同步序号 100% 一致）
+    // 精确计算有效章节序号（跳过被过滤为空白的消息，确保与全本同步序号 100% 一致）
     let chapterNumber = 0;
     for (let i = 0; i <= messageIndex; i++) {
         const m = chatLog[i];
         if (!m) continue;
-        if (i === 0 && !m.is_user) continue; // 角色问候语不入书、不参与编号
         if (m.is_user && !settings.include_user_dialogue) continue;
         const c = getCleanedMessage(m, i, settings);
         if (c) chapterNumber++;
@@ -843,6 +841,53 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
     }
 }
 
+// 已探测的服务端插件版本（问候语补写 is_greeting 需要服务端 ≥ 1.7.8 支持，旧服务端自动降级跳过）
+let serverPluginVersion = null;
+
+/**
+ * 问候语延迟入书：新开聊天时问候语不产生任何文件（看卡/调试零打扰）；
+ * 当用户发出第一条消息（会话恰好为 问候语+用户消息）时，把问候语作为第 1 章补写入书。
+ * 服务端对已存在内容的文件自动跳过——旧书不会重复写入，新书不会遗漏。
+ */
+async function ensureGreetingSerialized(settings, chatLog) {
+    if (!Array.isArray(chatLog) || chatLog.length !== 2) return;
+    if (serverPluginVersion && serverPluginVersion < '1.7.8') return;
+    const greeting = chatLog[0];
+    if (!greeting || greeting.is_user) return;
+    if (!chatLog[1] || !chatLog[1].is_user) return;
+    const novelText = cleanNovelText(greeting.mes || '', settings);
+    if (!novelText) return;
+
+    const speakerName = greeting.name || '旁白';
+    const bookTitle = getBookTitle(settings, speakerName);
+    const mesSnippet = novelText.slice(0, 80);
+    if (lastSavedSignature.messageId === 0 &&
+        lastSavedSignature.characterName === bookTitle &&
+        lastSavedSignature.mesSnippet === mesSnippet) {
+        return; // 已入书（例如缓冲模式先一步定稿）
+    }
+
+    const res = await postChapterToServer({
+        name: speakerName,
+        mes: novelText,
+        is_user: false,
+        characterName: bookTitle,
+        chapterNumber: 1,
+        chapterStyle: settings.chapter_style || 'numbered_floor',
+        save_dir: settings.save_dir || '',
+        is_regenerate: false,
+        is_greeting: true,
+        floor: 1
+    });
+
+    if (res && res.success && !res.skipped) {
+        lastSavedSignature = { messageId: 0, characterName: bookTitle, mesSnippet };
+        lastSettledSavedIndex = Math.max(lastSettledSavedIndex, 0);
+        recentStatus.chapter = Math.max(recentStatus.chapter, 1);
+        updateRecentStatus('success', `第 1 章 · ${speakerName} (原楼层: 1)（问候语已入书，连载正式开始）`, res.file || `${bookTitle}.txt`);
+    }
+}
+
 async function handleMessageSave(messageIdOrData, isFromUser = false) {
     const settings = getSettings();
     if (!settings.enabled) return;
@@ -873,6 +918,11 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
                 break;
             }
         }
+    }
+
+    if (isFromUser) {
+        // 用户发出第一条消息 = 真正开始对话：先把角色问候语作为第 1 章补写入书
+        await ensureGreetingSerialized(settings, chatLog);
     }
 
     if (isFromUser && !settings.include_user_dialogue) {
@@ -1232,13 +1282,10 @@ function announceChatNovelStatus() {
         return;
     }
 
-    // 角色问候语不参与连载与计数（与跳过 first_message 事件的语义保持一致）
-    const isGreetingOnly = chatLog.length === 1 && !!chatLog[0] && !chatLog[0].is_user;
     let chapterTotal = 0;
     for (let i = 0; i < chatLog.length; i++) {
         const m = chatLog[i];
         if (!m) continue;
-        if (i === 0 && !m.is_user) continue; // 跳过角色问候语
         if (m.is_user && !settings.include_user_dialogue) continue;
         if (getCleanedMessage(m, i, settings)) chapterTotal++;
     }
@@ -1255,9 +1302,7 @@ function announceChatNovelStatus() {
     }
 
     if (chapterTotal === 0) {
-        updateRecentStatus('idle', isGreetingOnly
-            ? '当前为角色问候语，尚未开始对话——您发出第一条消息、AI 首次回复时将自动开始连载'
-            : `《${bookTitle}》：当前聊天没有可连载的有效正文（可能被白/黑名单全部过滤）`);
+        updateRecentStatus('idle', `《${bookTitle}》：当前聊天没有可连载的有效正文（可能被白/黑名单全部过滤）`);
         return;
     }
 
@@ -1318,6 +1363,11 @@ async function renderSettingsUI(cachedStatus = null) {
     }
 
     const status = cachedStatus || await checkServerPluginStatus();
+
+    // 记录服务端插件版本（问候语补写等能力按版本门控）
+    if (status.ready) {
+        serverPluginVersion = status.version || serverPluginVersion;
+    }
 
     // 如果服务端已就绪且非用户刻意主动关闭，全自动激活开启连载状态
     if (status.ready && !settings.enabled && !settings.userDisabled) {
@@ -2059,6 +2109,10 @@ jQuery(async () => {
         bootStatus = await checkServerPluginStatus();
     } catch (e) {
         console.warn('[AutoSaveTxt] 启动探针检测异常:', e);
+    }
+
+    if (bootStatus.ready) {
+        serverPluginVersion = bootStatus.version || null;
     }
 
     // 如果服务端未就绪，强制将 enabled 置为 false，防止产生 404 网络请求

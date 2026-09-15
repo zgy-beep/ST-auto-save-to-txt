@@ -1,5 +1,5 @@
 /**
- * SillyTavern 聊天小说连载阅读服务端插件 (v1.7.0)
+ * SillyTavern 聊天小说连载阅读服务端插件 (v1.7.8)
  * 
  * 文件路径：plugins/auto-save/index.js
  * 
@@ -243,7 +243,7 @@ async function init(router) {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.7.0',
+            version: '1.7.8',
             logsDir: LOGS_DIR
         });
     });
@@ -255,7 +255,7 @@ async function init(router) {
                 return res.status(400).json({ error: '无效请求' });
             }
 
-            const { name, mes, is_user, characterName, chapterNumber, chapterStyle, save_dir, is_regenerate, floor } = body;
+            const { name, mes, is_user, characterName, chapterNumber, chapterStyle, save_dir, is_regenerate, floor, is_greeting } = body;
 
             if (!mes || typeof mes !== 'string') {
                 return res.status(400).json({ error: '正文内容不能为空' });
@@ -285,6 +285,15 @@ async function init(router) {
             const result = await runInFileQueue(targetFilePath, async () => {
                 const stat = await fs.promises.stat(targetFilePath).catch(() => null);
                 const isNewFile = !stat || stat.size === 0;
+
+                // 问候语补写模式：小说已有内容（含旧版已写入问候语的书）直接跳过绝不重复；全新文件则作为第 1 章写入
+                if (is_greeting && !isNewFile) {
+                    return {
+                        skipped: true,
+                        reason: '小说已有内容，问候语无需补写',
+                        file: path.relative(process.cwd(), targetFilePath)
+                    };
+                }
 
                 // 非新建且非重新生成模式下，检查末尾防重（结合章节序号精确防误杀）
                 if (!isNewFile && !is_regenerate) {

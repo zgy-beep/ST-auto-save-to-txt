@@ -66,7 +66,7 @@ async function runTests() {
     try {
         // 测试 0: 服务端健康状态探针 (/status)
         const res0 = await router.dispatch('GET', '/status', {});
-        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.7.0', '测试 0: 服务端状态探针正常响应且版本为 1.7.0');
+        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.7.8', '测试 0: 服务端状态探针正常响应且版本为 1.7.8');
 
         const testChar = '我的仙侠传奇';
         const testPayload1 = {
@@ -224,6 +224,28 @@ async function runTests() {
         const hugeText = '超大篇幅测试'.repeat(20000);
         const resHuge = await router.dispatch('POST', '/append', { name: '测试', mes: hugeText, characterName: '超大测试' });
         assert(resHuge.status === 413, '测试 9: 超出 100KB 限制被安全拦截 (HTTP 413)');
+
+        // 测试 10: 问候语补写（is_greeting）：全新文件作为第 1 章写入；已有内容的文件自动跳过（旧书绝不重复）
+        const greetChar = '问候语补写测试';
+        const greetFile = path.join(logsDir, `${greetChar}.txt`);
+        const resG1 = await router.dispatch('POST', '/append', {
+            name: '艾莉丝', mes: '　　夜色如墨，故事从这里开始。', is_user: false,
+            characterName: greetChar, chapterNumber: 1, chapterStyle: 'numbered_floor', floor: 1, is_greeting: true
+        });
+        assert(resG1.status === 200 && resG1.data.success === true && resG1.data.skipped !== true, '测试 10.1: 问候语成功写入全新文件（第 1 章）');
+        const resG2 = await router.dispatch('POST', '/append', {
+            name: '艾莉丝', mes: '　　第二段剧情。', is_user: false,
+            characterName: greetChar, chapterNumber: 2, chapterStyle: 'numbered_floor', floor: 3
+        });
+        assert(resG2.status === 200 && resG2.data.success === true, '测试 10.2: 问候语之后的章节正常续写（第 2 章）');
+        const resG3 = await router.dispatch('POST', '/append', {
+            name: '艾莉丝', mes: '　　夜色如墨，故事从这里开始。', is_user: false,
+            characterName: greetChar, chapterNumber: 1, chapterStyle: 'numbered_floor', floor: 1, is_greeting: true
+        });
+        assert(resG3.status === 200 && resG3.data.skipped === true, '测试 10.3: 已有内容的文件补写问候语被自动跳过（旧书绝不重复）');
+        const greetContent = fs.readFileSync(greetFile, 'utf8');
+        assert(greetContent.includes('第 1 章 · 艾莉丝 (原楼层: 1)') && greetContent.includes('第 2 章 · 艾莉丝 (原楼层: 3)'), '测试 10.4: 问候语第 1 章与后续章节编号完整正确');
+        if (fs.existsSync(greetFile)) fs.unlinkSync(greetFile);
 
         // 清理测试文件
         if (fs.existsSync(filePath1)) fs.unlinkSync(filePath1);
