@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.7.6',             // 扩展版本号
+    version: '1.7.7',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -418,6 +418,7 @@ function buildNovelText(settings, chatLog) {
     for (let i = 0; i < chatLog.length; i++) {
         const msg = chatLog[i];
         if (!msg) continue;
+        if (i === 0 && !msg.is_user) continue; // 角色问候语不入书（与逐章连载语义一致，防编号对撞）
         if (msg.is_user && !settings.include_user_dialogue) continue;
         const cleanMes = getCleanedMessage(msg, i, settings);
         if (!cleanMes) continue;
@@ -686,6 +687,7 @@ async function checkAndSaveBufferedTurn(settings, chatLog) {
     for (let i = chatLog.length - 2; i >= 0; i--) {
         const m = chatLog[i];
         if (!m) continue;
+        if (i === 0 && !m.is_user) continue; // 角色问候语不入书
         if (m.is_user && !settings.include_user_dialogue) continue;
         const clean = getCleanedMessage(m, i, settings);
         if (!clean) continue;
@@ -740,11 +742,12 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
         lastSavedSignature.mesSnippet !== mesSnippet
     );
 
-    // 精确计算有效章节序号（跳过被过滤为空白的消息，确保与全本同步序号 100% 一致）
+    // 精确计算有效章节序号（跳过被过滤为空白的消息与角色问候语，确保与全本同步序号 100% 一致）
     let chapterNumber = 0;
     for (let i = 0; i <= messageIndex; i++) {
         const m = chatLog[i];
         if (!m) continue;
+        if (i === 0 && !m.is_user) continue; // 角色问候语不入书、不参与编号
         if (m.is_user && !settings.include_user_dialogue) continue;
         const c = getCleanedMessage(m, i, settings);
         if (c) chapterNumber++;
@@ -1229,10 +1232,13 @@ function announceChatNovelStatus() {
         return;
     }
 
+    // 角色问候语不参与连载与计数（与跳过 first_message 事件的语义保持一致）
+    const isGreetingOnly = chatLog.length === 1 && !!chatLog[0] && !chatLog[0].is_user;
     let chapterTotal = 0;
     for (let i = 0; i < chatLog.length; i++) {
         const m = chatLog[i];
         if (!m) continue;
+        if (i === 0 && !m.is_user) continue; // 跳过角色问候语
         if (m.is_user && !settings.include_user_dialogue) continue;
         if (getCleanedMessage(m, i, settings)) chapterTotal++;
     }
@@ -1249,7 +1255,9 @@ function announceChatNovelStatus() {
     }
 
     if (chapterTotal === 0) {
-        updateRecentStatus('idle', `《${bookTitle}》：当前聊天没有可连载的有效正文（可能被白/黑名单全部过滤）`);
+        updateRecentStatus('idle', isGreetingOnly
+            ? '当前为角色问候语，尚未开始对话——您发出第一条消息、AI 首次回复时将自动开始连载'
+            : `《${bookTitle}》：当前聊天没有可连载的有效正文（可能被白/黑名单全部过滤）`);
         return;
     }
 
@@ -2077,7 +2085,13 @@ jQuery(async () => {
     seedLastSavedSignature();
 
     if (eventSource && event_types) {
-        eventSource.on(event_types.MESSAGE_RECEIVED, (data) => {
+        eventSource.on(event_types.MESSAGE_RECEIVED, (data, genType) => {
+            // 角色问候语（新开聊天 / 重新生成问候语 / 加载仅含问候的聊天）不触发连载：
+            // 等用户真正发出第一条消息、AI 首次回复时才正式开书写第 1 章
+            if (genType === 'first_message') {
+                updateDrawerHeaderFileBadge();
+                return;
+            }
             handleMessageSave(data, false);
             updateDrawerHeaderFileBadge();
             debouncedRenderTagTools();
@@ -2094,6 +2108,12 @@ jQuery(async () => {
                 const settings = getSettings();
                 if (settings.buffer_latest_message) {
                     updateRecentStatus('idle', '草稿缓冲中（所选分支将在开启下一轮对话时定稿入书）');
+                    return;
+                }
+                // 角色问候语的滑动/重新生成同样不入书：连载只从真实对话开始
+                const swipeChat = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+                if (data === 0 && swipeChat[0] && !swipeChat[0].is_user) {
+                    updateDrawerHeaderFileBadge();
                     return;
                 }
                 handleMessageSave(data, false);
