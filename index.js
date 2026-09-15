@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.7.8',             // 扩展版本号
+    version: '1.7.9',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -62,7 +62,7 @@ let lastSettledSavedIndex = -1; // 记录最近已定稿落盘入书的最高楼
 
 let recentStatus = {
     state: 'idle', // 'idle' | 'updating' | 'success' | 'skipped' | 'error'
-    text: '连载服务就绪（收到 AI 回复将自动排版写入）',
+    text: '连载服务就绪（开始对话后将自动逐章写入小说）',
     time: '',
     file: '',
     chapter: 0 // 最近成功写入的章节序号（进度感知：顶栏显示"已连载第 N 章"）
@@ -788,12 +788,12 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
         if (res.skipped) {
             updateRecentStatus('skipped', `${sectionLabel}末尾内容重复，已自动略过写入`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
-                window.toastr.info(`${sectionLabel}内容与前文重复，已略过`, '小说连载提示', { timeOut: 2500 });
+                window.toastr.info(`${sectionLabel}内容与前文重复，已略过`, '小说连载', { timeOut: 2500 });
             }
         } else if (res.is_regenerate || isRegenerate) {
             updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel}（重新生成已替换更新）${snippetSuffix}`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
-                throttledNovelSuccessToast(`${sectionLabel}${floorLabel}已更新为最新生成版本${snippetSuffix}`, '小说连载已更新', {
+                throttledNovelSuccessToast(`${sectionLabel}${floorLabel}已更新为最新生成版本${snippetSuffix}`, '小说连载', {
                     timeOut: 3000,
                     preventDuplicates: true
                 });
@@ -804,7 +804,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
 
             // 3. 屏幕 Toast 提示通知
             if (settings.show_toast !== false && window.toastr) {
-                throttledNovelSuccessToast(`${sectionLabel} · ${speakerName}${floorLabel} 已自动写入《${bookTitle}》${snippetSuffix}`, '小说连载更新完成', {
+                throttledNovelSuccessToast(`${sectionLabel} · ${speakerName}${floorLabel} 已自动写入《${bookTitle}》${snippetSuffix}`, '小说连载', {
                     timeOut: 3500,
                     preventDuplicates: true
                 });
@@ -822,8 +822,8 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
 
             if (settings.show_toast !== false && window.toastr) {
                 window.toastr.warning(
-                    '未检测到服务端插件 (HTTP 404)，已自动为您取消勾选连载，防止频繁报错。您可以随时使用【导出整本小说 TXT】一键下载，或参考指引安装插件。',
-                    '连载功能已自动暂停',
+                    '未检测到服务端插件 (HTTP 404)，已自动为您取消勾选连载，防止频繁报错。您可以随时使用【导出整本 TXT】一键下载，或参考下方指引部署插件。',
+                    '小说连载',
                     { timeOut: 6000, preventDuplicates: true }
                 );
             }
@@ -834,7 +834,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
         updateRecentStatus('error', `${sectionLabel}写入失败: ${errMsg}`);
 
         if (settings.show_toast !== false && window.toastr) {
-            window.toastr.warning(`${sectionLabel}自动连载失败: ${errMsg}`, '小说连载更新失败', {
+            window.toastr.warning(`${sectionLabel}自动连载失败: ${errMsg}`, '小说连载', {
                 timeOut: 4500
             });
         }
@@ -942,7 +942,7 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
         const latestMsg = chatLog[chatLog.length - 1];
         if (latestMsg) {
             const speaker = latestMsg.name || (latestMsg.is_user ? '你' : '旁白');
-            updateRecentStatus('idle', `草稿缓冲中 (#${chatLog.length}) · ${speaker}（随时可 Roll 点/修改，下一轮对话推进时定稿入书）`);
+            updateRecentStatus('idle', `草稿缓冲中 · ${speaker} 的最新回复暂未入书（可随意 Roll 点/修改，你发送下一条消息后定稿）`);
         }
         return;
     }
@@ -1004,7 +1004,7 @@ async function executeSyncAll(isSilent = false) {
     if (!isSilent) {
         updateRecentStatus('updating', '正在编排全量历史章节并同步至连载文件...');
         if (settings.show_toast !== false && window.toastr) {
-            window.toastr.info('正在编排历史聊天并写入连载文件...', '小说连载更新中', { timeOut: 2000 });
+            window.toastr.info('正在编排历史聊天并写入连载文件...', '小说连载', { timeOut: 2000 });
         }
     }
 
@@ -1047,7 +1047,7 @@ async function executeSyncAll(isSilent = false) {
             if (!isSilent) {
                 updateRecentStatus('success', `全书共 ${chapterCount} 个章节已完整同步！`, targetFile);
                 if (window.toastr) {
-                    window.toastr.success(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！后续 AI 回复将接着往后连载。`, '小说连载更新完成');
+                    window.toastr.success(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！后续 AI 回复将接着往后连载。`, '小说连载');
                 } else {
                     alert(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！`);
                 }
@@ -1059,7 +1059,7 @@ async function executeSyncAll(isSilent = false) {
             const errMsg = errData.error || `HTTP ${response.status}`;
             if (!isSilent) {
                 updateRecentStatus('error', `同步失败: ${errMsg}`);
-                if (window.toastr) window.toastr.error(`同步失败: ${errMsg}`, '小说连载更新失败');
+                if (window.toastr) window.toastr.error(`同步失败: ${errMsg}`, '小说连载');
             } else {
                 console.warn('[AutoSaveTxt] 自动校准同步失败:', errMsg);
             }
@@ -1067,7 +1067,7 @@ async function executeSyncAll(isSilent = false) {
     } catch (err) {
         if (!isSilent) {
             updateRecentStatus('error', `同步异常: ${err.message}`);
-            if (window.toastr) window.toastr.error(`同步异常: ${err.message}`, '小说连载更新失败');
+            if (window.toastr) window.toastr.error(`同步异常: ${err.message}`, '小说连载');
         } else {
             console.warn('[AutoSaveTxt] 自动校准同步异常:', err);
         }
@@ -1234,8 +1234,8 @@ function renderFilterPreview() {
     };
     if (statEl) {
         statEl.textContent = (cleaned
-            ? `原文 ${raw.length} 字 → 过滤后 ${cleaned.length} 字`
-            : '过滤后无正文（点击查看详情）') + (isDraft ? ' · 草稿未定稿' : '');
+            ? `原始内容 ${raw.length} 字符（含标签标记）→ 入书正文 ${cleaned.length} 字`
+            : '过滤后无正文（点开查看原因）') + (isDraft ? ' · 草稿未定稿' : '');
     }
 }
 
@@ -1249,7 +1249,7 @@ function openFilterPreviewModal() {
     const stat = document.getElementById('novel_modal_stat');
     if (stat) {
         stat.textContent = lastFilterPreview.cleaned
-            ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor}${lastFilterPreview.isDraft ? '（草稿未定稿）' : ''} ｜ 原文 ${lastFilterPreview.rawLength} 字 → 过滤后 ${lastFilterPreview.cleaned.length} 字`
+            ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor}${lastFilterPreview.isDraft ? '（草稿未定稿）' : ''} ｜ 原始 ${lastFilterPreview.rawLength} 字符 → 入书 ${lastFilterPreview.cleaned.length} 字`
             : (lastFilterPreview.speaker ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor}${lastFilterPreview.isDraft ? '（草稿未定稿）' : ''}` : '');
     }
     if (body) {
@@ -1258,7 +1258,7 @@ function openFilterPreviewModal() {
             : '';
         body.innerHTML = warnHtml + (lastFilterPreview.cleaned
             ? escapeHtml(lastFilterPreview.cleaned).replace(/\n/g, '<br>')
-            : '<div class="novel-tag-empty" style="color: #f39c12;">过滤后无正文，请检查白名单配置（白名单填错会导致提取不到内容）</div>');
+            : '<div class="novel-tag-empty" style="color: #f39c12;">过滤后无正文可入书——请检查白名单拼写，或确认正文是否被黑名单全部剔除。</div>');
     }
     overlay.style.display = 'flex';
 }
@@ -1278,7 +1278,7 @@ function announceChatNovelStatus() {
 
     const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
     if (!chatLog || chatLog.length === 0) {
-        updateRecentStatus('idle', '当前聊天为空，收到 AI 回复后将自动开始连载');
+        updateRecentStatus('idle', '当前聊天为空，发送第一条消息后将自动开书连载');
         return;
     }
 
@@ -1463,10 +1463,10 @@ async function renderSettingsUI(cachedStatus = null) {
                         <option value="numbered_floor" ${settings.chapter_style !== 'numbered' && settings.chapter_style !== 'separator' && settings.chapter_style !== 'dialogue' ? 'selected' : ''}>第 X 章 · 角色名 (原楼层: Y)（默认推荐：带楼层标记，方便快速定位排查问题）</option>
                         <option value="numbered" ${settings.chapter_style === 'numbered' ? 'selected' : ''}>第 X 节 · 角色名（纯净小说目录，无楼层）</option>
                         <option value="separator" ${settings.chapter_style === 'separator' ? 'selected' : ''}>优雅分割线（* * * 散文小说连续阅读）</option>
-                        <option value="dialogue" ${settings.chapter_style === 'dialogue' ? 'selected' : ''}>纯净戏剧体（角色名: 正文）</option>
+                        <option value="dialogue" ${settings.chapter_style === 'dialogue' ? 'selected' : ''}>【角色名】正文（纯净戏剧体，无章节号）</option>
                     </select>
                     <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                        切换后仅对<b>新写入章节</b>生效；想让已写内容统一为新样式，切换后点一次【同步历史连载】即可全书重写。
+                        切换后仅对<b>新写入章节</b>生效；想让已写内容统一为新样式，点一次【同步历史连载】即可全书重写。「原楼层」= 聊天记录中从上到下的消息序号（含问候语与你的发言），与酒馆界面楼层一致。
                     </small>
                 </div>
 
@@ -1511,7 +1511,7 @@ async function renderSettingsUI(cachedStatus = null) {
                     </div>
                     <div id="novel_tag_chips" class="novel-tag-chip-list"></div>
                     <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                        点「白」= 只保留该标签内的正文；点「黑」= 彻底剔除该标签块；再次点击可移除；两侧互斥。
+                        点「白」= 只保留该标签内的正文；点「黑」= 彻底剔除该标签块；再次点击可移除；两侧互斥；鼠标悬浮标签可预览其最新内容。
                     </small>
                 </div>
 
@@ -1561,7 +1561,7 @@ async function renderSettingsUI(cachedStatus = null) {
                     <span class="novel-label">指定保存文件夹（可选）：</span>
                     <input type="text" id="novel_save_dir" class="text_pole" value="${settings.save_dir || ''}" placeholder="留空默认存至 plugins/auto-save/logs；填写服务端有效目录" />
                     <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                        此处为<b>服务端（运行酒馆的机器）</b>上的保存目录。<span style="color: #f39c12;">注意：若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 <code>D:\</code>）；</span>如需在本机阅读，可留空并点击下方<b>【导出整本小说 TXT】</b>直接下载，或使用 Syncthing 自动双向同步。
+                        此处为<b>服务端（运行酒馆的机器）</b>上的保存目录。<span style="color: #f39c12;">注意：若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 <code>D:\</code>）；</span>如需在本机阅读，可留空并点击下方<b>【导出整本 TXT】</b>直接下载，或使用 Syncthing 自动双向同步。
                     </small>
                 </div>
 
@@ -1629,11 +1629,11 @@ async function renderSettingsUI(cachedStatus = null) {
                 }, 1200);
             }
             if (window.toastr) {
-                window.toastr.info(`连载文件路径已复制：<br><code>${fullPath}</code>`, '当前连载文件', { timeOut: 3500 });
+                window.toastr.info(`连载文件路径已复制：<br><code>${fullPath}</code>`, '小说连载', { timeOut: 3500 });
             }
         } catch (err) {
             if (window.toastr) {
-                window.toastr.info(`当前连载文件：${fullPath}`, '连载文件路径');
+                window.toastr.info(`当前连载文件：${fullPath}`, '小说连载');
             }
         }
     };
@@ -1683,8 +1683,8 @@ async function renderSettingsUI(cachedStatus = null) {
                         if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
                         if (window.toastr) {
                             window.toastr.warning(
-                                '服务端插件未就绪（未安装或未启动），已自动取消勾选（防止 404 报错）。您可以直接点击下方【导出整本小说 TXT】下载，或参考下方指引部署插件。',
-                                '连载服务未就绪',
+                                '服务端插件未就绪（未安装或未启动），已自动取消勾选（防止 404 报错）。您可以直接点击下方【导出整本 TXT】下载，或参考下方指引部署插件。',
+                                '小说连载',
                                 { timeOut: 5500 }
                             );
                         }
@@ -1882,20 +1882,20 @@ async function renderSettingsUI(cachedStatus = null) {
                     const targetText = res.file || (settings.save_dir ? settings.save_dir : 'plugins/auto-save/logs/');
                     updateRecentStatus('success', '试读章节已连载成功！', targetText);
                     if (settings.show_toast !== false && window.toastr) {
-                        window.toastr.success(`试读章节已连载！文件：${targetText}`, '小说连载更新完成');
+                        window.toastr.success(`试读章节已连载！文件：${targetText}`, '小说连载');
                     } else if (!window.toastr) {
                         alert(`试读章节已连载！文件：${targetText}`);
                     }
                 } else {
-                    updateRecentStatus('error', '试读章节写入失败，请检查服务插件');
+                    updateRecentStatus('error', '试读章节写入失败，请检查服务端插件');
                     if (settings.show_toast !== false && window.toastr) {
-                        window.toastr.error('试写失败，请确认服务端插件已启动。', '小说连载更新失败');
+                        window.toastr.error('试写失败，请确认服务端插件已启动。', '小说连载');
                     }
                 }
             } catch (err) {
                 updateRecentStatus('error', `试写异常: ${err.message}`);
                 if (settings.show_toast !== false && window.toastr) {
-                    window.toastr.error(`试写异常: ${err.message}`, '小说连载更新失败');
+                    window.toastr.error(`试写异常: ${err.message}`, '小说连载');
                 }
             } finally {
                 testBtn.disabled = false;
@@ -1937,7 +1937,7 @@ async function renderSettingsUI(cachedStatus = null) {
             <i class="fa-solid fa-triangle-exclamation"></i>
             <div class="novel-alert-text">
                 <b>未检测到服务端插件：</b>已自动取消勾选自动连载（防止产生网络 404 错误）。<br>
-                您可参考下方<b>方案一（一键命令自动部署）</b>或<b>方案二（手动复制保底）</b>进行部署，亦可直接使用<b>【📥 导出整本小说 TXT】</b>零配置打包下载。
+                您可参考下方<b>方案一（一键命令自动部署）</b>或<b>方案二（手动复制保底）</b>进行部署，亦可直接使用<b>【导出整本 TXT】</b>零配置打包下载。
             </div>
         `;
 
@@ -1956,7 +1956,7 @@ async function renderSettingsUI(cachedStatus = null) {
                         <i class="fa-solid fa-circle-check" style="color: #2ecc71;"></i>
                         <b>即开即用：零配置直接导出（推荐）</b>
                     </div>
-                    无需配置服务器或 Docker 挂载！随时点击下方<b>【📥 导出整本小说 TXT】</b>，浏览器可直接排版、生成带楼层/目录的完整小说并一键下载，零门槛、零网络报错！
+                    无需配置服务器或 Docker 挂载！随时点击下方<b>【导出整本 TXT】</b>，浏览器可直接排版、生成带楼层/目录的完整小说并一键下载，零门槛、零网络报错！
                 </div>
 
                 <!-- 方案一：一键脚本自动部署 -->
@@ -2161,7 +2161,7 @@ jQuery(async () => {
             eventSource.on(event_types.MESSAGE_SWIPED, (data) => {
                 const settings = getSettings();
                 if (settings.buffer_latest_message) {
-                    updateRecentStatus('idle', '草稿缓冲中（所选分支将在开启下一轮对话时定稿入书）');
+                    updateRecentStatus('idle', '草稿缓冲中（所选分支将在你发送下一条消息后定稿入书）');
                     return;
                 }
                 // 角色问候语的滑动/重新生成同样不入书：连载只从真实对话开始
