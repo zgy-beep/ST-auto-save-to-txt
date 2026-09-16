@@ -22,3 +22,6 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# 本地临时文件（截图/草稿等，绝不上传 GitHub）
+temp/
