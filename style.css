@@ -671,12 +671,12 @@
 }
 
 /* ==================== 可读性提升（标签醒目 / 说明弱化 / 字号上调） ==================== */
-/* 标签：加粗、字号到位 —— 颜色继承酒馆主题默认文本色（不再强制灰色变量），与下方灰化说明文本形成鲜明层次 */
+/* 标签（重点级）：主题全色 + 加粗，与正文/解释说明拉开层次 */
 .novel-label {
     font-size: 13px;
-    font-weight: 600;
-    color: inherit;
-    letter-spacing: 0.2px;
+    font-weight: 700;
+    color: var(--SmartThemeEmColor, #eee);
+    letter-spacing: 0.3px;
 }
 
 /* 整体字号上调一档：面板上大量 11px 小字统一提升至 12-14px */
@@ -699,11 +699,11 @@
 .novel-modal-body { font-size: 14px; }
 .novel-preview-stat { font-size: 12px; }
 
-/* 说明小字（内联 11px 样式由 !important 统一接管）：更大、更柔和的行高，弱化处理 */
+/* 说明小字（解释级）：明显更小更灰（内联样式由 !important 统一接管），与重点级标签拉开差距 */
 #auto-save-to-txt-settings small {
-    font-size: 12px !important;
-    opacity: 0.85 !important;
-    line-height: 1.55 !important;
+    font-size: 11px !important;
+    opacity: 0.6 !important;
+    line-height: 1.5 !important;
 }
 
 /* 会话标签 chip 悬浮提示：展示标签块内的实际内容（最新一次，不可滚动，超长截断），快速判断是否保留 */
@@ -733,8 +733,9 @@
 
 
 /* ==================== UI v1.8.0：分区布局 / 状态聚合 / 按钮层级 ==================== */
+/* v1.8.1 文字三级层级：重点全色加粗 / 正文默认 / 解释缩小灰化 */
 .novel-section { display: flex; flex-direction: column; gap: 8px; }
-.novel-section-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; opacity: 0.7; }
+.novel-section-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; opacity: 0.95; }
 .novel-section-title i { color: var(--SmartThemeQuoteColor, #3498db); }
 .novel-section + .novel-section { border-top: 1px solid rgba(255, 255, 255, 0.07); padding-top: 12px; }
 .novel-toggle-row { display: flex; gap: 16px; flex-wrap: wrap; }
