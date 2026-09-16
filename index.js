@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.7.9',             // 扩展版本号
+    version: '1.8.0',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -68,49 +68,50 @@ let recentStatus = {
     chapter: 0 // 最近成功写入的章节序号（进度感知：顶栏显示"已连载第 N 章"）
 };
 
+// 顶栏书名截断（折叠态空间狭小，超长书名省略）
+function shortBookTitle(title) {
+    const t = String(title || '');
+    return t.length > 14 ? t.slice(0, 14) + '…' : t;
+}
+
 function updateRecentStatus(state, text, file = '') {
     recentStatus.state = state;
     recentStatus.text = text;
     recentStatus.time = new Date().toLocaleTimeString();
     if (file) recentStatus.file = file;
 
-    // 更新面板顶栏标题右侧小指示灯（无论抽屉是否展开均可见）
+    // 顶栏状态灯（折叠抽屉时依然可见）
     const headerStatus = document.getElementById('novel_header_status');
     if (headerStatus) {
         if (state === 'updating') {
-            headerStatus.innerHTML = `<span style="color: var(--SmartThemeQuoteColor, #3498db); font-weight: normal;"><i class="fa-solid fa-spinner fa-spin"></i> 连载更新中...</span>`;
+            headerStatus.innerHTML = '<span class="novel-header-state is-updating"><i class="fa-solid fa-spinner fa-spin"></i> 连载中...</span>';
         } else if (state === 'success') {
-            headerStatus.innerHTML = `<span style="color: var(--SmartThemeEmColor, #2ecc71); font-weight: normal;"><i class="fa-solid fa-circle-check"></i> 已连载${recentStatus.chapter > 0 ? '第 ' + recentStatus.chapter + ' 章 ·' : ''} ${recentStatus.time}</span>`;
+            headerStatus.innerHTML = `<span class="novel-header-state is-success"><i class="fa-solid fa-circle-check"></i> 已连载${recentStatus.chapter > 0 ? ' ' + recentStatus.chapter + ' 章 ·' : ''} ${recentStatus.time}</span>`;
         } else if (state === 'skipped') {
-            headerStatus.innerHTML = `<span style="color: #f39c12; font-weight: normal;"><i class="fa-solid fa-circle-info"></i> 已跳过</span>`;
+            headerStatus.innerHTML = '<span class="novel-header-state is-skipped"><i class="fa-solid fa-circle-info"></i> 已跳过</span>';
         } else if (state === 'error') {
-            headerStatus.innerHTML = `<span style="color: #e74c3c; font-weight: normal;"><i class="fa-solid fa-circle-exclamation"></i> 连载失败</span>`;
+            headerStatus.innerHTML = '<span class="novel-header-state is-error"><i class="fa-solid fa-circle-exclamation"></i> 连载失败</span>';
         }
     }
 
-    // 更新抽屉内部的状态卡片
+    // 书卡内的连载状态行（连通性与最近动态聚合）
     const detailEl = document.getElementById('novel_recent_detail');
     const timeEl = document.getElementById('novel_recent_time');
-    const cardEl = document.getElementById('novel_recent_status');
-
-    if (detailEl && timeEl && cardEl) {
+    const lineEl = document.getElementById('novel_recent_status');
+    if (detailEl && timeEl && lineEl) {
         timeEl.textContent = recentStatus.time;
+        const stateClass = { updating: 'is-updating', success: 'is-success', skipped: 'is-skipped', error: 'is-error' }[state] || 'is-idle';
+        lineEl.className = 'novel-status-line ' + stateClass;
+        const fileHtml = recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${recentStatus.file}</code></div>` : '';
         if (state === 'updating') {
-            cardEl.style.borderColor = 'var(--SmartThemeQuoteColor, #3498db)';
-            detailEl.innerHTML = `<span style="color: var(--SmartThemeQuoteColor, #3498db);"><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${text}</span>`;
+            detailEl.innerHTML = `<span><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${text}</span>`;
         } else if (state === 'success') {
-            cardEl.style.borderColor = 'var(--SmartThemeEmColor, #2ecc71)';
-            detailEl.innerHTML = `<span style="color: var(--SmartThemeEmColor, #2ecc71);"><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${text}</span>` + 
-                (recentStatus.file ? `<div style="margin-top: 3px; font-size: 11px; opacity: 0.85;">文件路径：<code>${recentStatus.file}</code></div>` : '');
+            detailEl.innerHTML = `<span><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${text}</span>${fileHtml}`;
         } else if (state === 'skipped') {
-            cardEl.style.borderColor = '#f39c12';
-            detailEl.innerHTML = `<span style="color: #f39c12;"><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${text}</span>` +
-                (recentStatus.file ? `<div style="margin-top: 3px; font-size: 11px; opacity: 0.85;">文件路径：<code>${recentStatus.file}</code></div>` : '');
+            detailEl.innerHTML = `<span><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${text}</span>${fileHtml}`;
         } else if (state === 'error') {
-            cardEl.style.borderColor = '#e74c3c';
-            detailEl.innerHTML = `<span style="color: #e74c3c;"><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${text}</span>`;
+            detailEl.innerHTML = `<span><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${text}</span>`;
         } else {
-            cardEl.style.borderColor = 'var(--SmartThemeEmColor, #2ecc71)';
             detailEl.innerHTML = `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${text}`;
         }
     }
@@ -1297,8 +1298,8 @@ function announceChatNovelStatus() {
     const headerStatus = document.getElementById('novel_header_status');
     if (headerStatus) {
         headerStatus.innerHTML = chapterTotal > 0
-            ? `<span style="color: var(--SmartThemeEmColor, #2ecc71); font-weight: normal;"><i class="fa-solid fa-book-open"></i> 本书已 ${chapterTotal} 章</span>`
-            : `<span style="color: var(--SmartThemeEmColor, #2ecc71); font-weight: normal;"><i class="fa-solid fa-circle-check"></i> 连载就绪</span>`;
+            ? `<span class="novel-header-state is-success"><i class="fa-solid fa-book-open"></i> 《${escapeHtml(shortBookTitle(bookTitle))}》已 ${chapterTotal} 章</span>`
+            : '<span class="novel-header-state is-success"><i class="fa-solid fa-circle-check"></i> 连载就绪</span>';
     }
 
     if (chapterTotal === 0) {
@@ -1387,7 +1388,7 @@ async function renderSettingsUI(cachedStatus = null) {
     panel.id = 'auto-save-to-txt-settings';
     panel.className = 'inline-drawer';
 
-    // 默认折叠，顶栏极简整洁（与酒馆原生抽屉 1:1 一致），书名置顶沉淀于展开内容首位
+    // 默认折叠，顶栏极简整洁（与酒馆原生抽屉 1:1 一致）；展开后为四分区信息架构：开关置顶，依次为 当前连载 / 正文过滤 / 排版与行为 / 文件与导出
     panel.innerHTML = `
         <div class="inline-drawer-toggle inline-drawer-header">
             <b>小说连载阅读 (Novel Stream)</b>
@@ -1398,130 +1399,158 @@ async function renderSettingsUI(cachedStatus = null) {
         </div>
         <div class="inline-drawer-content" style="display: none;">
             <div class="novel-drawer-inner">
-                <!-- 置顶当前连载作品卡片 -->
-                <div class="novel-current-book-card">
-                    <div class="novel-book-card-header">
-                        <div class="novel-book-title-group">
-                            <i class="fa-solid fa-book-bookmark"></i>
-                            <span class="novel-book-title-label">当前连载小说</span>
+                <!-- 主开关置顶 -->
+                <div class="novel-toggle-row">
+                    <label class="checkbox_label" title="开启后，每轮 AI 回复将像小说章节一样自动写入 txt，随时用手机或阅读器翻阅">
+                        <input type="checkbox" id="novel_save_enabled" ${settings.enabled ? 'checked' : ''} />
+                        <span>开启小说自动连载</span>
+                    </label>
+                    <label class="checkbox_label" title="每当新章节连载更新完成时，在屏幕右上角弹出轻量提示通知">
+                        <input type="checkbox" id="novel_show_toast" ${settings.show_toast !== false ? 'checked' : ''} />
+                        <span>更新时弹窗提示</span>
+                    </label>
+                </div>
+
+                <!-- ▍当前连载 -->
+                <div class="novel-section">
+                    <div class="novel-section-title"><i class="fa-solid fa-book-bookmark"></i> 当前连载</div>
+                    <div class="novel-current-book-card">
+                        <div class="novel-book-card-header">
+                            <div class="novel-book-filename" id="novel_drawer_filename" title="点击复制完整文件路径">${initialFileName}</div>
+                            <button type="button" id="novel_copy_filepath_btn" class="novel-copy-pill" title="复制完整文件保存路径">
+                                <i class="fa-regular fa-copy"></i> 复制路径
+                            </button>
                         </div>
-                        <button type="button" id="novel_copy_filepath_btn" class="novel-copy-pill" title="复制完整文件保存路径">
-                            <i class="fa-regular fa-copy"></i> 复制路径
+                        <div class="novel-book-path-info"><code id="novel_drawer_filepath">${initialDir}${initialFileName}</code></div>
+                        <div id="novel_recent_status" class="novel-status-line ${recentStatus.state === 'updating' ? 'is-updating' : (recentStatus.state === 'success' ? 'is-success' : (recentStatus.state === 'skipped' ? 'is-skipped' : (recentStatus.state === 'error' ? 'is-error' : 'is-idle')))}">
+                            <span id="novel_recent_detail">
+                                ${recentStatus.state === 'success'
+                                    ? `<span><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${recentStatus.text}</span>${recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
+                                    : (recentStatus.state === 'updating'
+                                        ? `<span><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${recentStatus.text}</span>`
+                                        : (recentStatus.state === 'skipped'
+                                            ? `<span><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${recentStatus.text}</span>${recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
+                                            : (recentStatus.state === 'error'
+                                                ? `<span><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${recentStatus.text}</span>`
+                                                : `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${recentStatus.text}`)))
+                                }
+                            </span>
+                            <span id="novel_recent_time" class="novel-status-time">${recentStatus.time || '--:--:--'}</span>
+                        </div>
+                    </div>
+                    <div id="novel_save_status_badge" class="novel-alert checking">
+                        <i class="fa-solid fa-circle-notch fa-spin"></i>
+                        <div class="novel-alert-text">正在检查连载服务状态...</div>
+                    </div>
+                    <div id="novel_deploy_guide" class="novel-guide-section" style="display: none;"></div>
+                </div>
+
+                <!-- ▍正文过滤 -->
+                <div class="novel-section">
+                    <div class="novel-section-title"><i class="fa-solid fa-filter"></i> 正文过滤</div>
+                    <div class="novel-form-group">
+                        <span class="novel-label">只保留的标签（白名单，留空 = 整篇保留）：</span>
+                        <input type="text" id="novel_include_tags" class="text_pole" value="${settings.include_tags || ''}" placeholder="例如: story, response, content" />
+                        <small>AI 若把小说写在某个标签内（如 <code>&lt;story&gt;</code>），填入标签名即只提取其中正文，忽略外部元数据。</small>
+                    </div>
+                    <div class="novel-form-group">
+                        <span class="novel-label">剔除的标签块（黑名单）：</span>
+                        <input type="text" id="novel_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: status, memory, details, ooc, note" />
+                        <small>无论在整篇还是正文标签内部，都会彻底剔除这些干扰块。</small>
+                    </div>
+                    <!-- 【会话标签检测】：自动扫描当前聊天出现的标签，一键加入白/黑名单 -->
+                    <div class="novel-form-group novel-tag-scanner">
+                        <div class="novel-tag-scanner-header">
+                            <span class="novel-label"><i class="fa-solid fa-tags"></i> 会话标签检测</span>
+                            <span class="novel-tag-scanner-meta">
+                                <span id="novel_tag_scan_count"></span>
+                                <button type="button" id="novel_rescan_tags_btn" class="novel-chip-btn" title="重新扫描当前会话中出现的标签"><i class="fa-solid fa-rotate"></i> 重新扫描</button>
+                            </span>
+                        </div>
+                        <div id="novel_tag_chips" class="novel-tag-chip-list"></div>
+                        <small>点「白」= 只保留该标签内的正文；点「黑」= 彻底剔除该标签块；再次点击可移除；两侧互斥；鼠标悬浮标签可预览其最新内容。</small>
+                    </div>
+
+                    <!-- 【过滤效果预览】：按钮弹窗展示最近一条 AI 回复经标签过滤后的完整效果 -->
+                    <div class="novel-form-group">
+                        <span class="novel-label"><i class="fa-solid fa-eye"></i> 过滤效果预览（最近一条 AI 回复）</span>
+                        <button type="button" id="novel_preview_btn" class="novel-btn novel-btn-block" title="弹窗展示最近一条 AI 回复经当前白/黑名单过滤后的完整正文">
+                            <i class="fa-solid fa-eye"></i> <span id="novel_preview_btn_label">查看过滤效果预览</span>
+                        </button>
+                        <small id="novel_preview_btn_stat" class="novel-preview-stat"></small>
+                    </div>
+                </div>
+
+                <!-- ▍排版与行为 -->
+                <div class="novel-section">
+                    <div class="novel-section-title"><i class="fa-solid fa-sliders"></i> 排版与行为</div>
+                    <!-- 章节排版模式 -->
+                    <div class="novel-form-group">
+                        <span class="novel-label">章节目录风格：</span>
+                        <select id="novel_chapter_style" class="text_pole novel-select">
+                            <option value="numbered_floor" ${settings.chapter_style !== 'numbered' && settings.chapter_style !== 'separator' && settings.chapter_style !== 'dialogue' ? 'selected' : ''}>第 X 章 · 角色名 (原楼层: Y)（默认推荐：带楼层标记，方便快速定位排查问题）</option>
+                            <option value="numbered" ${settings.chapter_style === 'numbered' ? 'selected' : ''}>第 X 节 · 角色名（纯净小说目录，无楼层）</option>
+                            <option value="separator" ${settings.chapter_style === 'separator' ? 'selected' : ''}>优雅分割线（* * * 散文小说连续阅读）</option>
+                            <option value="dialogue" ${settings.chapter_style === 'dialogue' ? 'selected' : ''}>【角色名】正文（纯净戏剧体，无章节号）</option>
+                        </select>
+                        <small>
+                            切换后仅对<b>新写入章节</b>生效；想让已写内容统一为新样式，点一次【同步历史连载】即可全书重写。「原楼层」= 聊天记录中从上到下的消息序号（含问候语与你的发言），与酒馆界面楼层一致。
+                        </small>
+                    </div>
+
+                    <!-- 小说文件命名规则 -->
+                    <div class="novel-form-group">
+                        <span class="novel-label">文件命名规则：</span>
+                        <select id="novel_naming_rule" class="text_pole novel-select">
+                            <option value="char_chat" ${settings.naming_rule !== 'char_only' ? 'selected' : ''}>角色名 - 对话名（推荐：新聊天自动新建小说，绝不覆盖旧聊天）</option>
+                            <option value="char_only" ${settings.naming_rule === 'char_only' ? 'selected' : ''}>仅角色名（所有聊天合为一本，如 角色名.txt）</option>
+                        </select>
+                        <small>
+                            开启新聊天或平行分支时，默认会自动保存为新小说（如 <code>艾莉丝 - 2026-09-10.txt</code> 或自定义对话名），旧小说绝不被覆盖或串台！
+                        </small>
+                    </div>
+
+                    <!-- 包含主角互动开关 -->
+                    <label class="checkbox_label" title="开启后，你的提问与互动也会作为主角对白融入小说中；关闭则只收录纯故事正文">
+                        <input type="checkbox" id="novel_include_user" ${settings.include_user_dialogue ? 'checked' : ''} />
+                        <span>将你的发言作为主角对白融入小说</span>
+                    </label>
+
+                    <!-- 中文段落缩进 -->
+                    <label class="checkbox_label" title="每段开头空两格（全角空格），符合中文出版小说排版规范">
+                        <input type="checkbox" id="novel_indent_paragraphs" ${settings.indent_paragraphs ? 'checked' : ''} />
+                        <span>段落首行空两格（中文小说规范缩进）</span>
+                    </label>
+
+                    <!-- 草稿缓冲（延迟归档最新楼层） -->
+                    <label class="checkbox_label" title="开启后，最新一楼暂不写入连载文件，留出充分的 Roll 点与修改空间；待下一轮剧情推进时再正式定稿入书">
+                        <input type="checkbox" id="novel_buffer_latest" ${settings.buffer_latest_message ? 'checked' : ''} />
+                        <span>延迟归档最新楼层（草稿缓冲：下一轮对话推进时再正式定稿入书）</span>
+                    </label>
+                </div>
+
+                <!-- ▍文件与导出 -->
+                <div class="novel-section">
+                    <div class="novel-section-title"><i class="fa-solid fa-folder-open"></i> 文件与导出</div>
+                    <!-- 【保存文件夹设置】：自定义存储路径 -->
+                    <div class="novel-form-group">
+                        <span class="novel-label">指定保存文件夹（可选）：</span>
+                        <input type="text" id="novel_save_dir" class="text_pole" value="${settings.save_dir || ''}" placeholder="留空默认存至 plugins/auto-save/logs；填写服务端有效目录" />
+                        <small>此处为<b>服务端（运行酒馆的机器）</b>上的保存目录。<span style="color: #f39c12;">注意：若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 <code>D:\</code>）；</span>当前保存至：<code id="novel_save_dir_preview">${initialDir}${initialFileName}</code>；如需在本机阅读，可留空并用【导出整本 TXT】直接下载。</small>
+                    </div>
+
+                    <!-- 操作按钮组：导出为主按钮，同步为次按钮，试写为弱化诊断按钮 -->
+                    <div class="novel-action-buttons">
+                        <button type="button" id="novel_export_all_btn" class="novel-btn btn-export" style="flex: 1;" title="无需服务端插件，直接在浏览器中将所有聊天编排为小说 TXT 并下载">
+                            <i class="fa-solid fa-download"></i> 导出整本 TXT
+                        </button>
+                        <button type="button" id="novel_sync_all_btn" class="novel-btn btn-sync" style="flex: 1;" title="将当前聊天所有历史章节完整编排并同步写入服务端文件">
+                            <i class="fa-solid fa-file-import"></i> 同步历史连载
+                        </button>
+                        <button type="button" id="novel_test_btn" class="novel-btn btn-test novel-btn-minor" style="flex: 0 0 auto;" title="测试服务端插件连通性与标签清洗效果">
+                            <i class="fa-solid fa-feather-pointed"></i> 试写一章
                         </button>
                     </div>
-                    <div class="novel-book-filename" id="novel_drawer_filename">${initialFileName}</div>
-                    <div class="novel-book-path-info">
-                        <span class="novel-path-label">保存位置：</span><code id="novel_drawer_filepath">${initialDir}${initialFileName}</code>
-                    </div>
-                </div>
-
-                <!-- 连通性提示 -->
-                <div id="novel_save_status_badge" class="novel-alert checking">
-                    <i class="fa-solid fa-circle-notch fa-spin"></i>
-                    <div class="novel-alert-text">正在检查连载服务状态...</div>
-                </div>
-
-                <!-- 未安装服务端插件时的部署与使用指引 -->
-                <div id="novel_deploy_guide" class="novel-guide-section" style="display: none;"></div>
-
-                <!-- 最近连载动态卡片 (更新中/更新完成实时展示) -->
-                <div id="novel_recent_status" class="novel-status-card" style="border-left: 3px solid ${recentStatus.state === 'error' ? '#e74c3c' : (recentStatus.state === 'updating' ? 'var(--SmartThemeQuoteColor, #3498db)' : (recentStatus.state === 'skipped' ? '#f39c12' : 'var(--SmartThemeEmColor, #2ecc71)'))};">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                        <span style="font-weight: bold; opacity: 0.9;"><i class="fa-solid fa-clock-rotate-left"></i> 最近连载状态</span>
-                        <span id="novel_recent_time" style="opacity: 0.65; font-size: 11px;">${recentStatus.time || '--:--:--'}</span>
-                    </div>
-                    <div id="novel_recent_detail" style="word-break: break-all; line-height: 1.4;">
-                        ${recentStatus.state === 'success' 
-                            ? `<span style="color: var(--SmartThemeEmColor, #2ecc71);"><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${recentStatus.text}</span>${recentStatus.file ? `<div style="margin-top: 3px; font-size: 11px; opacity: 0.85;">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
-                            : (recentStatus.state === 'updating'
-                                ? `<span style="color: var(--SmartThemeQuoteColor, #3498db);"><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${recentStatus.text}</span>`
-                                : (recentStatus.state === 'skipped'
-                                    ? `<span style="color: #f39c12;"><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${recentStatus.text}</span>${recentStatus.file ? `<div style="margin-top: 3px; font-size: 11px; opacity: 0.85;">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
-                                    : (recentStatus.state === 'error'
-                                        ? `<span style="color: #e74c3c;"><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${recentStatus.text}</span>`
-                                        : `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${recentStatus.text}`)))
-                        }
-                    </div>
-                </div>
-
-                <!-- 主开关 -->
-                <label class="checkbox_label" title="开启后，每轮 AI 回复将像小说章节一样自动写入 txt，随时用手机或阅读器翻阅">
-                    <input type="checkbox" id="novel_save_enabled" ${settings.enabled ? 'checked' : ''} />
-                    <span>开启小说自动连载</span>
-                </label>
-
-                <!-- 连载更新弹窗提示开关 -->
-                <label class="checkbox_label" title="开启后，每当新章节连载更新完成时，在屏幕右上角弹出轻量提示通知">
-                    <input type="checkbox" id="novel_show_toast" ${settings.show_toast !== false ? 'checked' : ''} />
-                    <span>连载更新时弹出轻量提示通知（Toast）</span>
-                </label>
-
-                <!-- 章节排版模式 -->
-                <div class="novel-form-group">
-                    <span class="novel-label">章节目录风格：</span>
-                    <select id="novel_chapter_style" class="text_pole" style="padding: 5px 8px; border-radius: 4px; font-size: 13px;">
-                        <option value="numbered_floor" ${settings.chapter_style !== 'numbered' && settings.chapter_style !== 'separator' && settings.chapter_style !== 'dialogue' ? 'selected' : ''}>第 X 章 · 角色名 (原楼层: Y)（默认推荐：带楼层标记，方便快速定位排查问题）</option>
-                        <option value="numbered" ${settings.chapter_style === 'numbered' ? 'selected' : ''}>第 X 节 · 角色名（纯净小说目录，无楼层）</option>
-                        <option value="separator" ${settings.chapter_style === 'separator' ? 'selected' : ''}>优雅分割线（* * * 散文小说连续阅读）</option>
-                        <option value="dialogue" ${settings.chapter_style === 'dialogue' ? 'selected' : ''}>【角色名】正文（纯净戏剧体，无章节号）</option>
-                    </select>
-                    <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                        切换后仅对<b>新写入章节</b>生效；想让已写内容统一为新样式，点一次【同步历史连载】即可全书重写。「原楼层」= 聊天记录中从上到下的消息序号（含问候语与你的发言），与酒馆界面楼层一致。
-                    </small>
-                </div>
-
-                <!-- 小说文件命名规则 -->
-                <div class="novel-form-group">
-                    <span class="novel-label">文件命名规则：</span>
-                    <select id="novel_naming_rule" class="text_pole" style="padding: 5px 8px; border-radius: 4px; font-size: 13px;">
-                        <option value="char_chat" ${settings.naming_rule !== 'char_only' ? 'selected' : ''}>角色名 - 对话名（推荐：新聊天自动新建小说，绝不覆盖旧聊天）</option>
-                        <option value="char_only" ${settings.naming_rule === 'char_only' ? 'selected' : ''}>仅角色名（所有聊天合为一本，如 角色名.txt）</option>
-                    </select>
-                    <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                        开启新聊天或平行分支时，默认会自动保存为新小说（如 <code>艾莉丝 - 2026-09-10.txt</code> 或自定义对话名），旧小说绝不被覆盖或串台！
-                    </small>
-                </div>
-
-                <!-- 【白名单】：指定提取正文标签块 -->
-                <div class="novel-form-group">
-                    <span class="novel-label">指定正文标签（白名单，可选）：</span>
-                    <input type="text" id="novel_include_tags" class="text_pole" value="${settings.include_tags || ''}" placeholder="留空代表整篇保留；例如: story, response, content" />
-                    <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                        若预设把小说写在 <code>&lt;story&gt;</code> 内，填入 <code>story</code> 即可只提取该标签内容，忽略外部其他元数据。
-                    </small>
-                </div>
-
-                <!-- 【黑名单】：排除的标签块 -->
-                <div class="novel-form-group">
-                    <span class="novel-label">排除的标签块（黑名单）：</span>
-                    <input type="text" id="novel_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: status, memory, details, ooc, note" />
-                    <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                        无论在整篇还是在正文标签内部，都会彻底剔除这些类似 <code>&lt;status&gt;...&lt;/status&gt;</code> 的干扰块。
-                    </small>
-                </div>
-
-                <!-- 【会话标签检测】：自动扫描当前聊天出现的标签，一键加入白/黑名单 -->
-                <div class="novel-form-group novel-tag-scanner">
-                    <div class="novel-tag-scanner-header">
-                        <span class="novel-label"><i class="fa-solid fa-tags"></i> 会话标签检测</span>
-                        <span class="novel-tag-scanner-meta">
-                            <span id="novel_tag_scan_count"></span>
-                            <button type="button" id="novel_rescan_tags_btn" class="novel-chip-btn" title="重新扫描当前会话中出现的标签"><i class="fa-solid fa-rotate"></i> 重新扫描</button>
-                        </span>
-                    </div>
-                    <div id="novel_tag_chips" class="novel-tag-chip-list"></div>
-                    <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                        点「白」= 只保留该标签内的正文；点「黑」= 彻底剔除该标签块；再次点击可移除；两侧互斥；鼠标悬浮标签可预览其最新内容。
-                    </small>
-                </div>
-
-                <!-- 【过滤效果预览】：按钮弹窗展示最近一条 AI 回复经标签过滤后的完整效果 -->
-                <div class="novel-form-group">
-                    <span class="novel-label"><i class="fa-solid fa-eye"></i> 过滤效果预览（最近一条 AI 回复）</span>
-                    <button type="button" id="novel_preview_btn" class="novel-btn btn-test" style="width: 100%;" title="弹窗展示最近一条 AI 回复经当前白/黑名单过滤后的完整正文">
-                        <i class="fa-solid fa-eye"></i> <span id="novel_preview_btn_label">查看过滤效果预览</span>
-                    </button>
-                    <small id="novel_preview_btn_stat" class="novel-preview-stat"></small>
                 </div>
 
                 <!-- 过滤效果预览弹窗（完整正文，点遮罩 / 右上角 / Esc 均可关闭） -->
@@ -1536,52 +1565,6 @@ async function renderSettingsUI(cachedStatus = null) {
                         </div>
                         <div id="novel_modal_body" class="novel-modal-body"></div>
                     </div>
-                </div>
-
-                <!-- 包含主角互动开关 -->
-                <label class="checkbox_label" title="开启后，你的提问与互动也会作为主角对白融入小说中；关闭则只收录纯故事正文">
-                    <input type="checkbox" id="novel_include_user" ${settings.include_user_dialogue ? 'checked' : ''} />
-                    <span>将你的发言作为主角对白融入小说</span>
-                </label>
-
-                <!-- 中文段落缩进 -->
-                <label class="checkbox_label" title="每段开头空两格（全角空格），符合中文出版小说排版规范">
-                    <input type="checkbox" id="novel_indent_paragraphs" ${settings.indent_paragraphs ? 'checked' : ''} />
-                    <span>段落首行空两格（中文小说规范缩进）</span>
-                </label>
-
-                <!-- 草稿缓冲（延迟归档最新楼层） -->
-                <label class="checkbox_label" title="开启后，最新一楼暂不写入连载文件，留出充分的 Roll 点与修改空间；待下一轮剧情推进时再正式定稿入书">
-                    <input type="checkbox" id="novel_buffer_latest" ${settings.buffer_latest_message ? 'checked' : ''} />
-                    <span>延迟归档最新楼层（草稿缓冲：下一轮对话推进时再正式定稿入书）</span>
-                </label>
-
-                <!-- 【保存文件夹设置】：自定义存储路径 -->
-                <div class="novel-form-group">
-                    <span class="novel-label">指定保存文件夹（可选）：</span>
-                    <input type="text" id="novel_save_dir" class="text_pole" value="${settings.save_dir || ''}" placeholder="留空默认存至 plugins/auto-save/logs；填写服务端有效目录" />
-                    <small style="opacity: 0.75; font-size: 11px; color: var(--SmartThemeEmColor, #aaa); line-height: 1.4;">
-                        此处为<b>服务端（运行酒馆的机器）</b>上的保存目录。<span style="color: #f39c12;">注意：若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 <code>D:\</code>）；</span>如需在本机阅读，可留空并点击下方<b>【导出整本 TXT】</b>直接下载，或使用 Syncthing 自动双向同步。
-                    </small>
-                </div>
-
-                <!-- 存储位置说明（轻量保留，保持与设置同步） -->
-                <div class="novel-book-info" style="opacity: 0.85; font-size: 11px;">
-                    <i class="fa-solid fa-circle-info"></i>
-                    <span>当前连载保存路径：<code id="novel_save_dir_preview">${initialDir}${initialFileName}</code>。若未部署服务端，可随时点击<b>【导出整本 TXT】</b>一键下载。</span>
-                </div>
-
-                <!-- 操作按钮组：精致适中标准尺寸 -->
-                <div class="novel-action-buttons">
-                    <button type="button" id="novel_sync_all_btn" class="novel-btn btn-sync" style="flex: 1;" title="将当前聊天所有历史章节完整编排并同步写入服务端文件">
-                        <i class="fa-solid fa-file-import"></i> 同步历史连载
-                    </button>
-                    <button type="button" id="novel_export_all_btn" class="novel-btn btn-export" style="flex: 1;" title="无需服务端插件，直接在浏览器中将所有聊天编排为小说 TXT 并下载">
-                        <i class="fa-solid fa-download"></i> 导出整本 TXT
-                    </button>
-                    <button type="button" id="novel_test_btn" class="novel-btn btn-test" style="flex: 0 0 auto;" title="测试服务端插件连通性与标签清洗效果">
-                        <i class="fa-solid fa-feather-pointed"></i> 试写一章
-                    </button>
                 </div>
             </div>
         </div>
@@ -1646,13 +1629,13 @@ async function renderSettingsUI(cachedStatus = null) {
         const headerStatus = panel.querySelector('#novel_header_status');
         if (headerStatus) {
             if (recentStatus.state === 'updating') {
-                headerStatus.innerHTML = `<span style="color: var(--SmartThemeQuoteColor, #3498db);"><i class="fa-solid fa-spinner fa-spin"></i> 连载更新中...</span>`;
+                headerStatus.innerHTML = '<span class="novel-header-state is-updating"><i class="fa-solid fa-spinner fa-spin"></i> 连载中...</span>';
             } else if (recentStatus.state === 'success') {
-                headerStatus.innerHTML = `<span style="color: var(--SmartThemeEmColor, #2ecc71);"><i class="fa-solid fa-circle-check"></i> 已连载${recentStatus.chapter > 0 ? '第 ' + recentStatus.chapter + ' 章 ·' : ''} ${recentStatus.time}</span>`;
+                headerStatus.innerHTML = `<span class="novel-header-state is-success"><i class="fa-solid fa-circle-check"></i> 已连载${recentStatus.chapter > 0 ? ' ' + recentStatus.chapter + ' 章 ·' : ''} ${recentStatus.time}</span>`;
             } else if (recentStatus.state === 'skipped') {
-                headerStatus.innerHTML = `<span style="color: #f39c12;"><i class="fa-solid fa-circle-info"></i> 已跳过</span>`;
+                headerStatus.innerHTML = '<span class="novel-header-state is-skipped"><i class="fa-solid fa-circle-info"></i> 已跳过</span>';
             } else if (recentStatus.state === 'error') {
-                headerStatus.innerHTML = `<span style="color: #e74c3c;"><i class="fa-solid fa-circle-exclamation"></i> 连载失败</span>`;
+                headerStatus.innerHTML = '<span class="novel-header-state is-error"><i class="fa-solid fa-circle-exclamation"></i> 连载失败</span>';
             }
         }
     }

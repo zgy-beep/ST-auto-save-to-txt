@@ -731,3 +731,40 @@
 }
 
 
+
+/* ==================== UI v1.8.0：分区布局 / 状态聚合 / 按钮层级 ==================== */
+.novel-section { display: flex; flex-direction: column; gap: 8px; }
+.novel-section-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; opacity: 0.7; }
+.novel-section-title i { color: var(--SmartThemeQuoteColor, #3498db); }
+.novel-section + .novel-section { border-top: 1px solid rgba(255, 255, 255, 0.07); padding-top: 12px; }
+.novel-toggle-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.novel-select { padding: 5px 8px; border-radius: 4px; font-size: 13px; }
+
+/* 书卡轻量容器化（去掉黄色左边条，由分区标题承载识别） */
+.novel-current-book-card { border-left: none; background: rgba(0, 0, 0, 0.18); border: 1px solid rgba(255, 255, 255, 0.1); padding: 8px 10px; }
+.novel-book-card-header { align-items: flex-start; }
+
+/* 连载状态行：颜色即状态 */
+.novel-status-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding-top: 6px; border-top: 1px dashed rgba(255, 255, 255, 0.1); font-size: 12px; line-height: 1.5; word-break: break-all; }
+.novel-status-line.is-idle { color: var(--SmartThemeEmColor, #ddd); }
+.novel-status-line.is-updating { color: var(--SmartThemeQuoteColor, #3498db); }
+.novel-status-line.is-success { color: var(--SmartThemeEmColor, #2ecc71); }
+.novel-status-line.is-skipped { color: #f39c12; }
+.novel-status-line.is-error { color: #e74c3c; }
+.novel-status-time { margin-left: auto; opacity: 0.6; font-size: 11px; flex-shrink: 0; }
+.novel-status-file { width: 100%; font-size: 11px; opacity: 0.85; }
+
+/* 顶栏状态灯 */
+.novel-header-state.is-updating { color: var(--SmartThemeQuoteColor, #3498db); }
+.novel-header-state.is-success { color: var(--SmartThemeEmColor, #2ecc71); }
+.novel-header-state.is-skipped { color: #f39c12; }
+.novel-header-state.is-error { color: #e74c3c; }
+
+/* 按钮层级：导出=实心主按钮，同步=描边次按钮，试写=弱化诊断按钮 */
+.novel-btn.btn-export { background: var(--SmartThemeQuoteColor, #3498db); border-color: var(--SmartThemeQuoteColor, #3498db); color: #fff; }
+.novel-btn.btn-export:hover { background: var(--SmartThemeQuoteColor, #3498db); border-color: #3498db; color: #fff; filter: brightness(1.15); }
+.novel-btn-minor { padding: 6px 10px; font-size: 12px; opacity: 0.8; }
+.novel-btn-block { width: 100%; }
+
+/* 部署指引融入分区后收紧外距 */
+.novel-guide-section { margin-top: 0; }
