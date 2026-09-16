@@ -769,3 +769,28 @@
 
 /* 部署指引融入分区后收紧外距 */
 .novel-guide-section { margin-top: 0; }
+
+/* ==================== v1.8.2 重点强化：标签必须是面板里最亮的字 ==================== */
+/* 重点（设置项标签）：14px 加粗 + 主题主文本全色（inherit 继承酒馆正文色，避开偏灰的 EmColor 变量），并抵消基础规则的 opacity:0.9 残留 */
+#auto-save-to-txt-settings .novel-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: inherit;
+    opacity: 1;
+    letter-spacing: 0.3px;
+}
+
+/* 勾选项文字同属"设置项"层级：同步主题主文本全色 */
+#auto-save-to-txt-settings label.checkbox_label,
+#auto-save-to-txt-settings label.checkbox_label span {
+    color: inherit !important;
+}
+
+/* 结构（分区标题）：14px 全亮 + 主题色左边条锚定，与内容拉开结构感 */
+#auto-save-to-txt-settings .novel-section-title {
+    font-size: 14px;
+    opacity: 1;
+    color: inherit;
+    border-left: 3px solid var(--SmartThemeQuoteColor, #3498db);
+    padding-left: 8px;
+}
