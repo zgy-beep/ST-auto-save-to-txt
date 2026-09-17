@@ -840,3 +840,73 @@
     transition: all 0.15s ease;
 }
 .novel-lt-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
+/* ==================== v1.11.0 底部常驻快捷栏 ==================== */
+.novel-quickbar {
+    position: fixed;
+    left: 10px;
+    bottom: 10px;
+    z-index: 9000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+}
+.novel-qb-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(20, 22, 28, 0.85);
+    color: var(--SmartThemeEmColor, #eee);
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+    transition: all 0.2s ease;
+    align-self: flex-start;
+}
+.novel-qb-pill:hover { border-color: rgba(255, 209, 102, 0.5); color: #ffd166; }
+.novel-qb-pill i { color: #ffd166; }
+
+.novel-qb-panel {
+    width: 230px;
+    background: var(--SmartThemeBlurTintColor, rgba(22, 24, 30, 0.97));
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+}
+.novel-qb-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.novel-qb-title { font-weight: 700; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.novel-qb-head-btns { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.novel-qb-icon-btn {
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--SmartThemeEmColor, #ccc);
+    border-radius: 4px;
+    width: 22px; height: 22px;
+    font-size: 11px;
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.novel-qb-icon-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.novel-qb-row { display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; font-size: 12px; color: var(--SmartThemeEmColor, #ddd); }
+.novel-qb-actions { display: flex; gap: 6px; }
+.novel-qb-btn {
+    flex: 1;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--SmartThemeEmColor, #ddd);
+    border-radius: 5px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    transition: all 0.15s ease;
+}
+.novel-qb-btn:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }

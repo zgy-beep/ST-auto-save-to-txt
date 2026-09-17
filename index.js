@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.10.1',            // 扩展版本号
+    version: '1.11.0',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -50,6 +50,7 @@ const DEFAULT_SETTINGS = {
     exclude_tags: 'status,memory,details,variables,analysis,ooc,note,draft,system,log', // 【黑名单】：需剔除的标签块内容
     save_dir: '',                 // 自定义保存文件夹路径（留空则保存至默认 plugins/auto-save/logs；支持任意绝对路径如 D:\MyNovels）
     show_toast: true,             // 连载更新时弹出轻量提示通知
+    quickbar_collapsed: true,     // 底部常驻快捷栏折叠态（持久化；药丸常显，面板展开/收起记忆）
     userDisabled: false,          // 用户是否主动手动关闭了连载
 };
 
@@ -236,6 +237,127 @@ function refreshLatestToolbar() {
     bar.querySelector('[data-lt="preview"]').addEventListener('click', (e) => { e.stopPropagation(); openFilterPreviewModal(); });
     bar.querySelector('[data-lt="export"]').addEventListener('click', (e) => { e.stopPropagation(); exportNovelText(); });
     textEl.appendChild(bar);
+}
+
+// ==================== v1.11.0 主界面底部常驻快捷栏（body 级悬浮，软依赖无关） ====================
+function buildQuickBar() {
+    if (typeof document === 'undefined') return null;
+    const existing = document.getElementById('novel-quickbar');
+    if (existing) return existing;
+
+    const bar = document.createElement('div');
+    bar.id = 'novel-quickbar';
+    bar.className = 'novel-quickbar';
+    bar.innerHTML = `
+        <button type="button" id="novel_qb_pill" class="novel-qb-pill" title="点击展开/收起快捷设置">
+            <i class="fa-solid fa-book-bookmark"></i> <span id="novel_qb_pill_text">连载未开始</span>
+        </button>
+        <div id="novel_qb_panel" class="novel-qb-panel" style="display:none;">
+            <div class="novel-qb-head">
+                <span id="novel_qb_title" class="novel-qb-title">小说连载</span>
+                <span class="novel-qb-head-btns">
+                    <button type="button" id="novel_qb_settings" class="novel-qb-icon-btn" title="打开完整设置面板"><i class="fa-solid fa-gear"></i></button>
+                    <button type="button" id="novel_qb_collapse" class="novel-qb-icon-btn" title="收起"><i class="fa-solid fa-chevron-down"></i></button>
+                </span>
+            </div>
+            <label class="novel-qb-row"><input type="checkbox" id="novel_qb_enabled" /> 开启小说自动连载</label>
+            <label class="novel-qb-row"><input type="checkbox" id="novel_qb_toast" /> 更新时弹窗提示</label>
+            <label class="novel-qb-row"><input type="checkbox" id="novel_qb_buffer" /> 草稿缓冲（下一条消息时定稿）</label>
+            <div class="novel-qb-actions">
+                <button type="button" id="novel_qb_preview" class="novel-qb-btn"><i class="fa-solid fa-eye"></i> 过滤效果</button>
+                <button type="button" id="novel_qb_export" class="novel-qb-btn"><i class="fa-solid fa-download"></i> 导出 TXT</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(bar);
+
+    const settings = getSettings();
+    const pill = bar.querySelector('#novel_qb_pill');
+    const qbPanel = bar.querySelector('#novel_qb_panel');
+
+    // 折叠态切换（药丸常显，面板显隐持久化）
+    const setCollapsed = (collapsed) => {
+        settings.quickbar_collapsed = collapsed;
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        if (!collapsed) syncQuickBar();
+        qbPanel.style.display = collapsed ? 'none' : 'flex';
+    };
+    pill.addEventListener('click', () => setCollapsed(!settings.quickbar_collapsed));
+    bar.querySelector('#novel_qb_collapse').addEventListener('click', () => setCollapsed(true));
+    bar.querySelector('#novel_qb_settings').addEventListener('click', () => openFullSettings());
+
+    // 高频开关：连载总开关走共享探测逻辑；toast/buffer 直写并回同步面板复选框
+    const qbEnabled = bar.querySelector('#novel_qb_enabled');
+    qbEnabled.addEventListener('change', async () => {
+        const ok = await setNovelEnabled(qbEnabled.checked);
+        if (!ok) qbEnabled.checked = false;
+        syncQuickBar();
+    });
+    const qbToast = bar.querySelector('#novel_qb_toast');
+    qbToast.addEventListener('change', () => {
+        settings.show_toast = qbToast.checked;
+        const panelCb = document.getElementById('novel_show_toast');
+        if (panelCb) panelCb.checked = qbToast.checked;
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        syncQuickBar();
+    });
+    const qbBuffer = bar.querySelector('#novel_qb_buffer');
+    qbBuffer.addEventListener('change', () => {
+        settings.buffer_latest_message = qbBuffer.checked;
+        const panelCb = document.getElementById('novel_buffer_latest');
+        if (panelCb) panelCb.checked = qbBuffer.checked;
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        syncQuickBar();
+    });
+
+    // 过滤效果 / 导出：先刷新一次预览数据保证弹窗内容新鲜
+    bar.querySelector('#novel_qb_preview').addEventListener('click', () => {
+        renderFilterPreview();
+        openFilterPreviewModal();
+    });
+    bar.querySelector('#novel_qb_export').addEventListener('click', () => exportNovelText());
+
+    syncQuickBar();
+    return bar;
+}
+
+// 齿轮直达：打开酒馆扩展抽屉并展开本扩展的完整设置面板（尽力而为，不报错）
+function openFullSettings() {
+    try {
+        const navBtn = document.getElementById('nav-toggle') || document.querySelector('.nav-toggle') || document.getElementById('options-button');
+        if (navBtn) navBtn.click();
+    } catch (e) { /* 尽力而为 */ }
+    setTimeout(() => {
+        const content = document.querySelector('#auto-save-to-txt-settings .inline-drawer-content');
+        if (content) content.style.display = 'block';
+        const header = document.querySelector('#auto-save-to-txt-settings .inline-drawer-toggle');
+        if (header && content && content.style.display === 'none') header.click();
+    }, 300);
+}
+
+// 快捷栏状态同步：药丸进度、面板标题、三个复选框、折叠显隐（node 环境守卫）
+function syncQuickBar() {
+    if (typeof document === 'undefined') return;
+    const bar = document.getElementById('novel-quickbar');
+    if (!bar) return;
+    const settings = getSettings();
+    const mapMax = Object.keys(savedChapterMap).length ? Math.max(...Object.values(savedChapterMap)) : 0;
+    const total = Math.max(recentStatus.chapter, mapMax);
+    const pillText = bar.querySelector('#novel_qb_pill_text');
+    if (pillText) pillText.textContent = total > 0 ? `第 ${total} 章已入书` : '连载未开始';
+    const title = bar.querySelector('#novel_qb_title');
+    if (title) {
+        const shortTitle = shortBookTitle(getBookTitle(settings));
+        title.textContent = total > 0 ? `《${shortTitle}》· 已连载 ${total} 章` : `《${shortTitle}》`;
+    }
+    const enabledCb = bar.querySelector('#novel_qb_enabled');
+    if (enabledCb) enabledCb.checked = !!settings.enabled;
+    const toastCb = bar.querySelector('#novel_qb_toast');
+    if (toastCb) toastCb.checked = settings.show_toast !== false;
+    const bufferCb = bar.querySelector('#novel_qb_buffer');
+    if (bufferCb) bufferCb.checked = !!settings.buffer_latest_message;
+    const qbPanel = bar.querySelector('#novel_qb_panel');
+    if (qbPanel) qbPanel.style.display = settings.quickbar_collapsed ? 'none' : 'flex';
 }
 
 function getSettings() {
@@ -969,6 +1091,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
             savedChapterMap[messageIndex] = chapterNumber;
             refreshMessageBadges();
             refreshLatestToolbar();
+            syncQuickBar();
         }
     } else {
         const is404 = res && (res.status === 404 || (res.error && String(res.error).includes('404')));
@@ -1051,6 +1174,7 @@ async function ensureGreetingSerialized(settings, chatLog) {
         savedChapterMap[0] = 1;
         refreshMessageBadges();
         refreshLatestToolbar();
+        syncQuickBar();
     }
 }
 
@@ -1215,6 +1339,7 @@ async function executeSyncAll(isSilent = false) {
             savedChapterMap = computeChapterMap(settings, chatLog);
             refreshMessageBadges();
             refreshLatestToolbar();
+            syncQuickBar();
             // 聊天改名自动跟随：全书同步同样可能触发小说文件更名
             const syncRenameSuffix = data.renamed_from ? '（检测到聊天改名，小说文件已同步更名）' : '';
             if (!isSilent) {
@@ -1549,6 +1674,40 @@ function throttledNovelSuccessToast(message, title, opts = {}) {
 
 let renderRetryTimer = null;
 
+/**
+ * 连载总开关共享逻辑（面板复选框与底部快捷栏共用）：
+ * 开启前前置探测服务端是否可用，未就绪则取消勾选并提示；成功返回 true，被拒返回 false
+ */
+async function setNovelEnabled(wantEnable) {
+    const settings = getSettings();
+    if (wantEnable) {
+        const probe = await checkServerPluginStatus();
+        if (!probe.ready) {
+            settings.enabled = false;
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            const enableCheckbox = document.getElementById('novel_save_enabled');
+            if (enableCheckbox) enableCheckbox.checked = false;
+            if (window.toastr) {
+                window.toastr.warning(
+                    '服务端插件未就绪（未安装或未启动），已自动取消勾选（防止 404 报错）。您可以直接点击下方【导出整本 TXT】下载，或参考下方指引部署插件。',
+                    '小说连载',
+                    { timeOut: 5500 }
+                );
+            }
+            return false;
+        }
+        settings.enabled = true;
+        settings.userDisabled = false; // 用户主动开启
+    } else {
+        settings.enabled = false;
+        settings.userDisabled = true;  // 用户主动手动关闭，不再自动重新勾选
+    }
+    const enableCheckbox = document.getElementById('novel_save_enabled');
+    if (enableCheckbox) enableCheckbox.checked = settings.enabled;
+    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+    return true;
+}
+
 async function renderSettingsUI(cachedStatus = null) {
     const settings = getSettings();
     let container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
@@ -1861,38 +2020,16 @@ async function renderSettingsUI(cachedStatus = null) {
         }
     };
 
-    // 主开关绑定：附带未安装服务端的防误触检测
+    // 主开关绑定：附带未安装服务端的防误触检测（主体走共享 setNovelEnabled，快捷栏复用）
     const enableEl = panel.querySelector('#novel_save_enabled');
     if (enableEl) {
         enableEl.addEventListener('change', async (e) => {
-            if (e.target.checked) {
-                enableEl.disabled = true;
-                try {
-                    // 用户尝试手动开启连载时，前置探测服务端是否可用
-                    const probe = await checkServerPluginStatus();
-                    if (!probe.ready) {
-                        e.target.checked = false;
-                        settings.enabled = false;
-                        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
-                        if (window.toastr) {
-                            window.toastr.warning(
-                                '服务端插件未就绪（未安装或未启动），已自动取消勾选（防止 404 报错）。您可以直接点击下方【导出整本 TXT】下载，或参考下方指引部署插件。',
-                                '小说连载',
-                                { timeOut: 5500 }
-                            );
-                        }
-                        return;
-                    }
-                } finally {
-                    enableEl.disabled = false;
-                }
-                settings.enabled = true;
-                settings.userDisabled = false; // 用户主动开启
-            } else {
-                settings.enabled = false;
-                settings.userDisabled = true;  // 用户主动手动关闭，不再自动重新勾选
+            enableEl.disabled = true;
+            try {
+                await setNovelEnabled(e.target.checked);
+            } finally {
+                enableEl.disabled = false;
             }
-            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
         });
     }
 
@@ -2306,6 +2443,12 @@ jQuery(async () => {
         }
     }, 500);
 
+    // v1.11.0 底部常驻快捷栏：构建（幂等）+ 初始楼层入书映射，药丸即刻显示进度
+    buildQuickBar();
+    const bootChatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    savedChapterMap = computeChapterMap(getSettings(), bootChatLog);
+    syncQuickBar();
+
     seedLastSavedSignature();
 
     // 酒馆助手 (JS-Slash-Runner) 软依赖桥接：APP_READY 后探测 + 1s 轮询最多 15 次兜底
@@ -2337,6 +2480,7 @@ jQuery(async () => {
                     updateRecentStatus('idle', '草稿缓冲中（所选分支将在你发送下一条消息后定稿入书）');
                     refreshMessageBadges();
                     refreshLatestToolbar();
+                    syncQuickBar();
                     return;
                 }
                 // 角色问候语的滑动/重新生成同样不入书：连载只从真实对话开始
@@ -2351,6 +2495,7 @@ jQuery(async () => {
                 // ST 滑动楼层会重建 mes_text 导致内嵌元素丢失：幂等重绘补救
                 refreshMessageBadges();
                 refreshLatestToolbar();
+                syncQuickBar();
             });
         }
 
@@ -2369,6 +2514,7 @@ jQuery(async () => {
                 // ST 编辑楼层会重建 mes_text 导致内嵌元素丢失：幂等重绘补救
                 refreshMessageBadges();
                 refreshLatestToolbar();
+                syncQuickBar();
             });
         }
 
@@ -2382,6 +2528,7 @@ jQuery(async () => {
             savedChapterMap = computeChapterMap(getSettings(), ctxChat);
             refreshMessageBadges();
             refreshLatestToolbar();
+            syncQuickBar();
         };
 
         if (event_types.CHAT_CHANGED) {
