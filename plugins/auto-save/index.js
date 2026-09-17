@@ -1,5 +1,5 @@
 /**
- * SillyTavern 聊天小说连载阅读服务端插件 (v1.8.2)
+ * SillyTavern 聊天小说连载阅读服务端插件 (v1.9.0)
  * 
  * 文件路径：plugins/auto-save/index.js
  * 
@@ -18,6 +18,8 @@ const pluginName = 'auto-save';
 const MAX_MESSAGE_BYTES = 100 * 1024; // 100KB
 const LOGS_DIR = path.join(__dirname, 'logs');
 const UTF8_BOM = '\uFEFF';
+// 聊天 ID 锚定注册表：聊天改名后自动跟随重命名小说文件（本机状态，随部署生成，绝不上传 Git）
+const REGISTRY_FILE = path.join(__dirname, '.novel-registry.json');
 
 // 异步文件写入队列，确保同一小说的并发写入严格按序执行
 const fileQueues = new Map();
@@ -33,6 +35,108 @@ function runInFileQueue(filePath, task) {
         });
     fileQueues.set(filePath, nextQueue);
     return nextQueue;
+}
+
+// 聊天 ID 锚定注册表（内存态，启动时加载）：{ [chat_anchor]: { file, title } }
+let novelRegistry = {};
+
+// 启动时容错读取注册表：文件不存在/JSON 损坏 → 视为空表；损坏时备份为 .bak 后重建
+async function loadNovelRegistry() {
+    try {
+        const raw = await fs.promises.readFile(REGISTRY_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        novelRegistry = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+    } catch (err) {
+        novelRegistry = {};
+        if (err.code !== 'ENOENT') {
+            try {
+                await fs.promises.copyFile(REGISTRY_FILE, `${REGISTRY_FILE}.bak`);
+                console.warn(`[${pluginName}] 聊天锚定注册表损坏，已备份为 .novel-registry.json.bak 并重建空表:`, err.message);
+            } catch (bakErr) {
+                console.warn(`[${pluginName}] 注册表损坏且备份失败:`, bakErr.message);
+            }
+        }
+    }
+}
+
+// 注册表变更后同步写回（写不回仅告警，绝不阻断连载）
+async function saveNovelRegistry() {
+    try {
+        await fs.promises.writeFile(REGISTRY_FILE, JSON.stringify(novelRegistry, null, 2), { encoding: 'utf8' });
+    } catch (err) {
+        console.error(`[${pluginName}] 聊天锚定注册表写回失败:`, err);
+    }
+}
+
+/**
+ * 聊天 ID 锚定目标文件解析（聊天改名自动跟随重命名 + 多账号 file_name 优先）：
+ * - 有 file_name 优先用之（前端算好的含账号前缀文件名，sanitize 兜底并确保 .txt 后缀），否则沿用 characterName 逻辑
+ * - registry[anchor] 不存在 → 登记 desiredPath 并写（老用户首次写入与现有文件名一致，无缝接管）
+ * - entry.file === desiredPath → 直接写
+ * - entry.file !== desiredPath 且旧文件存在：
+ *   · desiredPath 不存在 → 重命名迁移：内容整体搬迁，首行书仅当原首行以《 开头时同步为新书名（BOM 原样保留）；响应 renamed_from
+ *   · desiredPath 已存在（与别的聊天撞名）→ 不 rename 绝不覆盖他人小说，继续写 entry.file（旧名），响应 kept_name
+ * - entry.file !== desiredPath 且旧文件不存在 → 视为用户手动挪走：登记改为 desiredPath，写新文件
+ */
+async function resolveAnchoredTargetPath({ chat_anchor, file_name, characterName, name, targetDir, bookTitle }) {
+    let targetFileName;
+    if (typeof file_name === 'string' && file_name.trim()) {
+        const sanitized = sanitizeFilename(file_name.trim());
+        targetFileName = /\.txt$/i.test(sanitized) ? sanitized : `${sanitized}.txt`;
+    } else {
+        targetFileName = `${sanitizeFilename(characterName || name)}.txt`;
+    }
+    const desiredPath = path.join(targetDir, targetFileName);
+
+    const anchor = (typeof chat_anchor === 'string') ? chat_anchor.trim() : '';
+    if (!anchor) {
+        return { targetFilePath: desiredPath, renamedFrom: '', keptName: false };
+    }
+
+    const entry = novelRegistry[anchor];
+    if (!entry) {
+        novelRegistry[anchor] = { file: desiredPath, title: characterName || '' };
+        await saveNovelRegistry();
+        return { targetFilePath: desiredPath, renamedFrom: '', keptName: false };
+    }
+
+    if (entry.file === desiredPath) {
+        return { targetFilePath: desiredPath, renamedFrom: '', keptName: false };
+    }
+
+    const oldStat = await fs.promises.stat(entry.file).catch(() => null);
+    if (!oldStat) {
+        // 旧文件已被用户手动挪走：直接登记新路径并写新文件
+        novelRegistry[anchor] = { file: desiredPath, title: characterName || '' };
+        await saveNovelRegistry();
+        return { targetFilePath: desiredPath, renamedFrom: '', keptName: false };
+    }
+
+    const newStat = await fs.promises.stat(desiredPath).catch(() => null);
+    if (newStat) {
+        // 与别的聊天撞名：保留旧文件名继续写，绝不覆盖他人小说
+        console.warn(`[${pluginName}] 锚点期望文件名已被其它聊天占用，保留旧文件继续写入: ${entry.file}`);
+        return { targetFilePath: entry.file, renamedFrom: '', keptName: true };
+    }
+
+    // 执行重命名：内容迁移 + 首行书名替换（仅当原首行以《 开头；BOM 原样保留）
+    const oldContent = await fs.promises.readFile(entry.file, 'utf8');
+    let newContent = oldContent;
+    const firstLineEnd = oldContent.indexOf('\n');
+    const firstLine = firstLineEnd >= 0 ? oldContent.slice(0, firstLineEnd) : oldContent;
+    if (firstLine.replace(/^\uFEFF/, '').startsWith('《')) {
+        const rest = firstLineEnd >= 0 ? oldContent.slice(firstLineEnd) : '';
+        const hadBom = oldContent.startsWith(UTF8_BOM);
+        newContent = (hadBom ? UTF8_BOM : '') + `《${bookTitle}》` + rest;
+    }
+    await fs.promises.writeFile(desiredPath, newContent, { encoding: 'utf8' });
+    await fs.promises.unlink(entry.file);
+
+    const renamedFrom = path.basename(entry.file);
+    novelRegistry[anchor] = { file: desiredPath, title: characterName || '' };
+    await saveNovelRegistry();
+    console.log(`[${pluginName}] 📛 聊天改名检测：小说文件已同步更名 ${renamedFrom} -> ${path.basename(desiredPath)}`);
+    return { targetFilePath: desiredPath, renamedFrom, keptName: false };
 }
 
 async function ensureLogsDir() {
@@ -237,13 +341,14 @@ function formatNovelChapter({ name, mes, is_user, chapterNumber, chapterStyle, f
 async function init(router) {
     console.log(`[${pluginName}] 小说连载服务插件正在初始化...`);
     await ensureLogsDir();
+    await loadNovelRegistry();
 
     // 状态探针接口：用于前端检测服务端插件是否正常运行
     router.get('/status', async (req, res) => {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.8.2',
+            version: '1.9.0',
             logsDir: LOGS_DIR
         });
     });
@@ -255,7 +360,7 @@ async function init(router) {
                 return res.status(400).json({ error: '无效请求' });
             }
 
-            const { name, mes, is_user, characterName, chapterNumber, chapterStyle, save_dir, is_regenerate, floor, is_greeting } = body;
+            const { name, mes, is_user, characterName, chapterNumber, chapterStyle, save_dir, is_regenerate, floor, is_greeting, chat_anchor, file_name } = body;
 
             if (!mes || typeof mes !== 'string') {
                 return res.status(400).json({ error: '正文内容不能为空' });
@@ -267,9 +372,8 @@ async function init(router) {
                 return res.status(413).json({ error: '单章节篇幅过大，超出 100KB 限制' });
             }
 
-            // 安全书名与目标存储路径
+            // 安全书名（扉页/首行《书名》用，保持纯净标题，不含账号前缀）
             const bookTitle = sanitizeFilename(characterName || name);
-            const targetFileName = `${bookTitle}.txt`;
 
             // 支持自定义存储目录（绝对路径或相对酒馆运行目录），留空则使用默认 logs 目录
             const dirResult = resolveTargetDirectory(save_dir);
@@ -279,7 +383,9 @@ async function init(router) {
             const targetDir = dirResult.dir;
             await fs.promises.mkdir(targetDir, { recursive: true });
 
-            const targetFilePath = path.join(targetDir, targetFileName);
+            // 聊天 ID 锚定：聊天改名自动跟随重命名（file_name 含多账号前缀时优先）
+            const anchorResult = await resolveAnchoredTargetPath({ chat_anchor, file_name, characterName, name, targetDir, bookTitle });
+            const targetFilePath = anchorResult.targetFilePath;
 
             // 排队进入写入队列，确保并发写操作安全有序
             const result = await runInFileQueue(targetFilePath, async () => {
@@ -345,7 +451,9 @@ async function init(router) {
                 skipped: result.skipped,
                 reason: result.reason,
                 file: result.file,
-                is_regenerate: result.is_regenerate
+                is_regenerate: result.is_regenerate,
+                ...(anchorResult.renamedFrom ? { renamed_from: anchorResult.renamedFrom } : {}),
+                ...(anchorResult.keptName ? { kept_name: true } : {})
             });
         } catch (error) {
             console.error(`[${pluginName}] 连载写入异常:`, error);
@@ -364,7 +472,7 @@ async function init(router) {
                 return res.status(400).json({ error: '无效请求' });
             }
 
-            const { characterName, fullText, save_dir } = body;
+            const { characterName, fullText, save_dir, chat_anchor, file_name } = body;
             if (!fullText || typeof fullText !== 'string') {
                 return res.status(400).json({ error: '小说正文不能为空' });
             }
@@ -376,7 +484,6 @@ async function init(router) {
             }
 
             const bookTitle = sanitizeFilename(characterName || '我的小说连载');
-            const targetFileName = `${bookTitle}.txt`;
 
             const dirResult = resolveTargetDirectory(save_dir);
             if (!dirResult.success) {
@@ -385,7 +492,9 @@ async function init(router) {
             const targetDir = dirResult.dir;
             await fs.promises.mkdir(targetDir, { recursive: true });
 
-            const targetFilePath = path.join(targetDir, targetFileName);
+            // 聊天 ID 锚定：全书重写同样走改名跟随（sync-all 内容本身就是新书名的全文，无需首行替换，但仍需迁移旧文件）
+            const anchorResult = await resolveAnchoredTargetPath({ chat_anchor, file_name, characterName, targetDir, bookTitle });
+            const targetFilePath = anchorResult.targetFilePath;
 
             await runInFileQueue(targetFilePath, async () => {
                 // 确保包含 UTF-8 BOM 标识
@@ -398,7 +507,9 @@ async function init(router) {
 
             return res.json({
                 success: true,
-                file: relPath
+                file: relPath,
+                ...(anchorResult.renamedFrom ? { renamed_from: anchorResult.renamedFrom } : {}),
+                ...(anchorResult.keptName ? { kept_name: true } : {})
             });
         } catch (error) {
             console.error(`[${pluginName}] 全量同步异常:`, error);

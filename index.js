@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.8.2',             // 扩展版本号
+    version: '1.9.0',             // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -223,16 +223,17 @@ function getBookTitle(settings, speakerName = '') {
         return charName;
     }
 
-    // 获取当前对话标题或文件名（自动区分同一角色的不同聊天会话 / 平行分支）
+    // 获取当前对话标题：显示标题(chatMetadata.title)优先，其次角色卡当前聊天文件名，最后聊天文件 ID
+    // （与群聊分支"标题跟随"语义一致：改名后书名即时跟随，配合服务端 ID 锚定注册表实现小说文件自动更名）
     let chatTitle = '';
-    if (Array.isArray(charList) && typeof chid !== 'undefined' && charList[chid]) {
+    if (ctx.chatMetadata && typeof ctx.chatMetadata === 'object' && ctx.chatMetadata.title) {
+        chatTitle = String(ctx.chatMetadata.title).trim();
+    }
+    if (!chatTitle && Array.isArray(charList) && typeof chid !== 'undefined' && charList[chid]) {
         const charObj = charList[chid];
         if (charObj.chat && typeof charObj.chat === 'string') {
             chatTitle = charObj.chat.replace(/\.jsonl$/i, '').trim();
         }
-    }
-    if (!chatTitle && ctx.chatMetadata && typeof ctx.chatMetadata === 'object' && ctx.chatMetadata.title) {
-        chatTitle = String(ctx.chatMetadata.title).trim();
     }
     if (!chatTitle) {
         const cId = ctx.chatId || window.chat_id;
@@ -250,6 +251,26 @@ function getBookTitle(settings, speakerName = '') {
     }
 
     return charName;
+}
+
+// 多账号前缀：仅多用户模式能检测到 currentUser 时生效（防御式多候选读取字段名）
+function getAccountPrefix() {
+    const acct = ctx.currentUser || (typeof window !== 'undefined' ? window.currentUser : null);
+    const name = acct && (acct.name || acct.handle || acct.userName);
+    if (!name) return '';
+    const safe = sanitizeFilename(String(name)).trim();
+    return safe ? `[${safe}] ` : '';
+}
+
+// 真实磁盘文件名：账号前缀 + 书名（书卡展示与写入载荷共用，保证两端一致）
+function getBookFileName(settings) {
+    return `${sanitizeFilename(getAccountPrefix() + getBookTitle(settings))}.txt`;
+}
+
+// 聊天文件 ID 锚点（去掉 .jsonl 后缀）：服务端注册表据此实现聊天改名自动跟随重命名
+function getChatAnchor() {
+    const cId = ctx.chatId || (typeof window !== 'undefined' ? window.chat_id : null);
+    return (typeof cId === 'string') ? cId.replace(/\.jsonl$/i, '') : '';
 }
 
 const INLINE_TAGS = new Set(['b', 'i', 'u', 's', 'em', 'strong', 'span', 'sub', 'sup', 'small', 'del', 'mark']);
@@ -646,6 +667,8 @@ async function postChapterToServer(payload) {
             success: true,
             file: data.file,
             skipped: data.skipped,
+            renamed_from: data.renamed_from,
+            kept_name: data.kept_name,
             is_regenerate: (typeof data.is_regenerate !== 'undefined') ? data.is_regenerate : payload.is_regenerate
         };
     } catch (error) {
@@ -771,7 +794,9 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
         chapterStyle: settings.chapter_style || 'numbered_floor',
         save_dir: settings.save_dir || '',
         is_regenerate: isRegenerate,
-        floor: floor
+        floor: floor,
+        chat_anchor: getChatAnchor(),
+        file_name: getBookFileName(settings)
     };
 
     const res = await postChapterToServer(payload);
@@ -786,13 +811,19 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
 
         const targetFile = res.file || `${bookTitle}.txt`;
 
+        // 聊天改名自动跟随：服务端 ID 锚定注册表检测到书名变化，已同步更名小说文件
+        const renameSuffix = res.renamed_from ? '（检测到聊天改名，小说文件已同步更名）' : '';
+        if (res.renamed_from && settings.show_toast !== false && window.toastr) {
+            window.toastr.info(`小说文件已跟随聊天改名：${res.renamed_from} → ${targetFile}`, '小说连载', { timeOut: 5000 });
+        }
+
         if (res.skipped) {
             updateRecentStatus('skipped', `${sectionLabel}末尾内容重复，已自动略过写入`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
                 window.toastr.info(`${sectionLabel}内容与前文重复，已略过`, '小说连载', { timeOut: 2500 });
             }
         } else if (res.is_regenerate || isRegenerate) {
-            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel}（重新生成已替换更新）${snippetSuffix}`, targetFile);
+            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel}（重新生成已替换更新）${snippetSuffix}${renameSuffix}`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
                 throttledNovelSuccessToast(`${sectionLabel}${floorLabel}已更新为最新生成版本${snippetSuffix}`, '小说连载', {
                     timeOut: 3000,
@@ -801,7 +832,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
             }
         } else {
             // 2. 更新完成提示（顶栏指示灯与面板卡片）
-            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel} 连载成功！${snippetSuffix}`, targetFile);
+            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel} 连载成功！${snippetSuffix}${renameSuffix}`, targetFile);
 
             // 3. 屏幕 Toast 提示通知
             if (settings.show_toast !== false && window.toastr) {
@@ -878,7 +909,9 @@ async function ensureGreetingSerialized(settings, chatLog) {
         save_dir: settings.save_dir || '',
         is_regenerate: false,
         is_greeting: true,
-        floor: 1
+        floor: 1,
+        chat_anchor: getChatAnchor(),
+        file_name: getBookFileName(settings)
     });
 
     if (res && res.success && !res.skipped) {
@@ -958,8 +991,7 @@ async function handleMessageSave(messageIdOrData, isFromUser = false) {
  */
 function updateDrawerHeaderFileBadge(settings = null) {
     const curSettings = settings || getSettings();
-    const rawTitle = getBookTitle(curSettings);
-    const fileName = `${sanitizeFilename(rawTitle)}.txt`;
+    const fileName = getBookFileName(curSettings);
     const prefix = curSettings.save_dir 
         ? (curSettings.save_dir.replace(/[\\/]+$/, '') + '/') 
         : 'SillyTavern/plugins/auto-save/logs/';
@@ -1036,7 +1068,9 @@ async function executeSyncAll(isSilent = false) {
             body: JSON.stringify({
                 characterName: bookTitle,
                 fullText: novelText,
-                save_dir: settings.save_dir || ''
+                save_dir: settings.save_dir || '',
+                chat_anchor: getChatAnchor(),
+                file_name: getBookFileName(settings)
             }),
         });
 
@@ -1045,15 +1079,20 @@ async function executeSyncAll(isSilent = false) {
             const targetFile = data.file || `${bookTitle}.txt`;
             recentStatus.chapter = chapterCount;
             seedLastSavedSignature();
+            // 聊天改名自动跟随：全书同步同样可能触发小说文件更名
+            const syncRenameSuffix = data.renamed_from ? '（检测到聊天改名，小说文件已同步更名）' : '';
             if (!isSilent) {
-                updateRecentStatus('success', `全书共 ${chapterCount} 个章节已完整同步！`, targetFile);
+                if (data.renamed_from && window.toastr) {
+                    window.toastr.info(`小说文件已跟随聊天改名：${data.renamed_from} → ${targetFile}`, '小说连载', { timeOut: 5000 });
+                }
+                updateRecentStatus('success', `全书共 ${chapterCount} 个章节已完整同步！${syncRenameSuffix}`, targetFile);
                 if (window.toastr) {
                     window.toastr.success(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！后续 AI 回复将接着往后连载。`, '小说连载');
                 } else {
                     alert(`已成功同步全书共 ${chapterCount} 个章节至：${targetFile}！`);
                 }
             } else {
-                updateRecentStatus('success', `连载已自动校准同步（共 ${chapterCount} 章）`, targetFile);
+                updateRecentStatus('success', `连载已自动校准同步（共 ${chapterCount} 章）${syncRenameSuffix}`, targetFile);
             }
         } else {
             const errData = await response.json().catch(() => ({}));
@@ -1377,8 +1416,7 @@ async function renderSettingsUI(cachedStatus = null) {
         updateRecentStatus('ready', '连载服务已就绪，已自动开启小说连载');
     }
 
-    const rawTitle = getBookTitle(settings);
-    const initialFileName = `${sanitizeFilename(rawTitle)}.txt`;
+    const initialFileName = getBookFileName(settings);
     const initialDir = settings.save_dir ? (settings.save_dir.replace(/[\\/]+$/, '') + '/') : 'SillyTavern/plugins/auto-save/logs/';
 
     let panel = document.getElementById('auto-save-to-txt-settings');

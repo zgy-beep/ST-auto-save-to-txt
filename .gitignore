@@ -5,6 +5,10 @@
 plugins/auto-save/logs/*
 !plugins/auto-save/logs/.gitkeep
 
+# 聊天 ID 锚定注册表（服务端本机状态，随部署生成，绝不上传 GitHub）
+plugins/auto-save/.novel-registry.json
+plugins/auto-save/.novel-registry.json.bak
+
 # Syncthing (华为家庭存储 / 私有云同步元数据)
 .stfolder/
 .stversions/
