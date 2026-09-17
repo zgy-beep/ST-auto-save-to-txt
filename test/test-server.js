@@ -66,7 +66,7 @@ async function runTests() {
     try {
         // 测试 0: 服务端健康状态探针 (/status)
         const res0 = await router.dispatch('GET', '/status', {});
-        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.10.0', '测试 0: 服务端状态探针正常响应且版本为 1.10.0');
+        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.10.1', '测试 0: 服务端状态探针正常响应且版本为 1.10.1');
 
         const testChar = '我的仙侠传奇';
         const testPayload1 = {

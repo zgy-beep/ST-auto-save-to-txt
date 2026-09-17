@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.10.0',            // 扩展版本号
+    version: '1.10.1',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -1590,6 +1590,9 @@ async function renderSettingsUI(cachedStatus = null) {
 
     let panel = document.getElementById('auto-save-to-txt-settings');
     if (panel) panel.remove();
+    // 弹窗若已移出面板挂载在 body，旧面板移除时清理不掉，先手动清除防重复 ID
+    const staleModal = document.getElementById('novel_preview_modal');
+    if (staleModal) staleModal.remove();
 
     panel = document.createElement('div');
     panel.id = 'auto-save-to-txt-settings';
@@ -1999,6 +2002,11 @@ async function renderSettingsUI(cachedStatus = null) {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') closeFilterPreviewModal();
         });
+        // 弹窗挂载到 body：抽屉折叠（display:none）时也能从楼层工具条正常弹出
+        // （必须在事件绑定完成之后再移动，监听器挂在元素上随元素走）
+        if (document.body.contains(modalOverlay)) {
+            document.body.appendChild(modalOverlay);
+        }
     }
 
     // 纯前端一键导出整本小说：与最新 AI 楼层内嵌工具条共用 exportNovelText()
