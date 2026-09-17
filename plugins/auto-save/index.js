@@ -1,5 +1,5 @@
 /**
- * SillyTavern 聊天小说连载阅读服务端插件 (v1.11.0)
+ * SillyTavern 聊天小说连载阅读服务端插件 (v1.11.1)
  * 
  * 文件路径：plugins/auto-save/index.js
  * 
@@ -348,7 +348,7 @@ async function init(router) {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.11.0',
+            version: '1.11.1',
             logsDir: LOGS_DIR
         });
     });
