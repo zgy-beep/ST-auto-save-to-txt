@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.9.0',             // 扩展版本号
+    version: '1.10.0',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -115,6 +115,127 @@ function updateRecentStatus(state, text, file = '') {
             detailEl.innerHTML = `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${text}`;
         }
     }
+}
+
+// ==================== 酒馆助手 (JS-Slash-Runner) 软依赖桥接 ====================
+// 检测到 window.TavernHelper 即启用增强；未安装时一切功能走 ST 原生降级路径，绝不报错
+const tavernHelper = { ready: false, api: null };
+
+function detectTavernHelper() {
+    return (typeof window !== 'undefined' && window.TavernHelper && typeof window.TavernHelper.getTavernHelperVersion === 'function')
+        ? window.TavernHelper : null;
+}
+
+function initTavernHelperBridge() {
+    const activate = () => {
+        const api = detectTavernHelper();
+        if (!api || tavernHelper.ready) return;
+        tavernHelper.api = api;
+        tavernHelper.ready = true;
+        try { onTavernHelperReady(); } catch (e) { console.warn('[AutoSaveTxt] 酒馆助手集成初始化失败:', e); }
+    };
+    if (eventSource && event_types && event_types.APP_READY) eventSource.on(event_types.APP_READY, activate);
+    activate();
+    let tries = 0;
+    const timer = setInterval(() => {
+        tries++;
+        activate();
+        if (tavernHelper.ready || tries >= 15) clearInterval(timer);
+    }, 1000);
+}
+
+function onTavernHelperReady() {
+    try {
+        console.log('[AutoSaveTxt] 已连接酒馆助手 v' + (tavernHelper.api.getTavernHelperVersion?.() || '?') + '，启用楼层徽标增强与改名即时刷新');
+    } catch (e) { /* 日志失败无关紧要 */ }
+    // ② 角色改名即时刷新书卡与标签工具（原先要等到下一次写入才生效）
+    try {
+        if (typeof tavernHelper.api.eventOn === 'function') {
+            tavernHelper.api.eventOn('CHARACTER_RENAMED', () => {
+                updateDrawerHeaderFileBadge();
+                renderTagTools();
+            });
+        }
+    } catch (e) { console.warn('[AutoSaveTxt] 酒馆助手事件订阅失败:', e); }
+    refreshMessageBadges();
+}
+
+// 楼层序号 → 已入书章节号（徽标展示用；切换聊天时重算）
+let savedChapterMap = {};
+
+function computeChapterMap(settings, chatLog) {
+    const map = {};
+    if (!Array.isArray(chatLog)) return map;
+    let chapter = 0;
+    for (let i = 0; i < chatLog.length; i++) {
+        const m = chatLog[i];
+        if (!m) continue;
+        if (m.is_user && !settings.include_user_dialogue) continue;
+        if (getCleanedMessage(m, i, settings)) { chapter++; map[i] = chapter; }
+    }
+    return map;
+}
+
+// 定位楼层正文 DOM：优先酒馆助手的稳定楼层定位，降级 ST 原生选择器
+function findMessageTextEl(index) {
+    if (typeof document === 'undefined') return null;
+    // 优先酒馆助手的稳定楼层定位
+    if (tavernHelper.ready && tavernHelper.api.displayed_message && typeof tavernHelper.api.displayed_message.retrieveDisplayedMessage === 'function') {
+        try {
+            const $el = tavernHelper.api.displayed_message.retrieveDisplayedMessage(index);
+            const dom = ($el && $el.length) ? ($el[0].matches?.('.mes_text') ? $el[0] : $el[0].querySelector?.('.mes_text')) : null;
+            if (dom) return dom;
+        } catch (e) { /* 降级原生 */ }
+    }
+    const mesEl = document.querySelector(`.mes[mesid="${index}"]`);
+    return mesEl ? mesEl.querySelector('.mes_text') : null;
+}
+
+// ① 楼层"已入书"徽标：幂等重绘（先清后插），无 DOM 环境（node 测试）直接跳过
+function refreshMessageBadges() {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll('.novel-mes-badge').forEach(el => el.remove());
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    for (const idxStr of Object.keys(savedChapterMap)) {
+        const idx = Number(idxStr);
+        if (!chatLog[idx]) continue;
+        const textEl = findMessageTextEl(idx);
+        if (!textEl) continue;
+        const badge = document.createElement('div');
+        badge.className = 'novel-mes-badge';
+        badge.title = '该楼层已写入连载小说文件（第 ' + savedChapterMap[idxStr] + ' 章）';
+        badge.innerHTML = `<i class="fa-solid fa-book-bookmark"></i> 第 ${savedChapterMap[idxStr]} 章已入书`;
+        textEl.appendChild(badge);
+    }
+}
+
+// ④ 最新 AI 楼层内嵌快捷工具条：幂等重绘（先清后插），无 DOM 环境（node 测试）直接跳过
+function refreshLatestToolbar() {
+    if (typeof document === 'undefined') return;
+    document.getElementById('novel-latest-toolbar')?.remove();
+    const settings = getSettings();
+    if (!settings.enabled) return;
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    let latestIdx = -1;
+    for (let i = chatLog.length - 1; i >= 0; i--) {
+        const m = chatLog[i];
+        if (m && !m.is_user) { latestIdx = i; break; }
+    }
+    if (latestIdx < 0 || Object.keys(savedChapterMap).length === 0) return;
+    const totalChapters = Math.max(recentStatus.chapter, ...Object.values(savedChapterMap));
+    const textEl = findMessageTextEl(latestIdx);
+    if (!textEl) return;
+    const bar = document.createElement('div');
+    bar.id = 'novel-latest-toolbar';
+    bar.className = 'novel-latest-toolbar';
+    bar.innerHTML = `
+        <span class="novel-lt-info"><i class="fa-solid fa-book-open"></i> 已连载 ${totalChapters} 章</span>
+        <button type="button" class="novel-lt-btn" data-lt="preview"><i class="fa-solid fa-eye"></i> 查看过滤效果</button>
+        <button type="button" class="novel-lt-btn" data-lt="export"><i class="fa-solid fa-download"></i> 导出整本 TXT</button>
+    `;
+    bar.querySelector('[data-lt="preview"]').addEventListener('click', (e) => { e.stopPropagation(); openFilterPreviewModal(); });
+    bar.querySelector('[data-lt="export"]').addEventListener('click', (e) => { e.stopPropagation(); exportNovelText(); });
+    textEl.appendChild(bar);
 }
 
 function getSettings() {
@@ -842,6 +963,13 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
                 });
             }
         }
+
+        // ①④ 非跳过的成功写入：登记楼层章节号并重绘"已入书"徽标与最新楼层工具条
+        if (!res.skipped) {
+            savedChapterMap[messageIndex] = chapterNumber;
+            refreshMessageBadges();
+            refreshLatestToolbar();
+        }
     } else {
         const is404 = res && (res.status === 404 || (res.error && String(res.error).includes('404')));
         if (is404) {
@@ -919,6 +1047,10 @@ async function ensureGreetingSerialized(settings, chatLog) {
         lastSettledSavedIndex = Math.max(lastSettledSavedIndex, 0);
         recentStatus.chapter = Math.max(recentStatus.chapter, 1);
         updateRecentStatus('success', `第 1 章 · ${speakerName} (原楼层: 1)（问候语已入书，连载正式开始）`, res.file || `${bookTitle}.txt`);
+        // ①④ 问候语入书：登记第 1 章并重绘徽标与工具条
+        savedChapterMap[0] = 1;
+        refreshMessageBadges();
+        refreshLatestToolbar();
     }
 }
 
@@ -1079,6 +1211,10 @@ async function executeSyncAll(isSilent = false) {
             const targetFile = data.file || `${bookTitle}.txt`;
             recentStatus.chapter = chapterCount;
             seedLastSavedSignature();
+            // ①④ 全书同步后重算楼层入书映射并重绘徽标与最新楼层工具条
+            savedChapterMap = computeChapterMap(settings, chatLog);
+            refreshMessageBadges();
+            refreshLatestToolbar();
             // 聊天改名自动跟随：全书同步同样可能触发小说文件更名
             const syncRenameSuffix = data.renamed_from ? '（检测到聊天改名，小说文件已同步更名）' : '';
             if (!isSilent) {
@@ -1306,6 +1442,39 @@ function openFilterPreviewModal() {
 function closeFilterPreviewModal() {
     const overlay = document.getElementById('novel_preview_modal');
     if (overlay) overlay.style.display = 'none';
+}
+
+// 纯前端一键导出整本小说（自动附加 UTF-8 BOM，彻底解决手机阅读器/老Windows乱码）
+// 抽出为具名函数：面板【导出整本 TXT】按钮与最新 AI 楼层内嵌工具条共用
+function exportNovelText() {
+    const settings = getSettings();
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    if (!chatLog || chatLog.length === 0) {
+        if (window.toastr) window.toastr.info('当前没有任何聊天内容可供导出。', '小说连载');
+        return;
+    }
+
+    const { bookTitle, novelText, chapterCount } = buildNovelText(settings, chatLog);
+
+    if (chapterCount === 0) {
+        if (window.toastr) window.toastr.warning('没有可导出的有效剧情章节。', '小说连载');
+        return;
+    }
+
+    const safeFileName = sanitizeFilename(bookTitle);
+    const blob = new Blob(['\uFEFF' + novelText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safeFileName}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    if (window.toastr) {
+        window.toastr.success(`已成功编排并下载《${bookTitle}》共 ${chapterCount} 个章节！`, '小说连载');
+    }
 }
 
 /**
@@ -1832,38 +2001,10 @@ async function renderSettingsUI(cachedStatus = null) {
         });
     }
 
-    // 纯前端一键导出整本小说（自动附加 UTF-8 BOM，彻底解决手机阅读器/老Windows乱码）
+    // 纯前端一键导出整本小说：与最新 AI 楼层内嵌工具条共用 exportNovelText()
     const exportBtn = panel.querySelector('#novel_export_all_btn');
     if (exportBtn) {
-        exportBtn.addEventListener('click', () => {
-            const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
-            if (!chatLog || chatLog.length === 0) {
-                if (window.toastr) window.toastr.info('当前没有任何聊天内容可供导出。', '小说连载');
-                return;
-            }
-
-            const { bookTitle, novelText, chapterCount } = buildNovelText(settings, chatLog);
-
-            if (chapterCount === 0) {
-                if (window.toastr) window.toastr.warning('没有可导出的有效剧情章节。', '小说连载');
-                return;
-            }
-
-            const safeFileName = sanitizeFilename(bookTitle);
-            const blob = new Blob(['\uFEFF' + novelText], { type: 'text/plain;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${safeFileName}.txt`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            if (window.toastr) {
-                window.toastr.success(`已成功编排并下载《${bookTitle}》共 ${chapterCount} 个章节！`, '小说连载');
-            }
-        });
+        exportBtn.addEventListener('click', () => exportNovelText());
     }
 
     // 绑定测试按钮
@@ -2159,6 +2300,9 @@ jQuery(async () => {
 
     seedLastSavedSignature();
 
+    // 酒馆助手 (JS-Slash-Runner) 软依赖桥接：APP_READY 后探测 + 1s 轮询最多 15 次兜底
+    initTavernHelperBridge();
+
     if (eventSource && event_types) {
         eventSource.on(event_types.MESSAGE_RECEIVED, (data, genType) => {
             // 角色问候语（新开聊天 / 重新生成问候语 / 加载仅含问候的聊天）不触发连载：
@@ -2183,6 +2327,8 @@ jQuery(async () => {
                 const settings = getSettings();
                 if (settings.buffer_latest_message) {
                     updateRecentStatus('idle', '草稿缓冲中（所选分支将在你发送下一条消息后定稿入书）');
+                    refreshMessageBadges();
+                    refreshLatestToolbar();
                     return;
                 }
                 // 角色问候语的滑动/重新生成同样不入书：连载只从真实对话开始
@@ -2194,6 +2340,9 @@ jQuery(async () => {
                 handleMessageSave(data, false);
                 updateDrawerHeaderFileBadge();
                 debouncedRenderTagTools();
+                // ST 滑动楼层会重建 mes_text 导致内嵌元素丢失：幂等重绘补救
+                refreshMessageBadges();
+                refreshLatestToolbar();
             });
         }
 
@@ -2209,6 +2358,9 @@ jQuery(async () => {
             eventSource.on(event_types.MESSAGE_EDITED, () => {
                 debouncedRenderTagTools();
                 updateDrawerHeaderFileBadge();
+                // ST 编辑楼层会重建 mes_text 导致内嵌元素丢失：幂等重绘补救
+                refreshMessageBadges();
+                refreshLatestToolbar();
             });
         }
 
@@ -2217,6 +2369,11 @@ jQuery(async () => {
             seedLastSavedSignature();
             renderTagTools();
             updateDrawerHeaderFileBadge();
+            // ①④ 切聊天/角色/群后重算楼层入书映射并重绘徽标与最新楼层工具条
+            const ctxChat = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+            savedChapterMap = computeChapterMap(getSettings(), ctxChat);
+            refreshMessageBadges();
+            refreshLatestToolbar();
         };
 
         if (event_types.CHAT_CHANGED) {

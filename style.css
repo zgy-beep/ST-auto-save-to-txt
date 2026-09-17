@@ -794,3 +794,49 @@
     border-left: 3px solid var(--SmartThemeQuoteColor, #3498db);
     padding-left: 8px;
 }
+
+/* ==================== v1.10.0 楼层徽标 & 最新楼层快捷工具条 ==================== */
+/* 楼层"已入书"徽标：低调落在消息文本末尾 */
+.novel-mes-badge {
+    margin-top: 8px;
+    padding-top: 5px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.12);
+    font-size: 11px;
+    opacity: 0.65;
+    color: var(--SmartThemeEmColor, #ccc);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    user-select: none;
+}
+.novel-mes-badge i { color: #ffd166; }
+
+/* 最新 AI 楼层快捷工具条 */
+.novel-latest-toolbar {
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 12px;
+}
+.novel-lt-info { color: var(--SmartThemeEmColor, #ddd); display: inline-flex; align-items: center; gap: 5px; }
+.novel-lt-info i { color: #ffd166; }
+.novel-lt-btn {
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--SmartThemeEmColor, #ddd);
+    border-radius: 5px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s ease;
+}
+.novel-lt-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
