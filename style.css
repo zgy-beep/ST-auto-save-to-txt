@@ -936,7 +936,7 @@
 .novel-chip-tooltip { max-width: min(340px, calc(100vw - 20px)); }
 
 /* 移动端：悬浮栏避让底部输入区；弹窗改贴底全宽抽屉式，内容完整可滚动 */
-@media (max-width: 600px) {
+@media (max-width: 768px) {
     .novel-quickbar { left: 8px; bottom: 112px; }
     .novel-qb-pill { padding: 8px 14px; font-size: 13px; }
     .novel-qb-gear { width: 36px; height: 36px; font-size: 15px; }
@@ -949,3 +949,10 @@
     .novel-modal-header { font-size: 14px; flex-wrap: wrap; }
     .novel-modal-body { font-size: 15px; line-height: 1.75; -webkit-overflow-scrolling: touch; }
 }
+
+/* ==================== v1.11.2 弹窗定位健壮性（旧内核/小屏设备） ==================== */
+/* 显式四向定位：旧 WebView 不认 inset 时仍铺满视口（同规则后声明覆盖，两条并存互备） */
+.novel-modal-overlay { top: 0; right: 0; bottom: 0; left: 0; }
+/* 头部（含关闭按钮）绝不被压缩消失 */
+.novel-modal-header { flex-shrink: 0; }
+.novel-modal { min-height: 0; }

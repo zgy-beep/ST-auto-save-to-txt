@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.11.1',            // 扩展版本号
+    version: '1.11.2',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -253,12 +253,15 @@ function buildQuickBar() {
             <button type="button" id="novel_qb_pill" class="novel-qb-pill" title="点击展开/收起快捷设置">
                 <i class="fa-solid fa-book-bookmark"></i> <span id="novel_qb_pill_text">连载未开始</span>
             </button>
-            <button type="button" id="novel_qb_settings" class="novel-qb-gear" title="打开完整设置面板"><i class="fa-solid fa-gear"></i></button>
+            <button type="button" id="novel_qb_settings" class="novel-qb-gear novel-qb-open-settings" title="打开完整设置面板"><i class="fa-solid fa-gear"></i></button>
         </div>
         <div id="novel_qb_panel" class="novel-qb-panel" style="display:none;">
             <div class="novel-qb-head">
                 <span id="novel_qb_title" class="novel-qb-title">小说连载</span>
-                <button type="button" id="novel_qb_collapse" class="novel-qb-icon-btn" title="收起"><i class="fa-solid fa-chevron-down"></i></button>
+                <span class="novel-qb-head-btns">
+                    <button type="button" class="novel-qb-icon-btn novel-qb-open-settings" title="打开完整设置面板"><i class="fa-solid fa-gear"></i></button>
+                    <button type="button" id="novel_qb_collapse" class="novel-qb-icon-btn" title="收起"><i class="fa-solid fa-chevron-down"></i></button>
+                </span>
             </div>
             <label class="novel-qb-row"><input type="checkbox" id="novel_qb_enabled" /> 开启小说自动连载</label>
             <label class="novel-qb-row"><input type="checkbox" id="novel_qb_toast" /> 更新时弹窗提示</label>
@@ -284,8 +287,8 @@ function buildQuickBar() {
     };
     pill.addEventListener('click', () => setCollapsed(!settings.quickbar_collapsed));
     bar.querySelector('#novel_qb_collapse').addEventListener('click', () => setCollapsed(true));
-    // 齿轮常显在药丸行：不展开面板也能直达完整设置
-    bar.querySelector('#novel_qb_settings').addEventListener('click', () => openFullSettings());
+    // 齿轮双入口（药丸行常显 + 面板头部）：批量按类绑定，直达完整设置
+    bar.querySelectorAll('.novel-qb-open-settings').forEach(btn => btn.addEventListener('click', () => openFullSettings()));
 
     // 点击面板外部任意处收起（buildQuickBar 只构建一次，天然只绑一次；node 环境已守卫）
     document.addEventListener('click', (e) => {
@@ -1768,7 +1771,7 @@ async function renderSettingsUI(cachedStatus = null) {
     // 默认折叠，顶栏极简整洁（与酒馆原生抽屉 1:1 一致）；展开后为四分区信息架构：开关置顶，依次为 当前连载 / 正文过滤 / 排版与行为 / 文件与导出
     panel.innerHTML = `
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b>小说连载阅读 (Novel Stream)</b>
+            <b>小说连载阅读 <span style="font-weight: normal; opacity: 0.7;">v${DEFAULT_SETTINGS.version}</span></b>
             <div style="display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;">
                 <span id="novel_header_status" style="font-size: 11px; opacity: 0.85;"></span>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
