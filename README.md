@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-1.11.4-brightgreen.svg?style=flat-square)
+![Version](https://img.shields.io/badge/Version-1.12.0-brightgreen.svg?style=flat-square)
 ![SillyTavern](https://img.shields.io/badge/SillyTavern-%3E%3D1.12.0-blue.svg?style=flat-square)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20Docker%20%7C%20NAS%20%7C%20Termux-orange.svg?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-purple.svg?style=flat-square)

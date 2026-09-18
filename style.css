@@ -841,109 +841,12 @@
 }
 .novel-lt-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
 
-/* ==================== v1.11.0 底部常驻快捷栏 ==================== */
-.novel-quickbar {
-    position: fixed;
-    left: 10px;
-    bottom: 10px;
-    z-index: 9000;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 12px;
-}
-.novel-qb-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(20, 22, 28, 0.85);
-    color: var(--SmartThemeEmColor, #eee);
-    cursor: pointer;
-    backdrop-filter: blur(6px);
-    transition: all 0.2s ease;
-    align-self: flex-start;
-}
-.novel-qb-pill:hover { border-color: rgba(255, 209, 102, 0.5); color: #ffd166; }
-.novel-qb-pill i { color: #ffd166; }
-
-.novel-qb-panel {
-    width: 230px;
-    background: var(--SmartThemeBlurTintColor, rgba(22, 24, 30, 0.97));
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 8px;
-    padding: 10px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(8px);
-}
-.novel-qb-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.novel-qb-title { font-weight: 700; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.novel-qb-head-btns { display: inline-flex; gap: 4px; flex-shrink: 0; }
-.novel-qb-icon-btn {
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--SmartThemeEmColor, #ccc);
-    border-radius: 4px;
-    width: 22px; height: 22px;
-    font-size: 11px;
-    cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-}
-.novel-qb-icon-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
-.novel-qb-row { display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; font-size: 12px; color: var(--SmartThemeEmColor, #ddd); }
-.novel-qb-actions { display: flex; gap: 6px; }
-.novel-qb-btn {
-    flex: 1;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(255, 255, 255, 0.07);
-    color: var(--SmartThemeEmColor, #ddd);
-    border-radius: 5px;
-    padding: 4px 8px;
-    font-size: 12px;
-    cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-    transition: all 0.15s ease;
-}
-.novel-qb-btn:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
-
-/* ==================== v1.11.1 快捷栏齿轮常显 / 外点收起 / 移动端适配 ==================== */
-.novel-qb-pillrow { display: flex; align-items: center; gap: 6px; }
-.novel-qb-gear {
-    width: 30px; height: 30px;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(20, 22, 28, 0.85);
-    color: var(--SmartThemeEmColor, #ccc);
-    cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-    font-size: 13px;
-    backdrop-filter: blur(6px);
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-.novel-qb-gear:hover { border-color: rgba(255, 209, 102, 0.5); color: #ffd166; }
-
-/* 层级提到 ST 底部输入区之上（仍低于过滤预览弹窗 99999）；触屏禁用双击缩放延迟 */
-.novel-quickbar { z-index: 99990; }
-.novel-qb-pill, .novel-qb-gear, .novel-qb-btn, .novel-qb-icon-btn { touch-action: manipulation; }
-
+/* ==================== v1.11.1 移动端适配（快捷栏已于 v1.12.0 移除，保留弹窗贴底与 tooltip 防溢出） ==================== */
 /* chip 悬浮提示窄屏防溢出 */
 .novel-chip-tooltip { max-width: min(340px, calc(100vw - 20px)); }
 
-/* 移动端：悬浮栏避让底部输入区；弹窗改贴底全宽抽屉式，内容完整可滚动 */
+/* 移动端：弹窗改贴底全宽抽屉式，内容完整可滚动 */
 @media (max-width: 768px) {
-    .novel-quickbar { left: 8px; bottom: 112px; }
-    .novel-qb-pill { padding: 8px 14px; font-size: 13px; }
-    .novel-qb-gear { width: 36px; height: 36px; font-size: 15px; }
-    .novel-qb-panel { width: min(250px, calc(100vw - 16px)); }
-    .novel-qb-icon-btn { width: 32px; height: 32px; font-size: 13px; }
-    .novel-qb-btn { padding: 8px 10px; font-size: 13px; }
-
     .novel-modal-overlay { padding: 8px; align-items: flex-end; }
     .novel-modal { width: 100%; max-height: 92vh; border-radius: 10px 10px 6px 6px; }
     .novel-modal-header { font-size: 14px; flex-wrap: wrap; }
@@ -958,13 +861,10 @@
 .novel-modal { min-height: 0; }
 
 /* ==================== v1.11.3 悬浮层级提升（压过酒馆移动端底部抽屉层） ==================== */
-.novel-quickbar { z-index: 1000010; }
 .novel-modal-overlay { z-index: 1000020; }
 .novel-chip-tooltip { z-index: 1000030; }
 
-/* ==================== v1.11.4 快捷栏可视区锚定 + 工具条移动端网格 ==================== */
-/* 快捷栏改绝对定位（top 由 JS 按 scrollY+innerHeight 计算锚定可视区底部，防 fixed 退化被带跑） */
-.novel-quickbar { position: absolute; }
+/* ==================== v1.11.4 工具条移动端网格 ==================== */
 @media (max-width: 768px) {
     .novel-latest-toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .novel-lt-info { grid-column: 1 / -1; }
