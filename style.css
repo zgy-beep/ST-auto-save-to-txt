@@ -956,3 +956,8 @@
 /* 头部（含关闭按钮）绝不被压缩消失 */
 .novel-modal-header { flex-shrink: 0; }
 .novel-modal { min-height: 0; }
+
+/* ==================== v1.11.3 悬浮层级提升（压过酒馆移动端底部抽屉层） ==================== */
+.novel-quickbar { z-index: 1000010; }
+.novel-modal-overlay { z-index: 1000020; }
+.novel-chip-tooltip { z-index: 1000030; }

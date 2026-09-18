@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.11.2',            // 扩展版本号
+    version: '1.11.3',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -350,7 +350,8 @@ function openFullSettings() {
 function syncQuickBar() {
     if (typeof document === 'undefined') return;
     const bar = document.getElementById('novel-quickbar');
-    if (!bar) return;
+    // 自愈：快捷栏被异常清掉时（如主题脚本/移动端抽屉层干预）任何刷新点都能重建
+    if (!bar) { buildQuickBar(); return; }
     const settings = getSettings();
     const mapMax = Object.keys(savedChapterMap).length ? Math.max(...Object.values(savedChapterMap)) : 0;
     const total = Math.max(recentStatus.chapter, mapMax);
@@ -1555,6 +1556,7 @@ function renderFilterPreview() {
  * 打开过滤效果预览弹窗：完整展示过滤后正文 + 字数对比，支持点遮罩 / 右上角 / Esc 关闭
  */
 function openFilterPreviewModal() {
+    if (typeof document === 'undefined') return;
     const overlay = document.getElementById('novel_preview_modal');
     if (!overlay) return;
     const body = document.getElementById('novel_modal_body');
@@ -1572,6 +1574,12 @@ function openFilterPreviewModal() {
             ? escapeHtml(lastFilterPreview.cleaned).replace(/\n/g, '<br>')
             : '<div class="novel-tag-empty" style="color: #f39c12;">过滤后无正文可入书——请检查白名单拼写，或确认正文是否被黑名单全部剔除。</div>');
     }
+    // 健壮定位：部分环境（ancestor transform 等）fixed 会退化为 absolute 跑到文档顶部，
+    // 改用绝对坐标显式锚定当前可视区（scrollY 补偿），任何滚动位置都贴在用户眼前
+    overlay.style.position = 'absolute';
+    overlay.style.top = `${window.scrollY}px`;
+    overlay.style.left = '0';
+    overlay.style.height = `${window.innerHeight}px`;
     overlay.style.display = 'flex';
 }
 
