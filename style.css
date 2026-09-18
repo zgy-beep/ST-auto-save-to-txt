@@ -961,3 +961,12 @@
 .novel-quickbar { z-index: 1000010; }
 .novel-modal-overlay { z-index: 1000020; }
 .novel-chip-tooltip { z-index: 1000030; }
+
+/* ==================== v1.11.4 快捷栏可视区锚定 + 工具条移动端网格 ==================== */
+/* 快捷栏改绝对定位（top 由 JS 按 scrollY+innerHeight 计算锚定可视区底部，防 fixed 退化被带跑） */
+.novel-quickbar { position: absolute; }
+@media (max-width: 768px) {
+    .novel-latest-toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .novel-lt-info { grid-column: 1 / -1; }
+    .novel-lt-btn { width: 100%; }
+}

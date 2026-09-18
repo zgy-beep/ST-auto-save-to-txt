@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.11.3',            // 扩展版本号
+    version: '1.11.4',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -240,6 +240,20 @@ function refreshLatestToolbar() {
 }
 
 // ==================== v1.11.0 主界面底部常驻快捷栏（body 级悬浮，软依赖无关） ====================
+// 快捷栏可视区锚定：与弹窗同理，部分环境 fixed 退化为文档定位会把药丸带跑，
+// 用 scrollY+innerHeight 显式钉在当前可视区底部（桌面 scrollY=0 时视觉等同 fixed）
+function anchorQuickBar() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    const bar = document.getElementById('novel-quickbar');
+    if (!bar) return;
+    const isMobile = window.innerWidth <= 768;
+    const bottomOffset = isMobile ? 112 : 10;
+    const top = (window.scrollY || window.pageYOffset || 0) + window.innerHeight - bar.offsetHeight - bottomOffset;
+    bar.style.position = 'absolute';
+    bar.style.top = Math.max(0, top) + 'px';
+    bar.style.bottom = 'auto';
+}
+
 function buildQuickBar() {
     if (typeof document === 'undefined') return null;
     const existing = document.getElementById('novel-quickbar');
@@ -284,11 +298,18 @@ function buildQuickBar() {
         if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
         if (!collapsed) syncQuickBar();
         qbPanel.style.display = collapsed ? 'none' : 'flex';
+        // 面板展开高度变化后重新钉住可视区底部
+        anchorQuickBar();
     };
     pill.addEventListener('click', () => setCollapsed(!settings.quickbar_collapsed));
     bar.querySelector('#novel_qb_collapse').addEventListener('click', () => setCollapsed(true));
     // 齿轮双入口（药丸行常显 + 面板头部）：批量按类绑定，直达完整设置
     bar.querySelectorAll('.novel-qb-open-settings').forEach(btn => btn.addEventListener('click', () => openFullSettings()));
+
+    // 滚动/缩放/横竖屏切换时重钉可视区（fixed 退化环境也能始终贴底可见）
+    window.addEventListener('scroll', anchorQuickBar, { passive: true });
+    window.addEventListener('resize', anchorQuickBar);
+    window.addEventListener('orientationchange', () => setTimeout(anchorQuickBar, 200));
 
     // 点击面板外部任意处收起（buildQuickBar 只构建一次，天然只绑一次；node 环境已守卫）
     document.addEventListener('click', (e) => {
@@ -329,6 +350,7 @@ function buildQuickBar() {
     bar.querySelector('#novel_qb_export').addEventListener('click', () => exportNovelText());
 
     syncQuickBar();
+    anchorQuickBar();
     return bar;
 }
 
