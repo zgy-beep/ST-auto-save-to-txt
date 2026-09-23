@@ -50,6 +50,7 @@ const DEFAULT_SETTINGS = {
     exclude_tags: 'status,memory,details,variables,analysis,ooc,note,draft,system,log', // 【黑名单】：需剔除的标签块内容
     save_dir: '',                 // 自定义保存文件夹路径（留空则保存至默认 plugins/auto-save/logs；支持任意绝对路径如 D:\MyNovels）
     show_toast: true,             // 连载更新时弹出轻量提示通知
+    show_embedded_toolbar: true,  // 最新 AI 楼层底部是否显示内嵌快捷工具条
     userDisabled: false,          // 用户是否主动手动关闭了连载
 };
 
@@ -214,7 +215,7 @@ function refreshLatestToolbar() {
     if (typeof document === 'undefined') return;
     document.getElementById('novel-latest-toolbar')?.remove();
     const settings = getSettings();
-    if (!settings.enabled) return;
+    if (!settings.enabled || settings.show_embedded_toolbar === false) return;
     const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
     let latestIdx = -1;
     for (let i = chatLog.length - 1; i >= 0; i--) {
@@ -1587,6 +1588,7 @@ async function setNovelEnabled(wantEnable) {
     const enableCheckbox = document.getElementById('novel_save_enabled');
     if (enableCheckbox) enableCheckbox.checked = settings.enabled;
     if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+    refreshLatestToolbar();
     return true;
 }
 
@@ -1659,6 +1661,10 @@ async function renderSettingsUI(cachedStatus = null) {
                     <label class="checkbox_label" title="每当新章节连载更新完成时，在屏幕右上角弹出轻量提示通知">
                         <input type="checkbox" id="novel_show_toast" ${settings.show_toast !== false ? 'checked' : ''} />
                         <span>更新时弹窗提示</span>
+                    </label>
+                    <label class="checkbox_label" title="在最新一条 AI 回复底部显示内嵌快捷操作条（显示连载进度、查看过滤效果、一键导出）">
+                        <input type="checkbox" id="novel_show_embedded_toolbar" ${settings.show_embedded_toolbar !== false ? 'checked' : ''} />
+                        <span>显示内嵌工具条</span>
                     </label>
                 </div>
 
@@ -1916,6 +1922,16 @@ async function renderSettingsUI(cachedStatus = null) {
     }
 
     bindCheck('novel_show_toast', 'show_toast');
+
+    const toolbarEl = panel.querySelector('#novel_show_embedded_toolbar');
+    if (toolbarEl) {
+        toolbarEl.addEventListener('change', (e) => {
+            settings.show_embedded_toolbar = e.target.checked;
+            refreshLatestToolbar();
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+
     bindCheck('novel_include_user', 'include_user_dialogue');
     bindCheck('novel_indent_paragraphs', 'indent_paragraphs');
     bindCheck('novel_buffer_latest', 'buffer_latest_message');
