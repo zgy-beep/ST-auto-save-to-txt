@@ -47,7 +47,7 @@ check('函数体调用 injectWandEntry', /injectWandEntry\s*\(/.test(refreshFn |
 check('函数体调用 syncWandEntryState', /syncWandEntryState\s*\(/.test(refreshFn || ''), true);
 
 console.log('\n=== ② 入口架构（v1.13：魔法棒菜单 + 悬浮窗，不再进扩展抽屉）===');
-for (const fn of ['injectWandEntry', 'syncWandEntryState', 'openFullSettings', 'ensureSettingsModal',
+for (const fn of ['injectWandEntry', 'syncWandEntryState', 'ensureSettingsModal',
     'openNovelSettingsModal', 'closeNovelSettingsModal', 'ensurePreviewModal',
     'bindFloatingWindowDrag', 'onFwPointerMove', 'onFwPointerUp', 'applyFloatPos', 'clampFloatPos']) {
     check(`${fn} 已定义`, src.includes(`function ${fn}(`), true);
@@ -66,23 +66,28 @@ check('悬浮窗默认开启（主入口之一）', src.includes('show_floating_
 check('悬浮窗位置持久化字段 float_pos', src.includes('float_pos:'), true);
 check('老用户一次性迁移标记 ui_v113_migrated', src.includes('ui_v113_migrated'), true);
 
-console.log('\n=== ③ 悬浮窗拖拽与展开行为 ===');
+console.log('\n=== ③ 悬浮入口（v1.14 纯入口：点击开弹窗 + 可拖拽移动）===');
 const dragFn = extractFn('bindFloatingWindowDrag') || '';
 check('拖拽把手绑定 pointerdown', /pointerdown/.test(dragFn), true);
 check('拖拽把手避让按钮/输入框', /closest\('button, input/.test(dragFn), true);
 const moveFn = extractFn('onFwPointerMove') || '';
-check('4px 阈值区分「点击展开」与「拖动移动」', /Math\.abs\(dx\) < 4 && Math\.abs\(dy\) < 4/.test(moveFn), true);
+check('4px 阈值区分「点击打开弹窗」与「拖动移动」', /Math\.abs\(dx\) < 4 && Math\.abs\(dy\) < 4/.test(moveFn), true);
 check('拖拽坐标经 clampFloatPos 夹取（拖不出屏幕）', /clampFloatPos\(fwDrag\.startLeft/.test(moveFn), true);
 const upFn = extractFn('onFwPointerUp') || '';
 check('拖动结束写入 float_pos 并持久化', /settings\.float_pos = \{/.test(upFn) && /saveSettingsDebounced/.test(upFn), true);
 check('拖动后抑制补发的 click（fwLastDragAt）', /fwLastDragAt = Date\.now\(\)/.test(upFn), true);
-const pillClick = (src.match(/novel_fw_pill'\)\.addEventListener\('click'[\s\S]{0,220}/) || [''])[0];
-check('药丸点击含拖动守卫', /fwLastDragAt/.test(pillClick), true);
+const buildFn = extractFn('buildFloatingWindow') || '';
+check('药丸点击即打开设置弹窗（纯入口）',
+    /pill\.addEventListener\('click'[\s\S]{0,160}activate\(\)/.test(buildFn) && /openNovelSettingsModal\(\)/.test(buildFn), true);
+check('点击与拖动区分（fwLastDragAt 守卫）', /Date\.now\(\) - fwLastDragAt < 300/.test(buildFn), true);
+check('药丸可键盘触发（role=button + Enter/Space）', /role="button"/.test(buildFn) && /'Enter' \|\| e\.key === ' '/.test(buildFn), true);
+check('悬浮入口已无二级展开面板', /novel-fw-panel/.test(src), false);
+check('面板相关设置项已清理（floating_window_collapsed）', /floating_window_collapsed/.test(src), false);
+check('无遗留的展开面板 CSS', /novel-fw-panel|novel-fw-btn|novel-fw-chevron/.test(css), false);
 check('拖拽状态只绑一次 document 监听（fwDragBound）', /fwDragBound/.test(dragFn), true);
-check('窗口使用 column-reverse 向上展开', /\.novel-floating-window \{[\s\S]*?column-reverse/.test(css), true);
 check('拖拽把手禁用触摸滚动（touch-action: none）', /\.novel-fw-drag-handle \{[\s\S]*?touch-action: none/.test(css), true);
 check('悬浮窗为 fixed 定位', /\.novel-floating-window \{[\s\S]*?position: fixed/.test(css), true);
-check('启动即渲染悬浮窗（init 调用 refreshNovelToolbars）', /seedLastSavedSignature\(\);[\s\S]{0,400}refreshNovelToolbars\(\)/.test(src), true);
+check('启动即渲染悬浮窗口（init 调用 refreshNovelToolbars）', /seedLastSavedSignature\(\);[\s\S]{0,400}refreshNovelToolbars\(\)/.test(src), true);
 
 console.log('\n=== ④ 弹窗定位与层级 ===');
 check('positionOverlay 具备 fixed 退化兜底',
@@ -136,7 +141,25 @@ if (escapeFn && parseFn && analyzeFn) {
     check('空输入安全返回', r3.removedCount === 0 && r3.html === '', true);
 }
 
-console.log('\n=== ⑦ 悬浮窗坐标夹取行为（真实源码执行）===');
+console.log('\n=== ⑦ 设置弹窗布局（桌面双列 / 手机单列 + 全屏 sheet）===');
+check('分区容器 novel-settings-grid', src.includes('novel-settings-grid'), true);
+check('主开关卡片 novel-toggle-card', src.includes('novel-toggle-card'), true);
+check('桌面分区双列栅格',
+    /\.novel-settings-grid \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(css), true);
+check('主开关卡桌面双列', /\.novel-toggle-row \{[\s\S]*?grid-template-columns: repeat\(2/.test(css), true);
+check('≤900px 退化为单列',
+    /@media \(max-width: 900px\) \{[\s\S]*?\.novel-settings-grid \{ grid-template-columns: 1fr/.test(css), true);
+check('≤600px 弹窗转全屏 sheet',
+    /@media \(max-width: 600px\) \{[\s\S]*?\.novel-modal-overlay \{ padding: 0;[\s\S]*?\.novel-modal \{ width: 100%; height: 100%/.test(css), true);
+check('手机端按钮触控高度 ≥42px', /#auto-save-to-txt-settings \.novel-btn \{ min-height: 42px/.test(css), true);
+check('手机端输入框/下拉触控高度 ≥40px',
+    /\.novel-select \{ min-height: 40px/.test(css), true);
+check('说明文字弱化（11.5px / opacity .6）',
+    /#auto-save-to-txt-settings small \{[\s\S]*?font-size: 11\.5px[\s\S]*?opacity: 0\.6/.test(css), true);
+check('楼层工具条章节信息 = 设置入口', /data-lt="settings"/.test(src) && /novel-lt-info/.test(src), true);
+check('已无 openFullSettings 死代码', /function openFullSettings/.test(src), false);
+
+console.log('\n=== ⑧ 悬浮入口坐标夹取行为（真实源码执行）===');
 const clampFn = extractFn('clampFloatPos');
 check('clampFloatPos 可抽取', !!clampFn, true);
 if (clampFn) {

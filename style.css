@@ -871,7 +871,7 @@
     .novel-lt-btn { width: 100%; }
 }
 
-/* ==================== v1.13 悬浮快捷窗（默认入口之一，可拖拽移动） ==================== */
+/* ==================== v1.14 悬浮入口（纯入口药丸，默认入口之一，可拖拽移动） ==================== */
 /* 默认贴右下角；拖动后由 applyFloatPos() 写入 left/top 像素坐标并持久化 */
 .novel-floating-window {
     position: fixed;
@@ -879,14 +879,11 @@
     bottom: 12px;
     z-index: 1000010;
     display: flex;
-    /* column-reverse：药丸固定在下方，面板向上展开，贴角时不会把药丸顶走 */
-    flex-direction: column-reverse;
     align-items: flex-end;
-    gap: 8px;
     font-size: 12px;
     user-select: none;
 }
-/* 拖拽把手：药丸与面板标题栏；禁用触摸滚动/长按选择，保证移动端也能拖 */
+/* 拖拽把手：禁用触摸滚动/长按选择，保证移动端也能拖 */
 .novel-fw-drag-handle {
     cursor: grab;
     touch-action: none;
@@ -894,88 +891,42 @@
 }
 .novel-floating-window.is-dragging .novel-fw-drag-handle { cursor: grabbing; }
 .novel-floating-window.is-dragging { user-select: none; }
-.novel-fw-grip {
-    font-size: 9px;
-    opacity: 0.45;
-    margin-right: -2px;
-}
-.novel-fw-pill:hover .novel-fw-grip { opacity: 0.8; }
+
+/* 药丸 = 入口按钮本身：点击即打开设置弹窗，按住可拖动 */
 .novel-fw-pill {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
+    gap: 7px;
+    padding: 8px 14px;
     border-radius: 999px;
     background: var(--SmartThemeBlurTintColor, rgba(22, 24, 30, 0.95));
     border: 1px solid rgba(255, 255, 255, 0.18);
     color: var(--SmartThemeEmColor, #ddd);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
     white-space: nowrap;
+    line-height: 1.2;
 }
-.novel-fw-pill:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
-.novel-fw-pill > i:first-child { color: #ffd166; }
-.novel-fw-pill.is-off { opacity: 0.65; }
-.novel-fw-pill.is-off > i:first-child { color: var(--SmartThemeEmColor, #999); }
-.novel-fw-chevron { font-size: 10px; opacity: 0.7; }
-.novel-fw-panel {
-    width: min(240px, calc(100vw - 24px));
-    background: var(--SmartThemeBlurTintColor, rgba(22, 24, 30, 0.97));
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 10px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-    overflow: hidden;
+.novel-fw-pill:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
 }
-.novel-fw-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    font-weight: 600;
-}
-.novel-fw-title i { color: #ffd166; }
-.novel-fw-chapter { margin-left: auto; font-weight: 400; font-size: 11px; opacity: 0.75; white-space: nowrap; }
-.novel-fw-close {
-    border: none;
-    background: transparent;
-    color: var(--SmartThemeEmColor, #ddd);
-    cursor: pointer;
-    padding: 2px 4px;
-    font-size: 12px;
-    line-height: 1;
-}
-.novel-fw-close:hover { color: #fff; }
-.novel-fw-rows { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
-.novel-fw-check { font-size: 12px; }
-.novel-fw-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    padding: 0 10px 10px;
-}
-.novel-fw-btn {
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--SmartThemeEmColor, #ddd);
-    border-radius: 6px;
-    padding: 5px 8px;
-    font-size: 12px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    transition: all 0.15s ease;
-}
-.novel-fw-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
-/* 完整设置为主操作，独占一行 */
-.novel-fw-actions .novel-fw-btn:first-child { grid-column: 1 / -1; }
+.novel-fw-pill:active { transform: scale(0.97); }
+.novel-fw-pill:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor, #3498db); outline-offset: 2px; }
+.novel-fw-grip { font-size: 9px; opacity: 0.4; margin-right: -2px; }
+.novel-fw-pill:hover .novel-fw-grip { opacity: 0.8; }
+.novel-fw-book { color: #ffd166; }
+/* 尾部小齿轮：暗示「点开即设置」 */
+.novel-fw-gear { font-size: 10px; opacity: 0.5; }
+.novel-fw-pill:hover .novel-fw-gear { opacity: 0.9; }
+.novel-fw-pill.is-off { opacity: 0.7; }
+.novel-fw-pill.is-off .novel-fw-book { color: var(--SmartThemeEmColor, #999); }
 
 @media (max-width: 768px) {
-    .novel-floating-window { bottom: 8px; right: 8px; }
-    .novel-fw-panel { width: min(260px, calc(100vw - 16px)); }
+    .novel-floating-window { bottom: 10px; right: 10px; }
+    .novel-fw-pill { padding: 9px 15px; }
 }
 
 /* ==================== v1.13 左下角魔法棒菜单入口 ==================== */
@@ -1166,4 +1117,80 @@
     .novel-modal-body-settings { padding: 10px 12px; }
     .novel-modal-settings { max-height: 92vh; }
     .novel-modal-settings .novel-modal-header { flex-wrap: wrap; }
+}
+
+/* ==================== v1.14 设置弹窗布局（桌面双列 / 手机单列 · 全屏 sheet） ==================== */
+/* 信息架构：主开关卡（置顶）→ 四张分区卡片（桌面两列并排，手机单列顺序滚动） */
+#auto-save-to-txt-settings { display: flex; flex-direction: column; gap: 12px; }
+.novel-modal-settings { width: min(860px, 100%); }
+
+/* 主开关卡片：桌面两列、手机单列；主开关高亮为主操作 */
+.novel-toggle-card {
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+.novel-toggle-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.novel-toggle-row .checkbox_label { margin: 0; font-size: 13px; }
+.novel-toggle-row .checkbox_label.is-primary span { font-weight: 700; }
+.novel-toggle-row .checkbox_label.is-primary i { color: #ffd166; }
+
+/* 分区卡片栅格 */
+.novel-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-items: start;
+}
+.novel-settings-grid .novel-section {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 8px;
+    padding: 10px 12px;
+    min-width: 0;
+}
+/* 卡片各自成块：卡片之间不再画分隔线（覆盖旧的 .novel-section + .novel-section 规则） */
+.novel-settings-grid .novel-section + .novel-section {
+    border-top: 1px solid rgba(255, 255, 255, 0.09);
+    padding-top: 10px;
+}
+
+/* 说明文字统一弱化：一眼看得到重点，细节需要时才读 */
+#auto-save-to-txt-settings small { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.55; opacity: 0.6; }
+#auto-save-to-txt-settings .novel-form-group { gap: 5px; }
+#auto-save-to-txt-settings .novel-section-title { margin-bottom: 2px; }
+
+/* 楼层内嵌工具条的「已连载 N 章」＝ 设置入口（按钮去掉默认外观，保持信息文字风格） */
+.novel-lt-info {
+    border: none;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+.novel-lt-info:hover { color: #fff; text-decoration: underline; }
+
+/* 中等屏幕：退化为单列，弹窗收窄 */
+@media (max-width: 900px) {
+    .novel-settings-grid { grid-template-columns: 1fr; }
+    .novel-toggle-row { grid-template-columns: 1fr; }
+    .novel-modal-settings { width: min(680px, 100%); }
+}
+
+/* 手机端：弹窗转全屏 sheet，控件放大到易点、按钮不挤压 */
+@media (max-width: 600px) {
+    .novel-modal-overlay { padding: 0; align-items: stretch; }
+    .novel-modal { width: 100%; height: 100%; max-height: 100%; border-radius: 0; border: none; }
+    .novel-modal-settings .novel-modal-header { padding: 12px 14px; }
+    .novel-modal-body-settings { padding: 10px 12px calc(16px + env(safe-area-inset-bottom, 0px)); }
+    .novel-toggle-row .checkbox_label { font-size: 14px; }
+    #auto-save-to-txt-settings .text_pole,
+    #auto-save-to-txt-settings .novel-select { min-height: 40px; }
+    #auto-save-to-txt-settings .novel-btn { min-height: 42px; font-size: 14px; }
+    .novel-action-buttons { flex-wrap: wrap; }
+    #novel_export_all_btn, #novel_sync_all_btn { flex: 1 1 calc(50% - 4px) !important; }
+    #novel_test_btn { flex: 1 1 100% !important; }
 }

@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.13.0',            // 扩展版本号
+    version: '1.14.0',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -51,9 +51,8 @@ const DEFAULT_SETTINGS = {
     save_dir: '',                 // 自定义保存文件夹路径（留空则保存至默认 plugins/auto-save/logs；支持任意绝对路径如 D:\MyNovels）
     show_toast: true,             // 连载更新时弹出轻量提示通知
     show_embedded_toolbar: true,  // 最新 AI 楼层底部是否显示内嵌快捷工具条
-    show_floating_window: true,   // 常驻悬浮快捷窗（v1.13 起为默认入口：开关连载/看进度/导出；可在设置里关闭）
-    floating_window_collapsed: true, // 悬浮窗折叠态：true = 只显示药丸，false = 展开面板（持久化记忆）
-    float_pos: null,              // 悬浮窗被拖动后的位置 { left, top }；null = 默认右下角
+    show_floating_window: true,   // 常驻悬浮入口（v1.14 起为纯入口按钮：显示章节进度，点击即打开设置弹窗；可拖动移动；可在设置里关闭）
+    float_pos: null,              // 悬浮入口被拖动后的位置 { left, top }；null = 默认右下角
     ui_v113_migrated: false,      // v1.13 一次性迁移标记（老用户自动补开悬浮窗作为主入口）
     userDisabled: false,          // 用户是否主动手动关闭了连载
 };
@@ -234,20 +233,14 @@ function refreshLatestToolbar() {
     bar.id = 'novel-latest-toolbar';
     bar.className = 'novel-latest-toolbar';
     bar.innerHTML = `
-        <span class="novel-lt-info"><i class="fa-solid fa-book-open"></i> 已连载 ${totalChapters} 章</span>
+        <button type="button" class="novel-lt-info" data-lt="settings" title="打开小说连载设置"><i class="fa-solid fa-book-open"></i> 已连载 ${totalChapters} 章</button>
         <button type="button" class="novel-lt-btn" data-lt="preview"><i class="fa-solid fa-eye"></i> 查看过滤效果</button>
         <button type="button" class="novel-lt-btn" data-lt="export"><i class="fa-solid fa-download"></i> 导出整本 TXT</button>
     `;
+    bar.querySelector('[data-lt="settings"]').addEventListener('click', (e) => { e.stopPropagation(); openNovelSettingsModal(); });
     bar.querySelector('[data-lt="preview"]').addEventListener('click', (e) => { e.stopPropagation(); openFilterPreviewModal(); });
     bar.querySelector('[data-lt="export"]').addEventListener('click', (e) => { e.stopPropagation(); exportNovelText(); });
     textEl.appendChild(bar);
-}
-
-/**
- * 打开完整设置面板（魔法棒菜单项 / 悬浮窗【完整设置】/ 楼层工具条共用）
- */
-function openFullSettings() {
-    openNovelSettingsModal();
 }
 
 // ⑥ 左下角「魔法棒」入口：注册为酒馆原生扩展菜单（#extensionsMenu）的一项，
@@ -296,8 +289,10 @@ function syncWandEntryState() {
     stateEl.classList.toggle('is-on', on);
 }
 
-// ⑤ 悬浮快捷窗：v1.13 起为默认入口之一。药丸常驻且可自由拖拽移动，点击展开面板；
-//    位置与折叠态均持久化；不依赖任何楼层 DOM，切聊天全程跟随；无 DOM 环境（node 测试）直接跳过
+// ⑤ 悬浮入口（v1.14 起简化为「纯入口」）：右下角一枚可拖动的药丸，
+//    常显当前连载进度（第 N 章 / 连载已关 / 等待开书），点击即打开设置弹窗——
+//    不再有二级展开面板，所有操作集中在弹窗内，信息与入口一一对应。
+//    位置持久化；不依赖任何楼层 DOM，切聊天全程跟随；无 DOM 环境（node 测试）直接跳过
 let fwLastDragAt = 0;
 
 /** 读取用户拖动后的悬浮窗坐标（从未拖动过返回 null = 默认右下角） */
@@ -412,92 +407,41 @@ function bindFloatingWindowDrag(win, handles) {
 }
 
 function buildFloatingWindow() {
-    const settings = getSettings();
     const win = document.createElement('div');
     win.id = 'novel-floating-window';
     win.className = 'novel-floating-window';
+    // 纯入口：只有一枚药丸。点击 = 打开设置弹窗；按住 = 拖动移动位置
     win.innerHTML = `
-        <div class="novel-fw-pill" id="novel_fw_pill" title="点击展开/收起 · 按住可拖动移动位置">
+        <div class="novel-fw-pill" id="novel_fw_pill" role="button" tabindex="0" title="点击打开小说连载设置 · 按住可拖动移动位置">
             <i class="fa-solid fa-grip-vertical novel-fw-grip"></i>
-            <i class="fa-solid fa-book-open"></i>
+            <i class="fa-solid fa-book-open novel-fw-book"></i>
             <span id="novel_fw_pill_text">小说连载</span>
-            <i class="fa-solid fa-chevron-up novel-fw-chevron" id="novel_fw_chevron"></i>
-        </div>
-        <div class="novel-fw-panel" id="novel_fw_panel">
-            <div class="novel-fw-header" title="按住此处可拖动移动悬浮窗">
-                <span class="novel-fw-title"><i class="fa-solid fa-book-bookmark"></i> 小说连载</span>
-                <span class="novel-fw-chapter" id="novel_fw_chapter">尚未入书</span>
-                <button type="button" class="novel-fw-close" id="novel_fw_collapse" title="收起为药丸"><i class="fa-solid fa-chevron-down"></i></button>
-            </div>
-            <div class="novel-fw-rows">
-                <label class="checkbox_label novel-fw-check" title="实时连载总开关（与服务端探测联动，未部署服务端时自动防误触）">
-                    <input type="checkbox" id="novel_fw_enabled" ${settings.enabled ? 'checked' : ''} />
-                    <span>开启连载</span>
-                </label>
-                <label class="checkbox_label novel-fw-check" title="最新楼层暂作草稿：可随意 Roll 点/修改，发送下一条消息后才定稿入书">
-                    <input type="checkbox" id="novel_fw_buffer" ${settings.buffer_latest_message ? 'checked' : ''} />
-                    <span>草稿缓冲</span>
-                </label>
-            </div>
-            <div class="novel-fw-actions">
-                <button type="button" class="novel-fw-btn" id="novel_fw_settings"><i class="fa-solid fa-gear"></i> 完整设置</button>
-                <button type="button" class="novel-fw-btn" id="novel_fw_preview"><i class="fa-solid fa-eye"></i> 过滤效果</button>
-                <button type="button" class="novel-fw-btn" id="novel_fw_export"><i class="fa-solid fa-download"></i> 导出 TXT</button>
-            </div>
+            <i class="fa-solid fa-sliders novel-fw-gear"></i>
         </div>
     `;
     document.body.appendChild(win);
 
-    // 药丸与面板标题栏都是拖拽把手（把手里含按钮/输入框时自动放行，不影响点击）
-    bindFloatingWindowDrag(win, [win.querySelector('#novel_fw_pill'), win.querySelector('.novel-fw-header')]);
+    // 药丸整体是拖拽把手（内部无按钮/输入框，拖动与点击由 4px 阈值区分）
+    bindFloatingWindowDrag(win, [win.querySelector('#novel_fw_pill')]);
 
-    const setCollapsed = (collapsed) => {
-        settings.floating_window_collapsed = collapsed;
-        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
-        refreshFloatingWindow();
-    };
-
-    win.querySelector('#novel_fw_pill').addEventListener('click', (e) => {
-        // 刚发生过拖动：浏览器补发的 click 不再当作「点击展开/收起」
+    const pill = win.querySelector('#novel_fw_pill');
+    const activate = () => {
+        // 刚发生过拖动：浏览器补发的 click 不再当作「点击打开弹窗」
         if (Date.now() - fwLastDragAt < 300) return;
+        openNovelSettingsModal();
+    };
+    pill.addEventListener('click', (e) => {
         e.stopPropagation();
-        setCollapsed(!settings.floating_window_collapsed);
+        activate();
     });
-    win.querySelector('#novel_fw_collapse').addEventListener('click', () => setCollapsed(true));
-
-    // 连载总开关：走共享 setNovelEnabled（服务端未就绪时自动回取消勾选并提示，防 404）
-    const fwEnabled = win.querySelector('#novel_fw_enabled');
-    fwEnabled.addEventListener('change', async (e) => {
-        fwEnabled.disabled = true;
-        try {
-            await setNovelEnabled(e.target.checked);
-        } finally {
-            fwEnabled.disabled = false;
-            refreshFloatingWindow();
+    pill.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            activate();
         }
     });
 
-    // 草稿缓冲开关：与面板 novel_buffer_latest 同键同效
-    win.querySelector('#novel_fw_buffer').addEventListener('change', (e) => {
-        settings.buffer_latest_message = e.target.checked;
-        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
-        updateRecentStatus('idle', e.target.checked ? '已开启草稿缓冲：最新回复将等你发送下一条消息后定稿入书' : '已关闭草稿缓冲：每轮回复即时入书');
-        refreshFloatingWindow();
-    });
-
-    win.querySelector('#novel_fw_settings').addEventListener('click', openFullSettings);
-    win.querySelector('#novel_fw_preview').addEventListener('click', openFilterPreviewModal);
-    win.querySelector('#novel_fw_export').addEventListener('click', exportNovelText);
-
-    // 点击面板外部任意处收起（buildFloatingWindow 全程只构建一次，天然只绑一次）
-    document.addEventListener('click', (e) => {
-        if (Date.now() - fwLastDragAt < 300) return;
-        if (settings.floating_window_collapsed) return;
-        const w = document.getElementById('novel-floating-window');
-        if (w && !w.contains(e.target)) setCollapsed(true);
-    });
-
-    // 视口变化时夹取坐标，保证拖过的窗口不会因缩小窗口/横竖屏切换而跑到屏幕外
+    // 视口变化时夹取坐标，保证拖过的入口不会因缩小窗口/横竖屏切换而跑到屏幕外
     window.addEventListener('resize', applyFloatPos);
     window.addEventListener('orientationchange', () => setTimeout(applyFloatPos, 200));
     return win;
@@ -524,21 +468,13 @@ function refreshFloatingWindow() {
 
     const pillText = win.querySelector('#novel_fw_pill_text');
     if (pillText) pillText.textContent = chapterText;
-    win.querySelector('#novel_fw_pill')?.classList.toggle('is-off', !settings.enabled);
 
-    const collapsed = settings.floating_window_collapsed !== false;
-    const panel = win.querySelector('#novel_fw_panel');
-    if (panel) panel.style.display = collapsed ? 'none' : 'flex';
-    const chevron = win.querySelector('#novel_fw_chevron');
-    if (chevron) chevron.className = collapsed ? 'fa-solid fa-chevron-up novel-fw-chevron' : 'fa-solid fa-chevron-down novel-fw-chevron';
-
-    const chapterEl = win.querySelector('#novel_fw_chapter');
-    if (chapterEl) chapterEl.textContent = chapterTotal > 0 ? `已连载 ${chapterTotal} 章` : '尚未入书';
-
-    const enabledEl = win.querySelector('#novel_fw_enabled');
-    if (enabledEl) enabledEl.checked = !!settings.enabled;
-    const bufferEl = win.querySelector('#novel_fw_buffer');
-    if (bufferEl) bufferEl.checked = !!settings.buffer_latest_message;
+    const pill = win.querySelector('#novel_fw_pill');
+    if (pill) {
+        pill.classList.toggle('is-off', !settings.enabled);
+        pill.title = `小说连载 · ${chapterText}（点击打开设置，按住可拖动移动位置）`;
+        pill.setAttribute('aria-label', `小说连载：${chapterText}，点击打开设置`);
+    }
 
     applyFloatPos();
 }
@@ -2210,25 +2146,29 @@ async function renderSettingsUI(cachedStatus = null) {
 
     // 分区信息架构：开关置顶，依次为 当前连载 / 正文过滤 / 排版与行为 / 文件与导出
     panel.innerHTML = `
-                <!-- 主开关置顶 -->
-                <div class="novel-toggle-row">
-                    <label class="checkbox_label" title="开启后，每轮 AI 回复将像小说章节一样自动写入 txt，随时用手机或阅读器翻阅">
-                        <input type="checkbox" id="novel_save_enabled" ${settings.enabled ? 'checked' : ''} />
-                        <span>开启小说自动连载</span>
-                    </label>
-                    <label class="checkbox_label" title="每当新章节连载更新完成时，在屏幕右上角弹出轻量提示通知">
-                        <input type="checkbox" id="novel_show_toast" ${settings.show_toast !== false ? 'checked' : ''} />
-                        <span>更新时弹窗提示</span>
-                    </label>
-                    <label class="checkbox_label" title="在最新一条 AI 回复底部显示内嵌快捷操作条（显示连载进度、查看过滤效果、一键导出）">
-                        <input type="checkbox" id="novel_show_embedded_toolbar" ${settings.show_embedded_toolbar !== false ? 'checked' : ''} />
-                        <span>显示内嵌工具条</span>
-                    </label>
-                    <label class="checkbox_label" title="显示常驻悬浮窗（默认开启）：随时查看连载进度、开关连载/草稿缓冲、快速导出；按住药丸或标题栏可拖动到任意位置，位置会被记住">
-                        <input type="checkbox" id="novel_show_floating_window" ${settings.show_floating_window ? 'checked' : ''} />
-                        <span>显示悬浮窗（可拖动移动）</span>
-                    </label>
+                <!-- 主开关卡片（桌面双列 / 手机单列） -->
+                <div class="novel-toggle-card">
+                    <div class="novel-toggle-row">
+                        <label class="checkbox_label is-primary" title="开启后，每轮 AI 回复将像小说章节一样自动写入 txt，随时用手机或阅读器翻阅">
+                            <input type="checkbox" id="novel_save_enabled" ${settings.enabled ? 'checked' : ''} />
+                            <span>开启小说自动连载</span>
+                        </label>
+                        <label class="checkbox_label" title="显示右下角悬浮入口：常显连载进度，点击打开本设置弹窗；按住可拖动到任意位置（位置会被记住）">
+                            <input type="checkbox" id="novel_show_floating_window" ${settings.show_floating_window ? 'checked' : ''} />
+                            <span>右下角悬浮入口</span>
+                        </label>
+                        <label class="checkbox_label" title="在最新一条 AI 回复底部显示内嵌快捷操作条（连载进度、查看过滤效果、一键导出）">
+                            <input type="checkbox" id="novel_show_embedded_toolbar" ${settings.show_embedded_toolbar !== false ? 'checked' : ''} />
+                            <span>回复底部内嵌工具条</span>
+                        </label>
+                        <label class="checkbox_label" title="每当新章节连载更新完成时，在屏幕右上角弹出轻量提示通知">
+                            <input type="checkbox" id="novel_show_toast" ${settings.show_toast !== false ? 'checked' : ''} />
+                            <span>更新时弹窗提示</span>
+                        </label>
+                    </div>
                 </div>
+
+                <div class="novel-settings-grid">
 
                 <!-- ▍当前连载 -->
                 <div class="novel-section">
@@ -2344,7 +2284,7 @@ async function renderSettingsUI(cachedStatus = null) {
                     <!-- 草稿缓冲（延迟归档最新楼层） -->
                     <label class="checkbox_label" title="开启后，最新一楼暂不写入连载文件，留出充分的 Roll 点与修改空间；待下一轮剧情推进时再正式定稿入书">
                         <input type="checkbox" id="novel_buffer_latest" ${settings.buffer_latest_message ? 'checked' : ''} />
-                        <span>延迟归档最新楼层（草稿缓冲：下一轮对话推进时再正式定稿入书）</span>
+                        <span>草稿缓冲（最新楼层延迟定稿）</span>
                     </label>
                 </div>
 
@@ -2355,7 +2295,7 @@ async function renderSettingsUI(cachedStatus = null) {
                     <div class="novel-form-group">
                         <span class="novel-label">指定保存文件夹（可选）：</span>
                         <input type="text" id="novel_save_dir" class="text_pole" value="${settings.save_dir || ''}" placeholder="留空默认存至 plugins/auto-save/logs；填写服务端有效目录" />
-                        <small>此处为<b>服务端（运行酒馆的机器）</b>上的保存目录。<span style="color: #f39c12;">注意：若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 <code>D:\</code>）；</span>当前保存至：<code id="novel_save_dir_preview">${initialDir}${initialFileName}</code>；如需在本机阅读，可留空并用【导出整本 TXT】直接下载。</small>
+                        <small title="若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 D:\），此时建议留空并用【导出整本 TXT】下载">服务端（运行酒馆的机器）目录，留空为默认。当前：<code id="novel_save_dir_preview">${initialDir}${initialFileName}</code></small>
                     </div>
 
                     <!-- 操作按钮组：导出为主按钮，同步为次按钮，试写为弱化诊断按钮 -->
@@ -2371,6 +2311,8 @@ async function renderSettingsUI(cachedStatus = null) {
                         </button>
                     </div>
                 </div>
+
+                </div><!-- /.novel-settings-grid -->
 
     `;
 
@@ -2486,7 +2428,7 @@ async function renderSettingsUI(cachedStatus = null) {
             refreshFloatingWindow();
             if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
             if (e.target.checked && window.toastr) {
-                window.toastr.success('悬浮窗已开启：默认在屏幕右下角，点击药丸展开面板，按住药丸可拖动到任意位置', '小说连载', { timeOut: 4000 });
+                window.toastr.success('悬浮入口已开启：位于屏幕右下角，点击即打开设置弹窗，按住可拖动到任意位置', '小说连载', { timeOut: 4000 });
             }
         });
     }
