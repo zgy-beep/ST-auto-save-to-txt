@@ -299,6 +299,195 @@ if (clampFn) {
     }
 }
 
+console.log('\n=== ⑩ v1.17 设置弹窗标签页化 + 桌面端去卡片 ===');
+
+// —— 结构：五个标签 / 五个面板一一对应 ——
+const TAB_KEYS = ['serial', 'filter', 'format', 'file', 'general'];
+const tabBtns = (src.match(/class="novel-tab(?: is-active)?"/g) || []).length;
+const paneDivs = (src.match(/class="novel-tabpane(?: is-active)?"/g) || []).length;
+check('标签按钮 5 个', tabBtns, 5);
+check('标签面板 5 个', paneDivs, 5);
+TAB_KEYS.forEach((k) => {
+    check(`标签 data-nv-tab="${k}" 存在`, src.includes(`data-nv-tab="${k}"`), true);
+    check(`面板 data-nv-pane="${k}" 存在`, src.includes(`data-nv-pane="${k}"`), true);
+});
+check('默认只有「连载」面板带 is-active',
+    (src.match(/class="novel-tabpane is-active"/g) || []).length, 1);
+check('默认只有「连载」标签带 is-active',
+    (src.match(/class="novel-tab is-active"/g) || []).length, 1);
+check('标签栏与面板容器成对出现',
+    src.includes('class="novel-tabs"') && src.includes('class="novel-tabpanes"'), true);
+
+// —— 红线：面板全部挂载、只切 display，禁止重建 innerHTML ——
+const tabsFn = extractFn('bindNovelTabs');
+check('bindNovelTabs 定义存在', !!tabsFn, true);
+check('bindNovelTabs 用 classList.toggle 切显示（不是重建 DOM）',
+    /classList\.toggle\('is-active'/.test(tabsFn || ''), true);
+check('bindNovelTabs 内没有任何 innerHTML 写入（红线守卫）',
+    /innerHTML/.test(tabsFn || ''), false);
+check('bindNovelTabs 内没有 removeChild / replaceChildren（红线守卫）',
+    /removeChild|replaceChildren|\.remove\(\)/.test(tabsFn || ''), false);
+check('切换标签后回到滚动顶部', /scrollTop = 0/.test(tabsFn || ''), true);
+check('标签支持左右方向键（tablist 键盘语义）',
+    /ArrowRight/.test(tabsFn || '') && /ArrowLeft/.test(tabsFn || ''), true);
+check('非激活标签移出 Tab 焦点序（tabIndex = -1）', /tabIndex = on \? 0 : -1/.test(tabsFn || ''), true);
+check('面板建好后立即接线', /container\.appendChild\(panel\);[\s\S]{0,200}bindNovelTabs\(panel\)/.test(src), true);
+check('每次打开弹窗复位到「连载」（不记忆标签）',
+    /__novelActivateTab\('serial'\)/.test(src), true);
+
+// —— 主开关常驻：不进任何标签面板 ——
+check('主开关仍在面板顶部（标签栏之前）',
+    src.indexOf('id="novel_save_enabled"') < src.indexOf('class="novel-tabs"'), true);
+check('界面偏好三开关已移入「通用」面板', (() => {
+    const seg = src.split('data-nv-pane="general"')[1] || '';
+    return seg.includes('id="novel_show_floating_window"')
+        && seg.includes('id="novel_show_embedded_toolbar"')
+        && seg.includes('id="novel_show_toast"');
+})(), true);
+
+// —— 模板完整性：注释里的反引号会把模板字符串提前截断（v1.17 实测事故）——
+// 语法仍然合法（后半段被解析成「标签模板调用」），node --check 查不出来，只有渲染时才暴露。
+const panelTplMatch = src.split("panel.className = 'novel-drawer-inner';")[1];
+const panelTpl = panelTplMatch ? (panelTplMatch.match(/innerHTML = `([\s\S]*?)`;/) || [])[1] : null;
+check('可抽取设置面板模板', !!panelTpl, true);
+const REQUIRED_IDS = [
+    'novel_save_enabled', 'novel_show_floating_window', 'novel_show_embedded_toolbar', 'novel_show_toast',
+    'novel_include_tags', 'novel_exclude_tags', 'novel_chapter_style', 'novel_naming_rule',
+    'novel_include_user', 'novel_indent_paragraphs', 'novel_buffer_latest', 'novel_save_dir',
+    'novel_export_all_btn', 'novel_sync_all_btn', 'novel_test_btn', 'novel_preview_btn',
+    'novel_rescan_tags_btn', 'novel_copy_filepath_btn'
+];
+if (panelTpl) {
+    const missing = REQUIRED_IDS.filter((id) => !panelTpl.includes(`id="${id}"`));
+    check('面板模板包含全部 18 个控件（模板未被截断）', missing.length === 0 ? 'ok' : missing.join(','), 'ok');
+    // 只看「注释内部、闭合 --> 之前」是否有反引号：注释外的反引号是 ${} 里的嵌套模板，合法
+    check('模板内 HTML 注释不含裸反引号（会截断模板字符串）',
+        /<!--(?:(?!-->)[\s\S])*`/.test(panelTpl), false);
+    check('面板内每个标签面板都有对应的 settings-grid',
+        (panelTpl.match(/class="novel-settings-grid"/g) || []).length, 5);
+}
+
+// —— CSS：标签栏 / 去卡片 / 手机端底部吸附 ——
+check('标签栏样式已定义', /#auto-save-to-txt-settings \.novel-tabs \{/.test(css), true);
+check('激活标签用紫罗兰淡底',
+    /\.novel-tab\.is-active \{[\s\S]*?background: var\(--nv-accent-bg\);/.test(css), true);
+check('未激活面板 display:none（只切 display）',
+    /#auto-save-to-txt-settings \.novel-tabpane \{ display: none; \}/.test(css), true);
+check('激活面板恢复显示',
+    /#auto-save-to-txt-settings \.novel-tabpane\.is-active \{ display: block; \}/.test(css), true);
+check('去卡片 ①：主开关卡去掉底色与描边',
+    /#auto-save-to-txt-settings \.novel-toggle-card \{[\s\S]*?background: none;[\s\S]*?border: none;/.test(css), true);
+check('去卡片 ②：分区去掉底色与描边',
+    /#auto-save-to-txt-settings \.novel-settings-grid \.novel-section \{[\s\S]*?background: none;[\s\S]*?border: none;/.test(css), true);
+check('去卡片 ③：书卡改为左侧强调竖线的信息块',
+    /#auto-save-to-txt-settings \.novel-current-book-card \{[\s\S]*?border-left: 2px solid var\(--nv-accent-line\);/.test(css), true);
+check('手机端标签栏 sticky 吸附底部',
+    /@media \(max-width: 768px\) \{[\s\S]*?\.novel-tabs \{[\s\S]*?position: sticky;[\s\S]*?bottom: 0;/.test(css), true);
+check('手机端正文容器撑满弹窗（否则 sticky 无处可吸附）',
+    /\.novel-modal-body-settings \{[\s\S]*?flex: 1 1 auto;[\s\S]*?flex-direction: column;/.test(css), true);
+check('手机端标签栏用 order 排到内容之后',
+    /\.novel-tabpanes \{[\s\S]*?order: 2;/.test(css) && /\.novel-tabs \{[\s\S]*?order: 3;/.test(css), true);
+check('手机端标签图标在上、文字在下（底部栏形态）',
+    /@media \(max-width: 768px\) \{[\s\S]*?\.novel-tab \{[\s\S]*?flex-direction: column;/.test(css), true);
+// 旧 CSS 规则必须保留（v1.15/v1.16 断言依赖它们，只追加不删改）
+check('v1.17 未删改旧的双列栅格规则（仍可被断言命中）',
+    /\.novel-settings-grid \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(css), true);
+
+// —— 两处已修的回归 ——
+// ① 标签页化后每个面板只剩 1 个分区，双列会让右半列整片空着（看起来像内容没居中）
+check('分区栅格已覆盖为单列（内容铺满弹窗宽度）',
+    /#auto-save-to-txt-settings \.novel-settings-grid \{[\s\S]*?grid-template-columns: 1fr;/.test(css), true);
+// ② v1.14 遗留的 #novel_settings_body { padding: 0 }（特异性 1,0,0）会压掉所有
+//    .novel-modal-body-settings 的 padding，实测 computed padding 为 "0px"，内容贴屏幕边
+check('正文容器内边距已恢复（不再被 #novel_settings_body 的 padding:0 压掉）',
+    /#novel_settings_body \{ padding: 16px; \}/.test(css), true);
+check('手机端正文容器给标签栏让出通栏（水平 padding 归零、内容侧留 12px）',
+    /@media \(max-width: 768px\) \{[\s\S]*?#novel_settings_body \{ padding: 12px 0 0; \}/.test(css)
+    && /\.novel-tabpanes \{[\s\S]{0,80}padding: 0 12px;/.test(css), true);
+check('设置弹窗保持居中（overlay 用 flex 居中，且不写死 margin/translate 偏移）',
+    /\.novel-modal-overlay \{[\s\S]*?align-items: center;[\s\S]*?justify-content: center;/.test(css)
+    && !/#novel_settings_modal \{[^}]*transform:/.test(css), true);
+
+console.log('\n=== ⑪ v1.17 折叠分组（替代卡片）===');
+
+// —— 结构：分组行 + 展开体 ——
+const ACC_KEYS = ['book', 'include', 'exclude', 'scan', 'style', 'naming', 'write', 'dir', 'display'];
+check('折叠分组 9 个', (src.match(/class="novel-acc"|class="novel-acc is-open"/g) || []).length, 9);
+ACC_KEYS.forEach((k) => {
+    check(`分组 data-nv-acc="${k}" 存在`, src.includes(`data-nv-acc="${k}"`), true);
+    check(`分组「${k}」有右侧摘要位`, new RegExp(`data-nv-acc="${k}"[\\s\\S]{0,400}?novel-acc-summary`).test(src), true);
+});
+check('不折叠的动作行 2 个（过滤预览 / 导出与同步）',
+    (src.match(/class="novel-acc-flat"/g) || []).length, 2);
+check('初始开合不在模板里写死（书卡上不预置 is-open）',
+    (src.match(/class="novel-acc is-open"/g) || []).length, 0);
+check('初始开合由 applyNovelAccordionDefaults 统一推导',
+    !!extractFn('applyNovelAccordionDefaults'), true);
+check('推导规则 = 「分区内只有一个分组就展开」',
+    /items\.length === 1/.test(extractFn('applyNovelAccordionDefaults') || ''), true);
+check('推导规则按 data-nv-pane 遍历，不按分组 key 写死',
+    !/nvAcc === '(book|dir|display)'/.test(extractFn('applyNovelAccordionDefaults') || ''), true);
+check('面板建好后会应用初始开合',
+    /applyNovelAccordionDefaults\(panel\)/.test(src), true);
+check('每次打开设置都重算开合（不记忆折叠状态）',
+    /applyNovelAccordionDefaults\(panelEl\)/.test(src), true);
+check('展开体 aria 语义齐备（aria-expanded）',
+    (src.match(/class="novel-acc-head" aria-expanded="/g) || []).length, 9);
+check('折叠行标题带箭头图标（.novel-acc-chev）',
+    (src.match(/novel-acc-chev/g) || []).length, 9);
+check('每个分组都有对应的展开体容器',
+    (src.match(/class="novel-acc-body"/g) || []).length, 9);
+
+// —— 接线：与标签页同一条红线（只切 class，不重建 DOM）——
+const accFn = extractFn('bindNovelAccordions');
+check('bindNovelAccordions 定义存在', !!accFn, true);
+check('折叠切换用 classList.toggle（不重建 DOM）', /classList\.toggle\('is-open'/.test(accFn || ''), true);
+check('bindNovelAccordions 内无 innerHTML / removeChild（红线守卫）',
+    /innerHTML|removeChild|replaceChildren/.test(accFn || ''), false);
+check('同步维护 aria-expanded', /setAttribute\('aria-expanded'/.test(accFn || ''), true);
+check('面板建好后同时接线标签页与折叠分组',
+    /bindNovelTabs\(panel\);[\s\S]{0,200}bindNovelAccordions\(panel\)/.test(src), true);
+
+// —— 摘要：收起时唯一的线索，每个分组都必须有当前值 ——
+const sumFn = extractFn('refreshNovelAccSummaries');
+check('refreshNovelAccSummaries 定义存在', !!sumFn, true);
+const SUMMARY_IDS = ['novel_acc_summary_include', 'novel_acc_summary_exclude', 'novel_acc_summary_style',
+    'novel_acc_summary_naming', 'novel_acc_summary_dir', 'novel_acc_summary_write',
+    'novel_acc_summary_display', 'novel_acc_summary_book'];
+SUMMARY_IDS.forEach((id) => {
+    check(`摘要 ${id} 有刷新逻辑`, (sumFn || '').includes(id), true);
+});
+check('改值后摘要跟着刷新（input / change 委托）',
+    /addEventListener\('input'/.test(accFn || '') && /addEventListener\('change'/.test(accFn || ''), true);
+check('会话标签数走 renderTagTools 写入（不重复维护）',
+    src.includes('id="novel_tag_scan_count"') && /countEl\.textContent/.test(src), true);
+
+// —— CSS：一行 + 发丝线，没有盒子 ——
+check('分组行用底部发丝线分隔（不是卡片描边）',
+    /#auto-save-to-txt-settings \.novel-acc \{ border-bottom: 1px solid var\(--nv-line\); \}/.test(css), true);
+check('标题行去掉按钮默认外观（无底色 / 无描边）',
+    /#auto-save-to-txt-settings \.novel-acc-head \{[\s\S]*?background: none;[\s\S]*?border: none;/.test(css), true);
+check('展开体默认 display:none、展开后 block',
+    /\.novel-acc-body \{ display: none;/.test(css) && /\.novel-acc\.is-open \.novel-acc-body \{ display: block; \}/.test(css), true);
+check('展开时箭头旋转 180°',
+    /\.novel-acc\.is-open \.novel-acc-chev \{ transform: rotate\(180deg\)/.test(css), true);
+check('摘要超长省略号（窄屏不撑破行）',
+    /\.novel-acc-summary \{[\s\S]*?text-overflow: ellipsis;/.test(css), true);
+
+// —— 去卡片 ④⑤⑥：剩下的盒子也全部扁平化 ——
+check('去卡片 ④：状态提示条改为左侧细竖线（无底色 / 无描边）',
+    /#auto-save-to-txt-settings \.novel-alert \{[\s\S]*?background: none !important;[\s\S]*?border-left: 2px solid var\(--nv-line-2\) !important;/.test(css), true);
+check('去卡片 ④：各状态用左竖线颜色区分',
+    /\.novel-alert\.checking \{ border-left-color: var\(--nv-dash\) !important; \}/.test(css)
+    && /\.novel-alert\.warning \{ border-left-color: var\(--nv-danger\) !important; \}/.test(css)
+    && /\.novel-alert\.success \{ border-left-color: var\(--nv-ok\) !important; \}/.test(css), true);
+check('去卡片 ⑤：标签检测容器无框（chips 自己就是形状）',
+    /#auto-save-to-txt-settings \.novel-tag-chip-list \{[\s\S]*?background: none !important;[\s\S]*?border: none !important;/.test(css), true);
+check('去卡片 ⑥：部署指引内的卡片同样扁平化',
+    /#auto-save-to-txt-settings \.novel-deploy-card,[\s\S]*?#auto-save-to-txt-settings \.novel-manual-card \{[\s\S]*?background: none !important;/.test(css), true);
+check('状态行分隔线改实线（虚线只留给空态）',
+    /#auto-save-to-txt-settings \.novel-status-line \{ border-top: 1px solid var\(--nv-line\); \}/.test(css), true);
+
 console.log(`\nUI 接线测试结果: 通过: ${pass}, 失败: ${fail}`);
 if (fail > 0) process.exit(1);
 console.log('所有 UI 接线与递归守卫测试全部通过！');

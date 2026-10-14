@@ -1787,3 +1787,310 @@
     .novel-tag-chip { font-size: 12.5px; padding: 5px 5px 5px 10px; }
     .novel-chip-btn { min-height: 32px; padding: 4px 10px; }
 }
+
+/* ==========================================================================
+ * v1.17 设置弹窗标签页化 + 桌面端去卡片
+ * --------------------------------------------------------------------------
+ * 设计来源：参考图（柏宝绘）——顶部品牌条 / 头部 + 方形图标按钮 / 横向标签行 /
+ * 分区标题 + 发丝分隔线 / **扁平行列表，不见卡片盒子**。
+ *
+ * 落地规则：
+ *   1. 标签栏无容器盒子，标签本身是胶囊；激活项用紫罗兰淡底（沿用 v1.15 强调色）。
+ *   2. 桌面端：标签行在头部下方横向排列；手机端：由 order 移到底部常驻（拇指可达）。
+ *   3. 分区 / 主开关卡 / 书卡一律扁平化 —— 去掉底色与卡片描边，改由发丝线分隔。
+ *   4. 所有规则以「追加覆盖块」形式写在文件末尾，不删改 v1.15/v1.16 既有规则
+ *      （test-ui-wiring.js 对旧 CSS 文本有正则断言，删旧规则测试会直接红）。
+ * ========================================================================== */
+
+/* ---------- 标签栏：无盒子，只有一行胶囊 + 底部发丝线 ---------- */
+#auto-save-to-txt-settings .novel-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 0 0 10px;
+    border-bottom: 1px solid var(--nv-line);
+    scrollbar-width: none;
+}
+#auto-save-to-txt-settings .novel-tabs::-webkit-scrollbar { display: none; }
+
+#auto-save-to-txt-settings .novel-tab {
+    /* 桌面端按内容宽度排布、整行左对齐（对齐参考图：紧凑标签行 + 右侧留白），
+       手机端在下方媒体查询里改为等分铺满 */
+    flex: 0 0 auto;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 8px 14px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--nv-text-2);
+    font-size: 13.5px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+#auto-save-to-txt-settings .novel-tab i { font-size: 12.5px; opacity: 0.9; }
+#auto-save-to-txt-settings .novel-tab:hover { background: rgba(255, 255, 255, 0.05); color: var(--nv-text); }
+#auto-save-to-txt-settings .novel-tab.is-active {
+    background: var(--nv-accent-bg);
+    border-color: var(--nv-accent-line);
+    color: var(--nv-text);
+    font-weight: 600;
+}
+#auto-save-to-txt-settings .novel-tab.is-active i { color: var(--nv-accent-2); opacity: 1; }
+#auto-save-to-txt-settings .novel-tab:focus-visible { outline: 2px solid var(--nv-accent); outline-offset: 2px; }
+
+/* ---------- 面板：全部挂载，只切 display ---------- */
+#auto-save-to-txt-settings .novel-tabpane { display: none; }
+#auto-save-to-txt-settings .novel-tabpane.is-active { display: block; }
+
+/* ---------- 去卡片 ①：主开关卡 → 一行扁平行 + 底部发丝线 ---------- */
+#auto-save-to-txt-settings .novel-toggle-card {
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--nv-line);
+    border-radius: 0;
+    padding: 0 2px 12px;
+}
+/* 主开关已独占一行，双列栅格不再需要（旧规则仍在文件中，此处仅覆盖） */
+#auto-save-to-txt-settings .novel-toggle-row { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+
+/* ---------- 去卡片 ②：分区 → 纯内容块，靠标题下的发丝线分隔 ---------- */
+#auto-save-to-txt-settings .novel-settings-grid .novel-section {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0 2px;
+}
+#auto-save-to-txt-settings .novel-settings-grid .novel-section + .novel-section {
+    border-top: none;
+    padding-top: 0;
+}
+#auto-save-to-txt-settings .novel-settings-grid {
+    gap: 18px;
+    /* 标签页化之后每个面板里只有 1 个分区，双列栅格会让右半列整片空着、
+      看上去像内容没居中 —— 这里退化为单列，让内容铺满弹窗宽度。
+      旧的双列规则仍保留在文件中（test-ui-wiring.js 对其有断言），仅在此覆盖。 */
+    grid-template-columns: 1fr;
+}
+
+/* 分区标题即参考图里的分组行：左标题 + 下方发丝线，与内容拉开呼吸 */
+#auto-save-to-txt-settings .novel-section-title {
+    padding: 0 0 11px;
+    margin: 0 0 15px;
+}
+
+/* ---------- 去卡片 ③：当前连载书卡 → 左侧强调竖线的信息块 ---------- */
+#auto-save-to-txt-settings .novel-current-book-card {
+    background: none;
+    border: none;
+    border-left: 2px solid var(--nv-accent-line);
+    border-radius: 0;
+    padding: 0 0 0 12px;
+}
+#auto-save-to-txt-settings .novel-current-book-card:hover {
+    background: none;
+    border-color: var(--nv-accent);
+}
+
+/* ---------- 扁平化后的行间距（开关行不再被卡片内边距隔开） ---------- */
+#auto-save-to-txt-settings .novel-section > .checkbox_label {
+    margin: 0 0 11px;
+}
+#auto-save-to-txt-settings .novel-section > .checkbox_label:last-child { margin-bottom: 0; }
+
+/* ---------- 恢复正文容器内边距 ----------
+   v1.14 遗留的 `#novel_settings_body { padding: 0; }`（特异性 1,0,0）把这里所有
+   `.novel-modal-body-settings` 的 padding 规则全部压成了 0（实测 computed padding: "0px"），
+   结果是内容一直贴着弹窗/屏幕边缘。这里按断点把内边距恢复回来。
+   手机端水平内边距挪到「面板内容」上（0 0 0），好让底部标签栏能自然通栏。 */
+#novel_settings_body { padding: 16px; }
+
+/* ---------- 手机端：标签栏挪到底部常驻 ----------
+   两个必须同时成立的布局条件（缺一个标签栏就浮不到底）：
+     a. 正文容器要撑满弹窗高度 —— 它默认 flex: 0 1 auto，内容不足一屏时只有内容那么高；
+     b. 标签栏要排到最后一个 flex 项 —— sticky 的吸附基准是滚动容器底部，
+        元素天然位置在容器末尾时才稳定贴底，故用 order 重排在 DOM 之后（不动真实索引）。
+   内容高于一屏时 sticky 让它浮在滚动区底部，滚到底又回到自己的流内位置，不遮正文。 */
+@media (max-width: 768px) {
+    #novel_settings_body { padding: 12px 0 0; }
+    #auto-save-to-txt-settings .novel-toggle-card { padding: 0 12px 12px; }
+    #auto-save-to-txt-settings .novel-tabpanes { padding: 0 12px; }
+    .novel-modal-body-settings {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+    }
+    #auto-save-to-txt-settings {
+        flex: 1 0 auto;
+        gap: 10px;
+    }
+    #auto-save-to-txt-settings .novel-toggle-card { order: 1; }
+    #auto-save-to-txt-settings .novel-tabpanes {
+        order: 2;
+        /* 内容不足一屏时由它吃掉多余高度，把标签栏顶到最底 */
+        flex: 1 1 auto;
+    }
+    #auto-save-to-txt-settings .novel-tabs {
+        order: 3;
+        position: sticky;
+        bottom: 0;
+        z-index: 3;
+        padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+        margin: 0;
+        border-bottom: none;
+        border-top: 1px solid var(--nv-line);
+        background: var(--nv-bg);
+    }
+    #auto-save-to-txt-settings .novel-tab {
+        flex: 1 1 auto;
+        flex-direction: column;
+        gap: 3px;
+        padding: 7px 4px;
+        border-radius: 12px;
+        font-size: 11px;
+    }
+    #auto-save-to-txt-settings .novel-tab i { font-size: 16px; }
+    #auto-save-to-txt-settings .novel-tab.is-active { background: var(--nv-accent-bg); }
+    #auto-save-to-txt-settings .novel-section-title { padding-bottom: 10px; margin-bottom: 13px; }
+}
+
+/* ==========================================================================
+ * v1.17 折叠分组（替代卡片）
+ * --------------------------------------------------------------------------
+ * 结构：分组标题行（图标 + 标题 + 当前值摘要 + 箭头）+ 展开体。
+ * 一律「一行 + 发丝线」，不再有底色 / 描边 / 圆角盒子。
+ *
+ * 摘要是这套组件成立的前提：收起时它是唯一线索，每个分组都必须有一句
+ * 「当前值」（见 index.js 的 refreshNovelAccSummaries），否则折叠 = 把设置藏起来。
+ * ========================================================================== */
+
+/* ---------- 分组行 ---------- */
+#auto-save-to-txt-settings .novel-acc { border-bottom: 1px solid var(--nv-line); }
+#auto-save-to-txt-settings .novel-acc:last-child { border-bottom: none; }
+
+#auto-save-to-txt-settings .novel-acc-head {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 13px 2px;
+    background: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    color: var(--nv-text);
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.5;
+    text-align: left;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+#auto-save-to-txt-settings .novel-acc-head:hover { color: #fff; }
+#auto-save-to-txt-settings .novel-acc-head:focus-visible { outline: 2px solid var(--nv-accent); outline-offset: -2px; }
+
+#auto-save-to-txt-settings .novel-acc-title {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--nv-text);
+}
+#auto-save-to-txt-settings .novel-acc-title i { color: var(--nv-accent-2); font-size: 13px; }
+
+#auto-save-to-txt-settings .novel-acc-summary {
+    margin-left: auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--nv-text-3);
+    font-size: 12px;
+    font-weight: 400;
+}
+
+#auto-save-to-txt-settings .novel-acc-chev {
+    flex: 0 0 auto;
+    color: var(--nv-text-3);
+    font-size: 12px;
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+#auto-save-to-txt-settings .novel-acc.is-open .novel-acc-chev { transform: rotate(180deg); color: var(--nv-accent-2); }
+
+/* ---------- 展开体 ---------- */
+#auto-save-to-txt-settings .novel-acc-body { display: none; padding: 0 0 16px; }
+#auto-save-to-txt-settings .novel-acc.is-open .novel-acc-body { display: block; }
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label { margin: 0 0 12px; }
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label:last-child { margin-bottom: 0; }
+#auto-save-to-txt-settings .novel-acc-body > .novel-form-group:last-child { margin-bottom: 0; }
+#auto-save-to-txt-settings .novel-tag-scanner { gap: 10px; }
+#auto-save-to-txt-settings .novel-tag-scanner-actions { display: flex; justify-content: flex-end; }
+
+/* ---------- 不折叠的动作行（导出/同步、过滤预览这类要一眼找到的） ---------- */
+#auto-save-to-txt-settings .novel-acc-flat {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 2px 15px;
+    border-bottom: 1px solid var(--nv-line);
+}
+#auto-save-to-txt-settings .novel-acc-flat:last-child { border-bottom: none; }
+#auto-save-to-txt-settings .novel-acc-flat > .novel-btn { margin: 0; }
+
+/* ---------- 去卡片 ④：状态提示条 → 左侧细竖线 + 纯文字 ---------- */
+#auto-save-to-txt-settings .novel-alert {
+    background: none !important;
+    border: none !important;
+    border-left: 2px solid var(--nv-line-2) !important;
+    border-radius: 0 !important;
+    padding: 2px 0 2px 10px !important;
+    margin-top: 14px;
+}
+#auto-save-to-txt-settings .novel-alert.checking { border-left-color: var(--nv-dash) !important; }
+#auto-save-to-txt-settings .novel-alert.warning { border-left-color: var(--nv-danger) !important; }
+#auto-save-to-txt-settings .novel-alert.success { border-left-color: var(--nv-ok) !important; }
+
+/* ---------- 去卡片 ⑤：标签检测容器 → 无框，chips 自己就是形状 ---------- */
+#auto-save-to-txt-settings .novel-tag-chip-list {
+    background: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+}
+
+/* ---------- 去卡片 ⑥：部署指引内的卡片同样扁平化 ---------- */
+#auto-save-to-txt-settings .novel-deploy-card,
+#auto-save-to-txt-settings .novel-manual-card {
+    background: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    border-left: 2px solid var(--nv-line-2) !important;
+    padding: 4px 0 4px 12px !important;
+}
+#auto-save-to-txt-settings .novel-manual-card { border-left-color: var(--nv-warn) !important; }
+
+/* 状态行分隔线改实线：虚线在本设计里是「空态卡」的语言，这里只是分隔 */
+#auto-save-to-txt-settings .novel-status-line { border-top: 1px solid var(--nv-line); }
+
+/* ---------- 手机端：行高放宽，摘要允许换行（窄屏放不下时不要硬截断） ---------- */
+@media (max-width: 768px) {
+    #auto-save-to-txt-settings .novel-acc-head { padding: 15px 2px; font-size: 14px; }
+    #auto-save-to-txt-settings .novel-acc-title { font-size: 14px; }
+    #auto-save-to-txt-settings .novel-acc-summary { font-size: 12.5px; }
+    #auto-save-to-txt-settings .novel-acc-flat { padding: 15px 2px 16px; }
+}
+
+
