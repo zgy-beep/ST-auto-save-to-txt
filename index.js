@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.14.0',            // 扩展版本号
+    version: '1.14.1',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -293,7 +293,9 @@ function syncWandEntryState() {
 //    常显当前连载进度（第 N 章 / 连载已关 / 等待开书），点击即打开设置弹窗——
 //    不再有二级展开面板，所有操作集中在弹窗内，信息与入口一一对应。
 //    位置持久化；不依赖任何楼层 DOM，切聊天全程跟随；无 DOM 环境（node 测试）直接跳过
-let fwLastDragAt = 0;
+let fwDragEndAt = 0;    // 最近一次「拖动结束」的时间戳：抑制随后补发的 click（防误当点击）
+let fwTapHandledAt = 0;  // 最近一次「已在 pointerup 里判定为轻点」的时间戳：抑制补发的 click 重复打开
+let fwOnTap = null;      // 轻点回调（由 buildFloatingWindow 注入），pointerup 里就直接调用
 
 /** 读取用户拖动后的悬浮窗坐标（从未拖动过返回 null = 默认右下角） */
 function getUserFloatPos() {
@@ -334,9 +336,19 @@ function applyFloatPos() {
     win.classList.add('is-moved');
 }
 
-// ---- 拖拽（指针事件，鼠标 / 触屏共用；4px 阈值区分「点击展开」与「拖动移动」） ----
-const fwDrag = { active: false, moved: false, startX: 0, startY: 0, startLeft: 0, startTop: 0 };
+// ---- 拖拽 + 轻点（指针事件，鼠标 / 触屏共用） ----
+// 关键约定：轻点绝不依赖浏览器补发的 click。
+// 移动端手指按下几乎必然带几像素抖动，一旦超过阈值，浏览器会把这次触摸当成手势
+// 从而吞掉 click —— 只认 click 就会出现「手机上点药丸没反应 / 弹窗打不开」。
+// 因此轻点在 pointerup 当场判定，click 仅作键盘与旧环境的兜底。
+const fwDrag = { active: false, moved: false, startX: 0, startY: 0, startLeft: 0, startTop: 0, pointerType: 'mouse' };
 let fwDragBound = false;
+// 手指抖动远大于鼠标：触屏阈值放宽到 10px（对齐 iOS/Android 的 tap slop），避免轻点被误判成拖动
+const FW_SLOP = { touch: 10, pen: 4, mouse: 4 };
+
+function fwSlop(type) {
+    return FW_SLOP[type] || 4;
+}
 
 function onFwPointerMove(e) {
     if (!fwDrag.active) return;
@@ -347,7 +359,8 @@ function onFwPointerMove(e) {
     }
     const dx = e.clientX - fwDrag.startX;
     const dy = e.clientY - fwDrag.startY;
-    if (!fwDrag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    const slop = fwSlop(fwDrag.pointerType);
+    if (!fwDrag.moved && Math.abs(dx) < slop && Math.abs(dy) < slop) return;
     fwDrag.moved = true;
     if (e.cancelable) e.preventDefault();
     const c = clampFloatPos(fwDrag.startLeft + dx, fwDrag.startTop + dy, win.offsetWidth, win.offsetHeight);
@@ -355,34 +368,51 @@ function onFwPointerMove(e) {
     win.style.top = `${c.top}px`;
 }
 
-function onFwPointerUp() {
+/**
+ * 指针结束统一收口：
+ * - 未构成拖动（moved=false）→ 判定为「轻点」，当场执行 onTap（打开设置弹窗）
+ * - 构成拖动（moved=true）→ 持久化新位置
+ * - isCancel（手势被系统取消，如页面开始滚动）且没拖过 → 什么都不做
+ */
+function onFwPointerEnd(e, isCancel) {
     if (!fwDrag.active) return;
     const win = document.getElementById('novel-floating-window');
     fwDrag.active = false;
-    if (win) {
-        win.classList.remove('is-dragging');
-        if (fwDrag.moved) {
-            // 记录拖动时间：随后浏览器补发的 click 不再触发「点击展开/收起」与「点外收起」
-            fwLastDragAt = Date.now();
-            const settings = getSettings();
-            settings.float_pos = {
-                left: parseFloat(win.style.left) || 0,
-                top: parseFloat(win.style.top) || 0
-            };
-            win.classList.add('is-moved');
-            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
-        }
-    }
+    if (win) win.classList.remove('is-dragging');
+    const moved = fwDrag.moved;
     fwDrag.moved = false;
+    if (isCancel && !moved) return;
+    if (!moved) {
+        fwTapHandledAt = Date.now();
+        if (typeof fwOnTap === 'function') fwOnTap();
+        return;
+    }
+    fwDragEndAt = Date.now();
+    if (win) {
+        const settings = getSettings();
+        settings.float_pos = {
+            left: parseFloat(win.style.left) || 0,
+            top: parseFloat(win.style.top) || 0
+        };
+        win.classList.add('is-moved');
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+    }
 }
 
-/** 绑定拖拽把手（药丸 + 面板标题栏）；document 级监听全程只绑一次，避免反复重建时重复挂载 */
-function bindFloatingWindowDrag(win, handles) {
+function onFwPointerUp() { onFwPointerEnd(null, false); }
+function onFwPointerCancel() { onFwPointerEnd(null, true); }
+
+/**
+ * 绑定拖拽把手；document 级监听全程只绑一次，避免反复重建时重复挂载。
+ * onTap：轻点（未构成拖动）时执行的动作，由调用方注入（v1.14.1 起为「打开设置弹窗」）
+ */
+function bindFloatingWindowDrag(win, handles, onTap) {
+    if (typeof onTap === 'function') fwOnTap = onTap;
     if (!fwDragBound && typeof document !== 'undefined') {
         fwDragBound = true;
         document.addEventListener('pointermove', onFwPointerMove, { passive: false });
         document.addEventListener('pointerup', onFwPointerUp);
-        document.addEventListener('pointercancel', onFwPointerUp);
+        document.addEventListener('pointercancel', onFwPointerCancel);
     }
     handles.filter(Boolean).forEach((handle) => {
         handle.classList.add('novel-fw-drag-handle');
@@ -392,6 +422,7 @@ function bindFloatingWindowDrag(win, handles) {
             const rect = win.getBoundingClientRect();
             fwDrag.active = true;
             fwDrag.moved = false;
+            fwDrag.pointerType = e.pointerType || 'mouse';
             fwDrag.startX = e.clientX;
             fwDrag.startY = e.clientY;
             fwDrag.startLeft = rect.left;
@@ -421,17 +452,17 @@ function buildFloatingWindow() {
     `;
     document.body.appendChild(win);
 
-    // 药丸整体是拖拽把手（内部无按钮/输入框，拖动与点击由 4px 阈值区分）
-    bindFloatingWindowDrag(win, [win.querySelector('#novel_fw_pill')]);
-
     const pill = win.querySelector('#novel_fw_pill');
-    const activate = () => {
-        // 刚发生过拖动：浏览器补发的 click 不再当作「点击打开弹窗」
-        if (Date.now() - fwLastDragAt < 300) return;
-        openNovelSettingsModal();
-    };
+    // 轻点动作：由 pointerup 当场执行（见 onFwPointerEnd），移动端不依赖补发的 click
+    const activate = () => openNovelSettingsModal();
+    // 药丸整体是拖拽把手（内部无按钮/输入框，拖动与轻点由阈值区分）
+    bindFloatingWindowDrag(win, [pill], activate);
+
     pill.addEventListener('click', (e) => {
         e.stopPropagation();
+        // 这次轻点已在 pointerup 里处理过（触摸 / 鼠标），或刚拖动完 → 忽略补发的 click 防重复打开
+        if (Date.now() - fwTapHandledAt < 500) return;
+        if (Date.now() - fwDragEndAt < 400) return;
         activate();
     });
     pill.addEventListener('keydown', (e) => {
@@ -1956,6 +1987,9 @@ function positionOverlay(overlay) {
     }
 }
 
+// 设置弹窗最近一次打开的时间戳：用于拦掉「打开它的同一次触摸补发的 click」把弹窗立刻关掉
+let settingsModalOpenedAt = 0;
+
 // Esc 只关闭最上层弹窗（预览弹窗优先于设置弹窗），全局只绑一次
 let novelEscBound = false;
 function bindNovelEscClose() {
@@ -1998,7 +2032,11 @@ function ensureSettingsModal() {
     document.body.appendChild(overlay);
 
     overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeNovelSettingsModal();
+        if (e.target !== overlay) return;
+        // 触摸端「轻点药丸」打开弹窗后，同一次触摸可能还会补发一次 click 并落到遮罩上，
+        // 若不设守卫，弹窗会刚打开就被自己关掉（表现为「手机点了没反应」）
+        if (Date.now() - settingsModalOpenedAt < 400) return;
+        closeNovelSettingsModal();
     });
     const closeBtn = overlay.querySelector('#novel_settings_close');
     if (closeBtn) closeBtn.addEventListener('click', closeNovelSettingsModal);
@@ -2017,8 +2055,10 @@ function openNovelSettingsModal() {
         if (body) body.innerHTML = '<div class="novel-mv-hint">正在载入设置…</div>';
         renderSettingsUI();
     }
-    positionOverlay(overlay);
+    // 先显示、后定位：display:none 时 getBoundingClientRect 恒为全 0，定位探测会失效
     overlay.style.display = 'flex';
+    positionOverlay(overlay);
+    settingsModalOpenedAt = Date.now();
     if (body) body.scrollTop = 0;
 }
 

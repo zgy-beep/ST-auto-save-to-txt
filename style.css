@@ -925,8 +925,10 @@
 .novel-fw-pill.is-off .novel-fw-book { color: var(--SmartThemeEmColor, #999); }
 
 @media (max-width: 768px) {
-    .novel-floating-window { bottom: 10px; right: 10px; }
-    .novel-fw-pill { padding: 9px 15px; }
+    /* 手机上酒馆输入栏常驻底部（约 60px 高），药丸必须上移让开，否则压住输入框与发送键 */
+    .novel-floating-window { bottom: calc(74px + env(safe-area-inset-bottom, 0px)); right: 10px; }
+    /* 触摸目标放大到约 40px 高，手指更容易点中 */
+    .novel-fw-pill { padding: 11px 16px; font-size: 13px; }
 }
 
 /* ==================== v1.13 左下角魔法棒菜单入口 ==================== */
@@ -1194,3 +1196,10 @@
     #novel_export_all_btn, #novel_sync_all_btn { flex: 1 1 calc(50% - 4px) !important; }
     #novel_test_btn { flex: 1 1 100% !important; }
 }
+
+/* ==================== v1.14.1 手机端弹窗修复 ==================== */
+/* 触摸端药丸轻点判定改在 pointerup 当场执行（见 index.js onFwPointerEnd）：
+   手指抖动会让浏览器吞掉补发的 click，只认 click 就会「点药丸没反应、弹窗打不开」 */
+/* 弹窗内滚动不穿透到背景页面（手机端尤其明显） */
+.novel-modal-overlay { overscroll-behavior: none; }
+.novel-modal-body { overscroll-behavior: contain; }

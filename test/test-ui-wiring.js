@@ -49,7 +49,8 @@ check('函数体调用 syncWandEntryState', /syncWandEntryState\s*\(/.test(refre
 console.log('\n=== ② 入口架构（v1.13：魔法棒菜单 + 悬浮窗，不再进扩展抽屉）===');
 for (const fn of ['injectWandEntry', 'syncWandEntryState', 'ensureSettingsModal',
     'openNovelSettingsModal', 'closeNovelSettingsModal', 'ensurePreviewModal',
-    'bindFloatingWindowDrag', 'onFwPointerMove', 'onFwPointerUp', 'applyFloatPos', 'clampFloatPos']) {
+    'bindFloatingWindowDrag', 'onFwPointerMove', 'onFwPointerEnd', 'onFwPointerUp',
+    'onFwPointerCancel', 'fwSlop', 'applyFloatPos', 'clampFloatPos']) {
     check(`${fn} 已定义`, src.includes(`function ${fn}(`), true);
 }
 check('魔法棒菜单项挂在 #extensionsMenu', /getElementById\('extensionsMenu'\)/.test(src), true);
@@ -71,27 +72,42 @@ const dragFn = extractFn('bindFloatingWindowDrag') || '';
 check('拖拽把手绑定 pointerdown', /pointerdown/.test(dragFn), true);
 check('拖拽把手避让按钮/输入框', /closest\('button, input/.test(dragFn), true);
 const moveFn = extractFn('onFwPointerMove') || '';
-check('4px 阈值区分「点击打开弹窗」与「拖动移动」', /Math\.abs\(dx\) < 4 && Math\.abs\(dy\) < 4/.test(moveFn), true);
+check('拖动阈值按指针类型区分（触屏放宽，手机轻点不被误判成拖动）', /fwSlop\(fwDrag\.pointerType\)/.test(moveFn), true);
+check('触屏阈值 10px / 鼠标 4px（FW_SLOP）', /FW_SLOP = \{ touch: 10, pen: 4, mouse: 4 \}/.test(src), true);
 check('拖拽坐标经 clampFloatPos 夹取（拖不出屏幕）', /clampFloatPos\(fwDrag\.startLeft/.test(moveFn), true);
-const upFn = extractFn('onFwPointerUp') || '';
-check('拖动结束写入 float_pos 并持久化', /settings\.float_pos = \{/.test(upFn) && /saveSettingsDebounced/.test(upFn), true);
-check('拖动后抑制补发的 click（fwLastDragAt）', /fwLastDragAt = Date\.now\(\)/.test(upFn), true);
+
+const endFn = extractFn('onFwPointerEnd') || '';
+check('轻点在 pointerup 当场判定（不依赖浏览器补发的 click）',
+    /fwTapHandledAt = Date\.now\(\)/.test(endFn) && /fwOnTap\(\)/.test(endFn), true);
+check('拖动结束写入 float_pos 并持久化', /settings\.float_pos = \{/.test(endFn) && /saveSettingsDebounced/.test(endFn), true);
+check('拖动结束记录时间戳（fwDragEndAt）', /fwDragEndAt = Date\.now\(\)/.test(endFn), true);
+check('pointercancel（手势被系统取消）既不算点击也不算拖动',
+    /if \(isCancel && !moved\) return;/.test(endFn) && /function onFwPointerCancel/.test(src), true);
+
 const buildFn = extractFn('buildFloatingWindow') || '';
 check('药丸点击即打开设置弹窗（纯入口）',
-    /pill\.addEventListener\('click'[\s\S]{0,160}activate\(\)/.test(buildFn) && /openNovelSettingsModal\(\)/.test(buildFn), true);
-check('点击与拖动区分（fwLastDragAt 守卫）', /Date\.now\(\) - fwLastDragAt < 300/.test(buildFn), true);
+    /pill\.addEventListener\('click'[\s\S]{0,300}activate\(\)/.test(buildFn) && /openNovelSettingsModal\(\)/.test(buildFn), true);
+check('click 仅作兜底：pointerup 已处理 / 刚拖动过都会被忽略',
+    /Date\.now\(\) - fwTapHandledAt < 500/.test(buildFn) && /Date\.now\(\) - fwDragEndAt < 400/.test(buildFn), true);
 check('药丸可键盘触发（role=button + Enter/Space）', /role="button"/.test(buildFn) && /'Enter' \|\| e\.key === ' '/.test(buildFn), true);
+check('旧版点击守卫已下线（fwLastDragAt）', /fwLastDragAt/.test(src), false);
 check('悬浮入口已无二级展开面板', /novel-fw-panel/.test(src), false);
 check('面板相关设置项已清理（floating_window_collapsed）', /floating_window_collapsed/.test(src), false);
 check('无遗留的展开面板 CSS', /novel-fw-panel|novel-fw-btn|novel-fw-chevron/.test(css), false);
 check('拖拽状态只绑一次 document 监听（fwDragBound）', /fwDragBound/.test(dragFn), true);
 check('拖拽把手禁用触摸滚动（touch-action: none）', /\.novel-fw-drag-handle \{[\s\S]*?touch-action: none/.test(css), true);
 check('悬浮窗为 fixed 定位', /\.novel-floating-window \{[\s\S]*?position: fixed/.test(css), true);
+check('手机端药丸上移避开输入栏（bottom 74px + 安全区）',
+    /bottom: calc\(74px \+ env\(safe-area-inset-bottom/.test(css), true);
 check('启动即渲染悬浮窗口（init 调用 refreshNovelToolbars）', /seedLastSavedSignature\(\);[\s\S]{0,400}refreshNovelToolbars\(\)/.test(src), true);
 
 console.log('\n=== ④ 弹窗定位与层级 ===');
 check('positionOverlay 具备 fixed 退化兜底',
     /Math\.abs\(rect\.top\) > 1 \|\| Math\.abs\(rect\.left\) > 1/.test(src), true);
+check('弹窗先显示后定位（display:none 时 getBoundingClientRect 恒为 0）',
+    /overlay\.style\.display = 'flex';\s*\n\s*positionOverlay\(overlay\);/.test(src), true);
+check('遮罩点击关闭带「刚打开」守卫（防同一次触摸补发的 click 秒关弹窗）',
+    /Date\.now\(\) - settingsModalOpenedAt < 400/.test(src), true);
 check('预览弹窗层级高于设置弹窗',
     /#novel_preview_modal \{ z-index: 1000025/.test(css) && /#novel_settings_modal \{ z-index: 1000015/.test(css), true);
 check('Esc 关闭逻辑只绑一次且预览优先', /novelEscBound/.test(src) && /bindNovelEscClose/.test(src), true);
