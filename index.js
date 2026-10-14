@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.15.0',            // 扩展版本号
+    version: '1.16.0',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -314,26 +314,119 @@ function clampFloatPos(left, top, w, h) {
     };
 }
 
-/** 落地悬浮窗位置：未拖动过走 CSS 默认（右下角），拖动过用持久化坐标并夹取回可视区 */
+/**
+ * 实测底部安全区高度（刘海屏 / Home Indicator）。
+ * CSS 的 env() 在 getComputedStyle 里读不到解析值（自定义属性保留的是原始 token），
+ * 所以用一个零尺寸探针把它量出来，供 JS 计算底部让位；尺寸变化时清缓存重测。
+ */
+let cachedSafeAreaBottom = null;
+function measureSafeAreaBottom() {
+    if (cachedSafeAreaBottom !== null) return cachedSafeAreaBottom;
+    if (typeof document === 'undefined' || !document.body) return 0;
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:absolute;left:-9999px;top:0;width:0;height:env(safe-area-inset-bottom, 0px);';
+    document.body.appendChild(probe);
+    const h = probe.getBoundingClientRect().height || 0;
+    probe.remove();
+    cachedSafeAreaBottom = h;
+    return h;
+}
+
+/** 读取悬浮入口的底部/右侧让位（CSS 变量给出档位，底部再叠加实测安全区） */
+function readFloatGap(win) {
+    const fallback = { bottom: 12, right: 12 };
+    if (!win || typeof getComputedStyle !== 'function') return fallback;
+    const cs = getComputedStyle(win);
+    const bottom = parseFloat(cs.getPropertyValue('--nv-fw-gap-bottom'));
+    const right = parseFloat(cs.getPropertyValue('--nv-fw-gap-right'));
+    return {
+        bottom: (Number.isFinite(bottom) ? bottom : fallback.bottom) + measureSafeAreaBottom(),
+        right: Number.isFinite(right) ? right : fallback.right
+    };
+}
+
+/**
+ * 底部需要额外让开的高度：桌面档（12px）不算，只有手机档（74px 起）要让开常驻输入栏。
+ * 修正与「坐标是否可用」两处共用，避免出现「贴到屏幕最底边、被输入栏压住」的结果。
+ */
+function floatBottomClearance(gap) {
+    return (gap && gap.bottom > 20) ? gap.bottom : 0;
+}
+
+/**
+ * 持久化坐标是否适用于当前视口（屏幕坐标）。
+ * 「悬浮窗不会根据手机端/电脑端适配」的根因：坐标是在另一台设备上拖出来的，
+ * 硬套到当前视口只能贴边，容易被输入栏压住甚至整颗跑出可见区。
+ * 规则：① 记录过保存时视口宽 vw，与当前宽度相差 > 120px 视为跨设备 → 不采用；
+ *      ② 坐标必须让整颗药丸完整落在可见区内（手机端还要让开底部输入栏）→ 否则不采用。
+ * 不采用时回落到「本设备默认锚点」（桌面右下 12px / 手机输入栏上方 74px）。
+ */
+function isFloatPosUsableForViewport(pos, w, h, vp, gap) {
+    if (!pos || typeof pos.left !== 'number' || typeof pos.top !== 'number') return false;
+    if (!Number.isFinite(pos.left) || !Number.isFinite(pos.top)) return false;
+    if (!vp || !vp.width || !vp.height || !w || !h) return false;
+    if (Number.isFinite(pos.vw) && Math.abs(pos.vw - vp.width) > 120) return false;
+    if (pos.left < 0 || pos.top < 0) return false;
+    if (pos.left + w > vp.width) return false;
+    if (pos.top + h > vp.height - floatBottomClearance(gap)) return false;
+    return true;
+}
+
+/**
+ * 实测修正：把药丸整颗推回可见区（用 translate 补偿，不动布局坐标，不影响拖拽逻辑）。
+ * 覆盖「宿主把 fixed 钉在高于可见区的文档盒子上」「文档被顶起」「跨设备旧坐标」
+ * 等所有会让药丸跑到屏幕外的情形；手机端同时保证不让常驻输入栏压住。
+ */
+function keepFloatWindowInsideViewport(win) {
+    if (!win) return;
+    const vp = getVisibleViewportBox();
+    if (!vp.width || !vp.height) return;
+    const r = win.getBoundingClientRect();
+    const maxBottom = vp.height - floatBottomClearance(readFloatGap(win));
+    let dx = 0;
+    let dy = 0;
+    if (r.right > vp.width) dx = vp.width - r.right;
+    if (r.left + dx < 0) dx = -r.left;
+    if (r.bottom > maxBottom) dy = maxBottom - r.bottom;
+    if (r.top + dy < 0) dy = -r.top;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+        win.style.transform = '';
+        return;
+    }
+    win.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+}
+
+/**
+ * 落地悬浮窗位置：本设备拖过就沿用旧坐标，跨设备 / 坐标已失效则回落本设备默认锚点。
+ * 末尾统一过一遍 keepFloatWindowInsideViewport，保证屏幕上一定看得见。
+ */
 function applyFloatPos() {
     if (typeof document === 'undefined' || typeof window === 'undefined') return;
     const win = document.getElementById('novel-floating-window');
     if (!win) return;
+    if (fwDrag.active) return;   // 拖拽中不与手指抢坐标
+    const vp = getVisibleViewportBox();
+    if (!vp.width || !vp.height) return;
+    const gap = readFloatGap(win);
     const pos = getUserFloatPos();
-    if (!pos) {
+
+    if (isFloatPosUsableForViewport(pos, win.offsetWidth || 0, win.offsetHeight || 0, vp, gap)) {
+        // 持久化的是屏幕坐标；宿主包含块被劫持时需折算成宿主坐标再写
+        const off = measureHostFixedOffset();
+        win.style.right = 'auto';
+        win.style.bottom = 'auto';
+        win.style.left = `${pos.left - off.x}px`;
+        win.style.top = `${pos.top - off.y}px`;
+        win.classList.add('is-moved');
+    } else {
+        // 回落到本设备默认锚点（右/下由 CSS 变量给出，手机端已让开输入栏）
         win.style.left = 'auto';
         win.style.top = 'auto';
         win.style.right = '';
         win.style.bottom = '';
         win.classList.remove('is-moved');
-        return;
     }
-    const c = clampFloatPos(pos.left, pos.top, win.offsetWidth || 0, win.offsetHeight || 0);
-    win.style.right = 'auto';
-    win.style.bottom = 'auto';
-    win.style.left = `${c.left}px`;
-    win.style.top = `${c.top}px`;
-    win.classList.add('is-moved');
+    keepFloatWindowInsideViewport(win);
 }
 
 // ---- 拖拽 + 轻点（指针事件，鼠标 / 触屏共用） ----
@@ -341,7 +434,7 @@ function applyFloatPos() {
 // 移动端手指按下几乎必然带几像素抖动，一旦超过阈值，浏览器会把这次触摸当成手势
 // 从而吞掉 click —— 只认 click 就会出现「手机上点药丸没反应 / 弹窗打不开」。
 // 因此轻点在 pointerup 当场判定，click 仅作键盘与旧环境的兜底。
-const fwDrag = { active: false, moved: false, startX: 0, startY: 0, startLeft: 0, startTop: 0, pointerType: 'mouse' };
+const fwDrag = { active: false, moved: false, startX: 0, startY: 0, startLeft: 0, startTop: 0, pointerType: 'mouse', hostOffset: { x: 0, y: 0 } };
 let fwDragBound = false;
 // 手指抖动远大于鼠标：触屏阈值放宽到 10px（对齐 iOS/Android 的 tap slop），避免轻点被误判成拖动
 const FW_SLOP = { touch: 10, pen: 4, mouse: 4 };
@@ -366,6 +459,8 @@ function onFwPointerMove(e) {
     const c = clampFloatPos(fwDrag.startLeft + dx, fwDrag.startTop + dy, win.offsetWidth, win.offsetHeight);
     win.style.left = `${c.left}px`;
     win.style.top = `${c.top}px`;
+    // 拖动过程中也保一颗在可见区内（宿主盒子高于可见区 / 文档被顶起时，夹取用的是宿主坐标系）
+    keepFloatWindowInsideViewport(win);
 }
 
 /**
@@ -390,12 +485,20 @@ function onFwPointerEnd(e, isCancel) {
     fwDragEndAt = Date.now();
     if (win) {
         const settings = getSettings();
+        // 存「屏幕坐标」：拖动结束时的实测矩形就是用户看到的位置，
+        // 天然兼容宿主包含块被劫持（不需要在这里做坐标折算）。
+        const rect = win.getBoundingClientRect();
         settings.float_pos = {
-            left: parseFloat(win.style.left) || 0,
-            top: parseFloat(win.style.top) || 0
+            left: Math.round(rect.left),
+            top: Math.round(rect.top),
+            // 记下当时视口宽度：换到手机/电脑时宽度差过大即判为跨设备，不再套用这份坐标
+            vw: Math.round(getVisibleViewportBox().width) || 0
         };
         win.classList.add('is-moved');
         if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        // 落点若已失效（例如拖到手机端输入栏后面 / 拖出屏幕），立刻回落本设备默认锚点
+        fwDrag.active = false;
+        applyFloatPos();
     }
 }
 
@@ -420,18 +523,23 @@ function bindFloatingWindowDrag(win, handles, onTap) {
             if (e.button !== undefined && e.button !== 0) return;
             if (e.target.closest('button, input, select, textarea, a, label')) return;
             const rect = win.getBoundingClientRect();
+            // 拖动前先把「包含块补偿」折成像素坐标：清掉可能叠加的修正 transform，
+            // 并把当前屏幕位置换算进宿主坐标系，否则按下瞬间药丸会跳位
+            const off = measureHostFixedOffset();
+            win.style.transform = '';
+            fwDrag.hostOffset = off;
             fwDrag.active = true;
             fwDrag.moved = false;
             fwDrag.pointerType = e.pointerType || 'mouse';
             fwDrag.startX = e.clientX;
             fwDrag.startY = e.clientY;
-            fwDrag.startLeft = rect.left;
-            fwDrag.startTop = rect.top;
+            fwDrag.startLeft = rect.left - off.x;
+            fwDrag.startTop = rect.top - off.y;
             // 先落成像素坐标再拖，避免 right/bottom 锚点在拖动过程中跳动
             win.style.right = 'auto';
             win.style.bottom = 'auto';
-            win.style.left = `${rect.left}px`;
-            win.style.top = `${rect.top}px`;
+            win.style.left = `${fwDrag.startLeft}px`;
+            win.style.top = `${fwDrag.startTop}px`;
             win.classList.add('is-dragging');
         });
     });
@@ -508,6 +616,8 @@ function refreshFloatingWindow() {
     }
 
     applyFloatPos();
+    // 首次构建时样式/字体可能还没落地，量不准药丸尺寸；下一帧再校正一次位置
+    scheduleOverlayResync();
 }
 
 // 连载界面 surfaces 统一刷新：楼层内嵌工具条 + 悬浮窗 + 魔法棒菜单项（含被酒馆重绘后的自动补回）
@@ -1964,26 +2074,152 @@ function throttledNovelSuccessToast(message, title, opts = {}) {
    统一改为 body 级弹窗：入口 = 左下角魔法棒菜单 / 悬浮窗 / 楼层内嵌工具条
    ============================================================ */
 
+/* ============================================================
+   v1.16 浮层定位加固：修「手机端悬浮窗 / 弹窗跑到屏幕外」
+   ------------------------------------------------------------
+   宿主事实（核对自 SillyTavern release 分支 public/style.css）：
+       html { -webkit-transform: translateZ(0); -webkit-backface-visibility: hidden;
+              -webkit-perspective: 1000 }
+   按 CSS 规范，html 上的 transform 会让它成为 position:fixed 子元素的包含块 ——
+   于是 fixed 不再钉住「可见视口」，而是钉住「文档盒子」。已用 Edge/CDP 实测确认：
+   html 带该 transform 时，把文档滚 500px，top:0 的 fixed 元素 rect.top 会变成 -500。
+   桌面端文档盒子恒等于视口，所以察觉不到；手机端 URL 栏展开 / 软键盘弹出会让文档盒子
+   与可见区脱节（100dvh 大于可见高、或文档被顶起一截）。此时我们原本直接用
+   `bottom: 74px`（悬浮药丸）与 `inset: 0`（弹窗）描述几何，就会整块落到可见区之外 ——
+   这就是「手机端悬浮窗与弹窗都不显示 / 像在界面外」的成因。
+   实测复现（390×844，body 高于可见区）：悬浮药丸 top=941（可见高 844，完全不可见）、
+   弹窗高 1055（底部 211px 在屏幕外）；同一场景把 html 的 transform 去掉则一切正常。
+   对策：不猜宿主行为，统一「按可见视口给几何 → 实测屏幕矩形 → 反向补偿」，
+   收敛后元素在屏幕上必然落在可见区内 —— 对 html transform、文档滚动、
+   手机端 URL 栏与软键盘、用户自定义美化 CSS 一律免疫。
+   ============================================================ */
+
+/** 可见视口尺寸：手机端 URL 栏 / 软键盘会改变 visualViewport，优先采用它 */
+function getVisibleViewportBox() {
+    if (typeof window === 'undefined') return { width: 0, height: 0 };
+    const vv = window.visualViewport;
+    const width = (vv && vv.width > 0) ? vv.width : (window.innerWidth || 0);
+    const height = (vv && vv.height > 0) ? vv.height : (window.innerHeight || 0);
+    return { width, height };
+}
+
+/** 文档滚动量（宿主劫持 fixed 后，它是「屏幕坐标 ↔ 宿主坐标」的换算基准） */
+function getDocScrollTop() {
+    if (typeof document === 'undefined') return 0;
+    const se = document.scrollingElement || document.documentElement;
+    return se ? (se.scrollTop || 0) : 0;
+}
+
 /**
- * 弹窗定位：默认 fixed 铺满视口；fixed 退化的环境（ancestor transform 等）
- * 自动降级为绝对坐标锚定当前可视区，任何滚动位置都贴在用户眼前
+ * 实测「fixed 元素 style: top/left = 0 时落在屏幕上的坐标」。
+ * 正常宿主恒为 (0,0)；酒馆这类被 transform 劫持的宿主在文档滚动后不为 0。
+ * 用探针即测即取（同一 tick 内建/测/删），避免缓存过期。
+ */
+function measureHostFixedOffset() {
+    if (typeof document === 'undefined' || !document.body) return { x: 0, y: 0 };
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;visibility:hidden;pointer-events:none;';
+    document.body.appendChild(probe);
+    const rect = probe.getBoundingClientRect();
+    probe.remove();
+    // 亚像素抖动归一为 0，避免无谓的补偿 transform
+    return {
+        x: Math.abs(rect.left) < 0.5 ? 0 : rect.left,
+        y: Math.abs(rect.top) < 0.5 ? 0 : rect.top
+    };
+}
+
+/**
+ * 把元素钉满「当前可见视口」。
+ * ① 按可见视口给一组几何（已按宿主包含块偏移折算坐标）；
+ * ② 实测屏幕矩形，偏差反向补偿，最多两轮（一轮即可收敛，第二轮兜底）。
+ */
+function pinElementToVisibleViewport(el) {
+    if (!el) return;
+    const vp = getVisibleViewportBox();
+    if (!vp.width || !vp.height) return;
+    const off = measureHostFixedOffset();
+    el.style.position = 'fixed';
+    el.style.right = 'auto';
+    el.style.bottom = 'auto';
+    el.style.width = `${vp.width}px`;
+    el.style.height = `${vp.height}px`;
+    el.style.left = `${-off.x}px`;
+    el.style.top = `${-off.y}px`;
+    for (let i = 0; i < 2; i++) {
+        const rect = el.getBoundingClientRect();
+        if (Math.abs(rect.left) < 0.5 && Math.abs(rect.top) < 0.5) break;
+        el.style.left = `${(parseFloat(el.style.left) || 0) - rect.left}px`;
+        el.style.top = `${(parseFloat(el.style.top) || 0) - rect.top}px`;
+    }
+}
+
+/**
+ * 弹窗定位：钉满当前可见视口。
+ * v1.16 起不再依赖宿主的 fixed 行为，也不再使用「退化时切 absolute」的分支 ——
+ * 那个分支只会把弹窗按文档坐标推得更远，正是问题的一部分。
  */
 function positionOverlay(overlay) {
     if (!overlay) return;
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.right = '0';
-    overlay.style.bottom = '0';
-    overlay.style.height = '';
-    const rect = overlay.getBoundingClientRect();
-    if (Math.abs(rect.top) > 1 || Math.abs(rect.left) > 1) {
-        overlay.style.position = 'absolute';
-        overlay.style.top = `${window.scrollY || window.pageYOffset || 0}px`;
-        overlay.style.left = '0';
-        overlay.style.right = '0';
-        overlay.style.bottom = 'auto';
-        overlay.style.height = `${window.innerHeight}px`;
+    pinElementToVisibleViewport(overlay);
+}
+
+/* ---- 视口变化统一重排：resize / 横竖屏 / 手机端 URL 栏与软键盘 / 文档级滚动 ---- */
+let overlayResyncRaf = 0;
+let lastObservedScrollTop = 0;
+let overlayResyncBound = false;
+
+/** 重排所有「当前可见」的浮层：设置弹窗 / 过滤预览弹窗 / 悬浮入口 */
+function resyncNovelOverlays() {
+    if (typeof document === 'undefined') return;
+    const settings = document.getElementById('novel_settings_modal');
+    if (settings && settings.style.display !== 'none') positionOverlay(settings);
+    const preview = document.getElementById('novel_preview_modal');
+    if (preview && preview.style.display !== 'none') positionOverlay(preview);
+    if (document.getElementById('novel-floating-window')) applyFloatPos();
+}
+
+/** 合并到下一帧执行，避免 resize / 滚动高频重排 */
+function scheduleOverlayResync() {
+    if (overlayResyncRaf || typeof document === 'undefined') return;
+    const raf = (typeof requestAnimationFrame === 'function')
+        ? requestAnimationFrame
+        : (cb) => setTimeout(cb, 16);
+    overlayResyncRaf = raf(() => {
+        overlayResyncRaf = 0;
+        resyncNovelOverlays();
+    });
+}
+
+/**
+ * 只绑一次。
+ * 注意滚动只认「文档级滚动量变化」：弹窗正文滚动同样会冒泡到 document 的捕获监听，
+ * 若不筛掉，滚动设置面板时每一帧都会重排浮层（明显卡顿）。
+ */
+function bindOverlayResync() {
+    if (overlayResyncBound || typeof window === 'undefined' || typeof document === 'undefined') return;
+    overlayResyncBound = true;
+    lastObservedScrollTop = getDocScrollTop();
+
+    window.addEventListener('resize', scheduleOverlayResync);
+    window.addEventListener('orientationchange', () => {
+        cachedSafeAreaBottom = null;   // 横竖屏切换后底部安全区会变，重测
+        setTimeout(scheduleOverlayResync, 200);
+    });
+
+    const onDocScroll = () => {
+        const st = getDocScrollTop();
+        if (st === lastObservedScrollTop) return;
+        lastObservedScrollTop = st;
+        scheduleOverlayResync();
+    };
+    document.addEventListener('scroll', onDocScroll, { capture: true, passive: true });
+
+    const vv = window.visualViewport;
+    if (vv) {
+        // URL 栏收放 / 软键盘弹出 / 手势缩放都会改可见区尺寸与位置，直接重排
+        vv.addEventListener('resize', scheduleOverlayResync);
+        vv.addEventListener('scroll', scheduleOverlayResync);
     }
 }
 
@@ -2872,6 +3108,8 @@ jQuery(async () => {
 
     // 魔法棒菜单项 + 悬浮窗：立即就位，并用短轮询兜底酒馆慢渲染 / 菜单后置重绘
     refreshNovelToolbars();
+    // 视口变化（含手机端 URL 栏 / 软键盘 / 横竖屏 / 文档级滚动）统一重排浮层，只绑一次
+    bindOverlayResync();
     let uiRetries = 0;
     const uiRetryTimer = setInterval(() => {
         uiRetries++;

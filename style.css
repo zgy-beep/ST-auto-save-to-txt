@@ -877,6 +877,10 @@
     position: fixed;
     right: 12px;
     bottom: 12px;
+    /* JS 侧 applyFloatPos() 读取这两个变量算「本设备默认锚点」，保证与样式表单一口径
+       （底部安全区由 JS 用探针实测后叠加，env() 在 getComputedStyle 里读不出解析值） */
+    --nv-fw-gap-bottom: 12px;
+    --nv-fw-gap-right: 12px;
     z-index: 1000010;
     display: flex;
     align-items: flex-end;
@@ -926,7 +930,12 @@
 
 @media (max-width: 768px) {
     /* 手机上酒馆输入栏常驻底部（约 60px 高），药丸必须上移让开，否则压住输入框与发送键 */
-    .novel-floating-window { bottom: calc(74px + env(safe-area-inset-bottom, 0px)); right: 10px; }
+    .novel-floating-window {
+        bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+        right: 10px;
+        --nv-fw-gap-bottom: 74px;
+        --nv-fw-gap-right: 10px;
+    }
     /* 触摸目标放大到约 40px 高，手指更容易点中 */
     .novel-fw-pill { padding: 11px 16px; font-size: 13px; }
 }

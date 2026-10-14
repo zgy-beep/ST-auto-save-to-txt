@@ -101,9 +101,75 @@ check('手机端药丸上移避开输入栏（bottom 74px + 安全区）',
     /bottom: calc\(74px \+ env\(safe-area-inset-bottom/.test(css), true);
 check('启动即渲染悬浮窗口（init 调用 refreshNovelToolbars）', /seedLastSavedSignature\(\);[\s\S]{0,400}refreshNovelToolbars\(\)/.test(src), true);
 
+console.log('\n=== ③b 悬浮窗跨设备适配与「必须看得见」（v1.16）===');
+check('init 绑定视口变化统一重排（只绑一次）',
+    /refreshNovelToolbars\(\);\s*\n\s*\/\/[^\n]*\n\s*bindOverlayResync\(\);/.test(src) && /overlayResyncBound/.test(src), true);
+check('重排覆盖 resize / 横竖屏 / visualViewport 尺寸与位移 / 文档级滚动',
+    /window\.addEventListener\('resize', scheduleOverlayResync\)/.test(src)
+    && /orientationchange/.test(src)
+    && /visualViewport[\s\S]{0,400}vv\.addEventListener\('resize'/.test(src)
+    && /document\.addEventListener\('scroll', onDocScroll/.test(src), true);
+check('弹窗正文滚动不会触发重排（只认文档级滚动量变化）',
+    /const st = getDocScrollTop\(\);\s*\n\s*if \(st === lastObservedScrollTop\) return;/.test(src), true);
+check('跨设备坐标不套用（保存时记 vw，宽度差 > 120px 即回落默认锚点）',
+    /function isFloatPosUsableForViewport/.test(src)
+    && /Math\.abs\(pos\.vw - vp\.width\) > 120/.test(src), true);
+check('药丸保存屏幕坐标 + 记录视口宽度',
+    /left: Math\.round\(rect\.left\),\s*\n\s*top: Math\.round\(rect\.top\),/.test(src)
+    && /vw: Math\.round\(getVisibleViewportBox\(\)\.width\)/.test(src), true);
+check('药丸跑出可见区即被实测推回（含手机端让开输入栏）',
+    /function keepFloatWindowInsideViewport/.test(src)
+    && /const maxBottom = vp\.height - floatBottomClearance\(readFloatGap\(win\)\);/.test(src), true);
+check('药丸底部让位由 CSS 变量给出（JS 与样式表单一口径）',
+    /--nv-fw-gap-bottom: 12px;/.test(css) && /--nv-fw-gap-bottom: 74px;/.test(css)
+    && /getPropertyValue\('--nv-fw-gap-bottom'\)/.test(src), true);
+check('底部安全区由探针实测（env() 在 computedStyle 里读不出解析值）',
+    /function measureSafeAreaBottom/.test(src) && /height:env\(safe-area-inset-bottom, 0px\)/.test(src), true);
+check('拖动按下时把包含块补偿折成像素坐标（防按下瞬间跳位）',
+    /const off = measureHostFixedOffset\(\);\s*\n\s*win\.style\.transform = '';/.test(src)
+    && /fwDrag\.startLeft = rect\.left - off\.x;/.test(src), true);
+
+// 行为用例：坐标是否适用于当前视口（纯函数，真实执行）
+const usableFn = extractFn('isFloatPosUsableForViewport');
+const clearanceFn = extractFn('floatBottomClearance');
+check('可抽取 isFloatPosUsableForViewport / floatBottomClearance', !!(usableFn && clearanceFn), true);
+if (usableFn && clearanceFn) {
+    const api = new Function(`${clearanceFn}\n${usableFn}\nreturn { isFloatPosUsableForViewport, floatBottomClearance };`)();
+    const vpPhone = { width: 390, height: 844 };
+    const gapPhone = { bottom: 74, right: 10 };
+    const gapDesk = { bottom: 12, right: 12 };
+    check('手机端跨设备坐标被拒（桌面拖出的 1140,720）',
+        api.isFloatPosUsableForViewport({ left: 1140, top: 720, vw: 1280 }, 105, 40, vpPhone, gapPhone), false);
+    check('手机端本设备坐标可用',
+        api.isFloatPosUsableForViewport({ left: 250, top: 700, vw: 390 }, 105, 40, vpPhone, gapPhone), true);
+    check('坐标右溢出被拒', api.isFloatPosUsableForViewport({ left: 330, top: 700, vw: 390 }, 105, 40, vpPhone, gapPhone), false);
+    check('手机端压住输入栏的坐标被拒（top 810 + 40 > 844 - 74）',
+        api.isFloatPosUsableForViewport({ left: 100, top: 810, vw: 390 }, 105, 40, vpPhone, gapPhone), false);
+    check('桌面端贴底坐标可用（桌面档不让开输入栏）',
+        api.isFloatPosUsableForViewport({ left: 100, top: 790, vw: 390 }, 105, 40, vpPhone, gapDesk), true);
+    check('负坐标被拒', api.isFloatPosUsableForViewport({ left: -20, top: 100, vw: 390 }, 105, 40, vpPhone, gapPhone), false);
+    check('缺 vw 的老数据不做跨设备判定（按几何是否放得下决定）',
+        api.isFloatPosUsableForViewport({ left: 250, top: 700 }, 105, 40, vpPhone, gapPhone), true);
+    check('NaN / 空值安全返回 false',
+        api.isFloatPosUsableForViewport({ left: NaN, top: 1 }, 105, 40, vpPhone, gapPhone) === false
+        && api.isFloatPosUsableForViewport(null, 105, 40, vpPhone, gapPhone) === false, true);
+    check('桌面档（12px）不算让位，手机档（74px）算',
+        api.floatBottomClearance(gapDesk) === 0 && api.floatBottomClearance(gapPhone) === 74, true);
+}
+
 console.log('\n=== ④ 弹窗定位与层级 ===');
-check('positionOverlay 具备 fixed 退化兜底',
-    /Math\.abs\(rect\.top\) > 1 \|\| Math\.abs\(rect\.left\) > 1/.test(src), true);
+check('弹窗定位改为「钉住可见视口 + 实测反向补偿」',
+    /function pinElementToVisibleViewport/.test(src)
+    && /el\.style\.height = `\$\{vp\.height\}px`/.test(src)
+    && /el\.style\.left = `\$\{-off\.x\}px`/.test(src), true);
+check('宿主包含块偏移实测探针存在（酒馆 html 的 transform 会劫持 fixed 包含块）',
+    /function measureHostFixedOffset/.test(src)
+    && /position:fixed;top:0;left:0;width:1px;height:1px/.test(src), true);
+check('positionOverlay 已无「切 absolute 按文档坐标推走」的退化分支',
+    /function positionOverlay\(overlay\) \{\s*\n\s*if \(!overlay\) return;\s*\n\s*pinElementToVisibleViewport\(overlay\);\s*\n\}/.test(src)
+    && /window\.scrollY \|\| window\.pageYOffset/.test(src), false);
+check('可见视口优先取 visualViewport（手机端 URL 栏 / 软键盘）',
+    /function getVisibleViewportBox/.test(src) && /window\.visualViewport/.test(src), true);
 check('弹窗先显示后定位（display:none 时 getBoundingClientRect 恒为 0）',
     /overlay\.style\.display = 'flex';\s*\n\s*positionOverlay\(overlay\);/.test(src), true);
 check('遮罩点击关闭带「刚打开」守卫（防同一次触摸补发的 click 秒关弹窗）',
