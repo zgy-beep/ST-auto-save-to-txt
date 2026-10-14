@@ -35,6 +35,16 @@ function extractFn(name) {
     return m ? m[0] : null;
 }
 
+/**
+ * 把源码/模板里所有 class 属性拆成**单独的类名**再比对。
+ * 直接用 `class="novel-section"` 做子串判断会被 `class="novel-section-title"` 放过，
+ * 于是「包裹层已删除」这类断言会静默变成空转（实测踩到过）。
+ */
+function classTokens(text) {
+    return (String(text).match(/class="([^"]*)"/g) || [])
+        .reduce((acc, m) => acc.concat(m.slice(7, -1).trim().split(/\s+/)), []);
+}
+
 console.log('=== ① 递归守卫（v1.12.1 事故回归）===');
 const refreshFn = extractFn('refreshNovelToolbars');
 check('refreshNovelToolbars 定义存在', !!refreshFn, true);
@@ -224,7 +234,10 @@ if (escapeFn && parseFn && analyzeFn) {
 }
 
 console.log('\n=== ⑦ 设置弹窗布局（桌面双列 / 手机单列 + 全屏 sheet）===');
-check('分区容器 novel-settings-grid', src.includes('novel-settings-grid'), true);
+check('已无「栅格 + 分区」两层纯包裹容器（v1.17.1 扁平化）',
+    classTokens(src).some((c) => c === 'novel-settings-grid' || c === 'novel-section'), false);
+check('面板内容直接挂在 .novel-tabpane 下（层次：面板 > 折叠行 > 展开体 > 控件）',
+    /class="novel-tabpane[^"]*"[\s\S]{0,220}?class="novel-section-title"/.test(src), true);
 check('主开关卡片 novel-toggle-card', src.includes('novel-toggle-card'), true);
 check('桌面分区双列栅格',
     /\.novel-settings-grid \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(css), true);
@@ -363,8 +376,10 @@ if (panelTpl) {
     // 只看「注释内部、闭合 --> 之前」是否有反引号：注释外的反引号是 ${} 里的嵌套模板，合法
     check('模板内 HTML 注释不含裸反引号（会截断模板字符串）',
         /<!--(?:(?!-->)[\s\S])*`/.test(panelTpl), false);
-    check('面板内每个标签面板都有对应的 settings-grid',
-        (panelTpl.match(/class="novel-settings-grid"/g) || []).length, 5);
+    check('5 个标签面板各自直接以分区标题开头（没有中间包裹层）',
+        (panelTpl.match(/class="novel-tabpane[^"]*"[\s\S]{0,200}?class="novel-section-title"/g) || []).length, 5);
+    check('模板里已无 novel-settings-grid / novel-section 包裹层',
+        (panelTpl.match(/class="novel-settings-grid"|class="novel-section"/g) || []).length, 0);
 }
 
 // —— CSS：标签栏 / 去卡片 / 手机端底部吸附 ——
@@ -379,8 +394,8 @@ check('去卡片 ①：主开关卡去掉底色与描边',
     /#auto-save-to-txt-settings \.novel-toggle-card \{[\s\S]*?background: none;[\s\S]*?border: none;/.test(css), true);
 check('去卡片 ②：分区去掉底色与描边',
     /#auto-save-to-txt-settings \.novel-settings-grid \.novel-section \{[\s\S]*?background: none;[\s\S]*?border: none;/.test(css), true);
-check('去卡片 ③：书卡改为左侧强调竖线的信息块',
-    /#auto-save-to-txt-settings \.novel-current-book-card \{[\s\S]*?border-left: 2px solid var\(--nv-accent-line\);/.test(css), true);
+check('去卡片 ③：书卡改成「键 + 值」扁平行（v1.17.1，不再是嵌套盒子）',
+    /#auto-save-to-txt-settings \.novel-info-row \{[\s\S]*?display: flex;[\s\S]*?border-bottom: 1px solid var\(--nv-block-line\);/.test(css), true);
 check('手机端标签栏 sticky 吸附底部',
     /@media \(max-width: 768px\) \{[\s\S]*?\.novel-tabs \{[\s\S]*?position: sticky;[\s\S]*?bottom: 0;/.test(css), true);
 check('手机端正文容器撑满弹窗（否则 sticky 无处可吸附）',
@@ -487,6 +502,43 @@ check('去卡片 ⑥：部署指引内的卡片同样扁平化',
     /#auto-save-to-txt-settings \.novel-deploy-card,[\s\S]*?#auto-save-to-txt-settings \.novel-manual-card \{[\s\S]*?background: none !important;/.test(css), true);
 check('状态行分隔线改实线（虚线只留给空态）',
     /#auto-save-to-txt-settings \.novel-status-line \{ border-top: 1px solid var\(--nv-line\); \}/.test(css), true);
+
+console.log('\n=== ⑫ v1.17.1 展开体扁平化（去掉层层嵌套）===');
+
+// 这些容器只起包裹作用，删掉后层次从「面板 > 栅格 > 分区 > 折叠行 > 展开体 > 包装 > 控件」
+// 压到「面板 > 折叠行 > 展开体 > 控件」。用「不得出现」把它们钉死，防止以后再长回来。
+// 比对用 classTokens()（精确类名），别用子串 —— 否则 `class="novel-form-group novel-tag-scanner"`
+// 这种带副类的写法会被漏掉（第一版就这么漏了一个）。
+const panelTokens = classTokens(panelTpl || '');
+['novel-settings-grid', 'novel-section', 'novel-form-group', 'novel-tag-scanner',
+    'novel-tag-scanner-actions', 'novel-action-buttons',
+    'novel-current-book-card', 'novel-book-card-header'
+].forEach((w) => {
+    check(`纯包裹容器已移除：.${w}`, panelTokens.includes(w), false);
+});
+check('展开体里的左右排布交给类，模板内不再写内联 flex',
+    /style="[^"]*display:\s*flex/.test(panelTpl || ''), false);
+check('剩下的内联样式只该是 display:none / opacity 这类状态开关',
+    (src.match(/style="(?![^"]*display:\s*none)(?![^"]*opacity:)[^"]*"/g) || []).length, 0);
+
+// 三种行的样式必须真的落地，否则「扁平化」只是删了结构、内容会挤成一坨
+check('信息行样式已定义（键 + 值）',
+    /\.novel-info-key \{/.test(css) && /\.novel-info-val \{/.test(css), true);
+check('信息行之间用发丝线分隔（不再套盒子）',
+    /\.novel-info-row \{[\s\S]*?border-bottom: 1px solid var\(--nv-block-line\);/.test(css), true);
+check('开关行「左标题 + 右控件」（row-reverse，跟参考图一致）',
+    /\.novel-acc-body > \.checkbox_label \{[\s\S]*?flex-direction: row-reverse;/.test(css), true);
+check('开关行同样靠发丝线分隔',
+    /\.novel-acc-body > \.checkbox_label \{[\s\S]*?border-bottom: 1px solid var\(--nv-block-line\);/.test(css), true);
+check('动作行：重新扫描按钮贴右（auto 外边距，不额外包一层）',
+    /\.novel-acc-body > \.novel-acc-action \{[\s\S]*?margin: 0 0 10px auto;/.test(css), true);
+check('动作行：导出/同步并排等宽，内联 flex:1 已撤掉',
+    /\.novel-btn-row > \.novel-btn \{ flex: 1 1 140px; margin: 0; \}/.test(css)
+    && !/style="flex: 1;"/.test(src), true);
+check('部署指引行内排布改为类',
+    /\.novel-guide-row \{/.test(css) && src.includes('class="novel-guide-title"'), true);
+check('最后一张指引卡也扁平化（左侧竖线，不再是独立盒子）',
+    /#auto-save-to-txt-settings \.novel-plan-c-card \{[\s\S]*?background: none !important;[\s\S]*?border-left: 2px solid var\(--nv-ok\) !important;/.test(css), true);
 
 console.log(`\nUI 接线测试结果: 通过: ${pass}, 失败: ${fail}`);
 if (fail > 0) process.exit(1);

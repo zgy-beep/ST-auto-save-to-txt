@@ -2093,4 +2093,325 @@
     #auto-save-to-txt-settings .novel-acc-flat { padding: 15px 2px 16px; }
 }
 
+/* ==========================================================================
+ * v1.17.1 折叠条 → 与背景有区分的「独立块」
+ * --------------------------------------------------------------------------
+ * 用户反馈：折叠条和背景一个颜色，看不出是可以点的东西（参考图里每条都是一块）。
+ *
+ * 这条反馈和上一轮的「不要卡片」不冲突，界限是：
+ *   - **可点的行**（折叠条 / 动作行 / 主开关）= 有底色的块 —— 块 = 可交互；
+ *   - **大分区与说明文字**（.novel-section / .novel-alert / 状态行）继续扁平，靠发丝线分层。
+ * 也就是说主角仍然是「扁平」，块只用来标出「这里能点」。
+ *
+ * 参考图的另外两个特征也照搬了：块之间用**间距**分隔（不再用发丝线），
+ * 展开项带一条左侧强调竖线（参考图里是青色，我们换成唯一的紫罗兰）。
+ * ========================================================================== */
+
+/* 块专用的三档底色：基底 / 悬停·展开 / 描边。比白色蒙版更耐调，换主题只动这里。 */
+.novel-modal-overlay,
+.novel-floating-window,
+.novel-chip-tooltip {
+    --nv-block-bg: rgba(255, 255, 255, 0.05);
+    --nv-block-bg-2: rgba(255, 255, 255, 0.078);
+    --nv-block-line: rgba(255, 255, 255, 0.06);
+    --nv-block-line-2: rgba(255, 255, 255, 0.1);
+}
+
+/* ---------- 折叠条：发丝线分隔 → 块 + 块间距 ---------- */
+#auto-save-to-txt-settings .novel-acc {
+    border-bottom: none;
+    background: var(--nv-block-bg);
+    border: 1px solid var(--nv-block-line);
+    border-radius: var(--nv-radius);
+    margin: 0 0 8px;
+    transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+/* 旧的 `:last-child { border-bottom: none }` 特异性更高（(1,2,0) > (1,1,0)），
+   会把最后一块的底边描边抠掉 —— 块是四边轮廓，必须把这一边补回来。 */
+#auto-save-to-txt-settings .novel-acc:last-child {
+    margin-bottom: 0;
+    border-bottom: 1px solid var(--nv-block-line);
+}
+#auto-save-to-txt-settings .novel-acc:hover {
+    background: var(--nv-block-bg-2);
+    border-color: var(--nv-block-line-2);
+}
+/* 展开态：描边提亮 + 左侧 2px 紫罗兰竖线（inset 阴影不吃布局，也不会顶坏圆角） */
+#auto-save-to-txt-settings .novel-acc.is-open {
+    background: var(--nv-block-bg-2);
+    border-color: var(--nv-block-line-2);
+    box-shadow: inset 2px 0 0 var(--nv-accent);
+}
+
+/* 标题行：内边距撑起来，悬停不再改文字色（高亮交给整块的底色） */
+#auto-save-to-txt-settings .novel-acc-head {
+    padding: 13px 14px;
+    border-radius: var(--nv-radius);
+}
+#auto-save-to-txt-settings .novel-acc-head:hover { color: var(--nv-text); }
+#auto-save-to-txt-settings .novel-acc-head:focus-visible { outline-offset: -3px; }
+
+/* 展开体：与标题之间一条发丝线，读起来是「一张块的上半张标题、下半张内容」 */
+#auto-save-to-txt-settings .novel-acc-body { padding: 0 14px 14px; }
+#auto-save-to-txt-settings .novel-acc.is-open .novel-acc-body {
+    padding-top: 14px;
+    border-top: 1px solid var(--nv-block-line);
+}
+
+/* ---------- 动作行（过滤预览 / 导出与同步）：同样做成块，保持列表观感一致 ---------- */
+#auto-save-to-txt-settings .novel-acc-flat {
+    padding: 14px;
+    background: var(--nv-block-bg);
+    border: 1px solid var(--nv-block-line);
+    border-radius: var(--nv-radius);
+    margin: 0 0 8px;
+}
+#auto-save-to-txt-settings .novel-acc-flat:last-child {
+    margin-bottom: 0;
+    border-bottom: 1px solid var(--nv-block-line);
+}
+
+/* ---------- 主开关行：参考图里的「第一块」—— 左侧紫罗兰竖线 + 常驻块 ---------- */
+#auto-save-to-txt-settings .novel-toggle-card {
+    background: var(--nv-block-bg);
+    border: 1px solid var(--nv-block-line);
+    border-radius: var(--nv-radius);
+    padding: 13px 14px;
+    margin: 0 0 14px;
+    box-shadow: inset 2px 0 0 var(--nv-accent);
+}
+
+/* 分区去掉那 2px 内缩：主开关块在 .novel-tabpanes 之外、靠 margin 对齐，
+   分区若还留着 2px，两边的块边缘就会差 2px（截图里看得出来），左右对不齐。 */
+#auto-save-to-txt-settings .novel-settings-grid .novel-section { padding: 0; }
+
+/* 手机端：块自带内边距后，行高与触控区都要跟着放宽一点 */
+@media (max-width: 768px) {
+    #auto-save-to-txt-settings .novel-acc-head { padding: 14px; }
+    #auto-save-to-txt-settings .novel-acc-body { padding: 0 14px 14px; }
+    #auto-save-to-txt-settings .novel-acc.is-open .novel-acc-body { padding-top: 14px; }
+    #auto-save-to-txt-settings .novel-acc-flat { padding: 14px; }
+    /* 主开关卡在手机端要跟折叠块左右对齐 ——
+       折叠块在 .novel-tabpanes 里被 12px 内边距托着，而主开关卡在这个容器之外，
+       所以用 margin 补同样的 12px（不能只加 padding，否则块边缘会比别的块宽出一圈）。 */
+    #auto-save-to-txt-settings .novel-toggle-card { margin: 0 12px 14px; padding: 13px 14px; }
+}
+
+/* ==========================================================================
+ * v1.17.1 展开体内部扁平化（与上一节同属 v1.17.1，是同一版的第二步）
+ * --------------------------------------------------------------------------
+ * 用户反馈：展开体里层套层，臃肿。
+ *
+ * 做的是减法，不是加装饰：
+ *  - 删掉 5 个只起包裹作用的容器（.novel-settings-grid / .novel-section /
+ *    .novel-form-group / .novel-tag-scanner-actions / .novel-action-buttons），
+ *    面板层次从「面板 > 栅格 > 分区 > 折叠行 > 展开体 > 包装 > 控件」压到
+ *    「面板 > 折叠行 > 展开体 > 控件」；
+ *  - 展开体里的内容统一收敛成三种行：**信息行**（键 + 值）、**开关行**（标题 + 控件）、
+ *    **动作行**（按钮）。行与行之间只靠一条发丝线，不再套盒子；
+ *  - 模板里那批 `style="display:flex; justify-content:space-between…"` 全部撤掉，
+ *    排布交给这里的类，样式和结构不再两处维护。
+ * ========================================================================== */
+
+/* ---------- 信息行：左键 + 右值（+ 可选操作按钮） ---------- */
+#auto-save-to-txt-settings .novel-info-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--nv-block-line);
+}
+#auto-save-to-txt-settings .novel-info-row:last-child { border-bottom: none; }
+#auto-save-to-txt-settings .novel-info-key {
+    flex: 0 0 auto;
+    min-width: 52px;
+    color: var(--nv-text-3);
+    font-size: 12px;
+}
+#auto-save-to-txt-settings .novel-info-val {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--nv-text-2);
+    font-size: 12.5px;
+}
+/* 路径这类长值允许换行完整显示（省略号会把关键的后半段吃掉） */
+#auto-save-to-txt-settings .novel-info-val.is-wrap {
+    overflow: visible;
+    white-space: normal;
+    word-break: break-all;
+}
+#auto-save-to-txt-settings .novel-info-val code {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--nv-text-2);
+    font-size: 11.5px;
+}
+/* 文件名是这一区的主角，允许换行完整显示（超长文件名不该被省略号吃掉） */
+#auto-save-to-txt-settings .novel-info-val.novel-book-filename {
+    overflow: visible;
+    white-space: normal;
+    word-break: break-all;
+    color: var(--nv-text);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+}
+#auto-save-to-txt-settings .novel-info-row > .novel-copy-pill { flex: 0 0 auto; margin: 0; }
+/* 信息行本身已带下边发丝线，紧跟其后的状态行不要再叠一条（否则看起来是 2px 的粗线） */
+#auto-save-to-txt-settings .novel-info-row + .novel-status-line { border-top: none; }
+
+/* ---------- 开关行：左标题 + 右控件（参考图里最常见的设置行形态） ---------- */
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label {
+    display: flex;
+    flex-direction: row-reverse;   /* 控件靠右 */
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--nv-block-line);
+}
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label:last-child { border-bottom: none; }
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label > span {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--nv-text-2);
+    font-size: 13px;
+}
+/* 开关做成胶囊：原生方框在深色浮层里太扎眼，也跟参考图的开关对不上。
+   appearance:none 之后 ::after 当滑钮，勾选态只换底色和位移，不需要额外 DOM。 */
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label input[type="checkbox"],
+#auto-save-to-txt-settings .novel-toggle-card .checkbox_label input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 21px;
+    margin: 0;
+    border: 1px solid var(--nv-block-line-2);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    cursor: pointer;
+    transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label input[type="checkbox"]::after,
+#auto-save-to-txt-settings .novel-toggle-card .checkbox_label input[type="checkbox"]::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--nv-text-2);
+    transition: transform 0.16s ease, background-color 0.16s ease;
+}
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label input[type="checkbox"]:checked,
+#auto-save-to-txt-settings .novel-toggle-card .checkbox_label input[type="checkbox"]:checked {
+    background: var(--nv-accent);
+    border-color: var(--nv-accent);
+}
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label input[type="checkbox"]:checked::after,
+#auto-save-to-txt-settings .novel-toggle-card .checkbox_label input[type="checkbox"]:checked::after {
+    transform: translateX(15px);
+    background: #fff;
+}
+
+/* 主开关行：跟展开体里的开关行同一种形态（左标题 + 右开关），它在这页是主角所以字大一号 */
+#auto-save-to-txt-settings .novel-toggle-card .checkbox_label {
+    display: flex;
+    flex-direction: row-reverse;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    margin: 0;
+}
+#auto-save-to-txt-settings .novel-toggle-card .checkbox_label > span {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--nv-text);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* ---------- 动作行：展开体里的按钮 ---------- */
+/* 「重新扫描」这类单个按钮贴右（block 级 + auto 外边距，不需要额外包一层） */
+#auto-save-to-txt-settings .novel-acc-body > .novel-acc-action {
+    display: flex;
+    width: fit-content;
+    margin: 0 0 10px auto;
+}
+#auto-save-to-txt-settings .novel-chip-list { margin: 0 0 10px; }
+#auto-save-to-txt-settings .novel-tag-chip-list:last-child { margin-bottom: 0; }
+/* 「导出 / 同步」并排等宽，「试写一章」单独一行、自适应宽度 */
+#auto-save-to-txt-settings .novel-btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+#auto-save-to-txt-settings .novel-btn-row > .novel-btn { flex: 1 1 140px; margin: 0; }
+#auto-save-to-txt-settings .novel-acc-flat > .novel-btn-inline {
+    align-self: flex-start;
+    margin: 0;
+}
+
+/* ---------- 部署指引：行内左右排布用类，模板里不再写内联 flex ---------- */
+#auto-save-to-txt-settings .novel-guide-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+}
+#auto-save-to-txt-settings .novel-guide-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--nv-text);
+    font-size: 12.5px;
+    font-weight: 600;
+}
+#auto-save-to-txt-settings .novel-plan-c-card .novel-guide-title i { color: var(--nv-ok); }
+#auto-save-to-txt-settings .novel-manual-card .novel-guide-title i { color: var(--nv-warn); }
+#auto-save-to-txt-settings .novel-guide-tag { flex: 0 0 auto; color: var(--nv-text-3); font-size: 11px; }
+#auto-save-to-txt-settings .novel-manual-card .novel-guide-tag { color: var(--nv-warn); font-weight: 600; }
+#auto-save-to-txt-settings .novel-guide-text {
+    display: block;
+    margin: 0;
+    color: var(--nv-text-2);
+    font-size: 11.5px;
+    line-height: 1.6;
+}
+#auto-save-to-txt-settings .novel-guide-hint { color: var(--nv-text-3); font-size: 11px; }
+#auto-save-to-txt-settings .novel-guide-foot {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--nv-line);
+}
+/* 最后一张卡片也扁平化：跟另外两张一样只留左侧竖线，不再单独是有底色的盒子 */
+#auto-save-to-txt-settings .novel-plan-c-card {
+    background: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    border-left: 2px solid var(--nv-ok) !important;
+    padding: 4px 0 4px 12px !important;
+}
+
+/* ==========================================================================
+ * v1.17.1 桌面端弹窗收窄：860px → 620px
+ * --------------------------------------------------------------------------
+ * 内容单列铺满之后，860px 太宽了：输入框被拉成一条长带，折叠条右侧的「摘要」
+ * 离标题隔了大半个屏幕，读起来是两截。
+ *
+ * 620px 的取法是「一行刚好放得下 5 个标签 + 两个并排按钮」的下限舒适值，
+ * 再窄就会开始折行。用 min-width 兜住桌面断点：
+ * 手机端的全屏 sheet（≤600px）与 ≤900px 那档的 680px 都不受影响；
+ * 过滤效果预览弹窗走的是 .novel-modal-preview（左右对照，需要宽度），也不受影响。
+ * ========================================================================== */
+@media (min-width: 769px) {
+    .novel-modal-settings { width: min(620px, 100%); }
+}
+
 

@@ -19,6 +19,8 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const src = fs.readFileSync(path.join(ROOT, 'index.js'), 'utf8');
+// 少量「样式只在该断点生效」的判断需要读 CSS 原文（几何断言量不出来，比如 min-width 守卫）
+const cssText = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
 
 let playwright = null;
 try {
@@ -95,7 +97,10 @@ const panelHtml = renderPanel(
 
 const FNS = [
     'positionOverlay', 'pinElementToVisibleViewport', 'getVisibleViewportBox',
-    'measureHostFixedOffset', 'bindNovelTabs', 'bindNovelAccordions',
+    'measureHostFixedOffset', 'getDocScrollTop',
+    // 视口变化后的统一重排：窗口 resize / 横竖屏 / URL 栏与软键盘都靠这条链
+    'bindOverlayResync', 'scheduleOverlayResync', 'resyncNovelOverlays',
+    'bindNovelTabs', 'bindNovelAccordions',
     'applyNovelAccordionDefaults', 'refreshNovelAccSummaries'
 ].map(extractFn).join('\n') + '\n'
     + extractConstObj('NOVEL_STYLE_SUMMARY') + '\n'
@@ -125,6 +130,11 @@ ${FNS}
 let settingsModalOpenedAt = 0;
 let cachedStatus = null;
 let serverPluginVersion = '';
+// 重排链的模块级状态（与 index.js 同名同形，extractFn 只抽函数、变量要自己补）
+let overlayResyncRaf = 0;
+let lastObservedScrollTop = 0;
+let overlayResyncBound = false;
+let cachedSafeAreaBottom = null;
 // 折叠行摘要要读连载状态（与 index.js 里的模块级变量同名同形）
 let recentStatus = { state: 'success', text: '第 12 章 · 艾莉丝', time: '12:34:56', file: '/logs/x.txt', chapter: 12 };
 function getSettings() { return {}; }
@@ -153,6 +163,8 @@ applyNovelAccordionDefaults(panel);
 refreshNovelAccSummaries(panel);
 overlay.style.display = 'flex';
 positionOverlay(overlay);
+// 与 index.js 一致：绑上视口变化后的重排，这样测试里改视口尺寸走的是真实路径
+bindOverlayResync();
 
 function rectOf(el) {
     const r = el.getBoundingClientRect();
@@ -263,16 +275,72 @@ window.__api = {
         const modal = document.querySelector('.novel-modal-settings');
         const modalBody = document.getElementById('novel_settings_body');
         const activeTab = document.querySelector('.novel-tab.is-active');
-        const activeSection = document.querySelector('.novel-tabpane.is-active .novel-section');
+        const activePane = document.querySelector('.novel-tabpane.is-active');
         return {
             tabs: rectOf(tabs), tabsOrder: getComputedStyle(tabs).order, tabsPos: getComputedStyle(tabs).position,
             panes: rectOf(panes), panesOrder: getComputedStyle(panes).order,
             modal: rectOf(modal), modalBody: rectOf(modalBody),
-            section: activeSection ? rectOf(activeSection) : null,
-            gridCols: getComputedStyle(document.querySelector('.novel-settings-grid')).gridTemplateColumns,
+            pane: activePane ? rectOf(activePane) : null,
             bodyPad: getComputedStyle(modalBody).padding,
             bodyBox: getComputedStyle(modalBody).boxSizing,
             activeTab: rectOf(activeTab), vw: window.innerWidth, vh: window.innerHeight
+        };
+    },
+    // 结构深度：从元素往上数到 #auto-save-to-txt-settings 隔了几层。
+    // 「不要层层嵌套」这条诉求只能这样量化 —— 只看 class 名看不出层次压没压下去。
+    depthOf: (id) => {
+        let el = document.getElementById(id);
+        let n = 0;
+        while (el && el.id !== 'auto-save-to-txt-settings') { el = el.parentElement; n++; }
+        return el ? n : -1;
+    },
+    // 折叠块的「与背景有区分」是视觉诉求，靠肉眼得失真，这里全部量成数字。
+    // 注意取样范围：几何一律取**当前激活面板**里的块（隐藏面板里的元素 rect 恒为 0，
+    // 第一版就是踩了这个坑，拿到的是连载页那个隐藏的 book 块，对齐全判成失败）。
+    blockRects: () => {
+        const style = (el) => {
+            if (!el) return null;
+            const cs = getComputedStyle(el);
+            return {
+                bg: cs.backgroundColor,
+                radius: cs.borderTopLeftRadius,
+                bt: cs.borderTopWidth, bb: cs.borderBottomWidth,
+                bl: cs.borderLeftWidth, br: cs.borderRightWidth,
+                borderColor: cs.borderTopColor,
+                marginBottom: cs.marginBottom,
+                padTop: cs.paddingTop, padLeft: cs.paddingLeft,
+                shadow: cs.boxShadow
+            };
+        };
+        const blocks = Array.from(document.querySelectorAll(
+            '.novel-tabpane.is-active .novel-acc, .novel-tabpane.is-active .novel-acc-flat'));
+        const firstAccEl = document.querySelector('.novel-tabpane.is-active .novel-acc');
+        const openEl = document.querySelector('.novel-acc.is-open');
+        return {
+            toggle: rectOf(document.querySelector('.novel-toggle-card')),
+            firstAcc: firstAccEl ? rectOf(firstAccEl) : null,
+            firstFlat: (() => {
+                const el = document.querySelector('.novel-tabpane.is-active .novel-acc-flat');
+                return el ? rectOf(el) : null;
+            })(),
+            acc: style(firstAccEl),
+            flat: style(document.querySelector('.novel-tabpane.is-active .novel-acc-flat')),
+            toggleStyle: style(document.querySelector('.novel-toggle-card')),
+            openBg: openEl ? getComputedStyle(openEl).backgroundColor : null,
+            openShadow: openEl ? getComputedStyle(openEl).boxShadow : null,
+            closedBg: (() => {
+                const el = document.querySelector('.novel-tabpane.is-active .novel-acc:not(.is-open)');
+                return el ? getComputedStyle(el).backgroundColor : null;
+            })(),
+            // 块之间的实际间隙（相邻两块的距离，比读 margin 更可信 ——
+            // 这里的父容器阻止了外边距合并，所以视觉间隙是单侧 margin 的两倍）
+            gaps: (() => {
+                const out = [];
+                for (let i = 1; i < blocks.length; i++) {
+                    out.push(+(blocks[i].getBoundingClientRect().top - blocks[i - 1].getBoundingClientRect().bottom).toFixed(1));
+                }
+                return out;
+            })()
         };
     }
 };
@@ -351,10 +419,20 @@ async function clickTab(page, key) {
             Math.abs((dr.modal.left + dr.modal.right) / 2 - dr.vw / 2) <= 2, true);
         check('弹窗在可见视口内垂直居中',
             Math.abs((dr.modal.top + dr.modal.bottom) / 2 - dr.vh / 2) <= 2, true);
-        // 单列：每个标签里只有 1 个分区，双列会让右半列整片空着（看起来像内容没居中）
-        check('分区栅格退化为单列', dr.gridCols.trim().split(/\s+/).length, 1);
-        check('分区铺满弹窗内容区（不再只占左半列）',
-            dr.section && dr.section.right - dr.section.left > dr.modal.w - 60, true);
+        // 桌面端收窄：内容单列铺满后 860px 太宽（输入框拉成一条长带、摘要离标题太远）
+        check('桌面端弹窗宽度已收窄到 620px（不再跟着屏幕拉宽）',
+            dr.modal.w >= 600 && dr.modal.w <= 640, true);
+        check('窄屏（≤768）不受收窄影响，仍走全屏 / 单列那套',
+            /@media \(min-width: 769px\) \{\s*\n\s*\.novel-modal-settings \{ width: min\(620px, 100%\); \}/.test(cssText), true);
+        // 内容必须铺满弹窗内容区：标签页化后每个面板只有一组内容，
+        // 双列栅格会让右半列整片空着，看起来像「内容没居中」
+        check('面板内容铺满弹窗内容区（不再只占左半列）',
+            dr.pane && dr.pane.right - dr.pane.left > dr.modal.w - 60, true);
+        // 结构深度：正文输入框离面板根只有 5 层（面板 > 标签容器 > 标签面板 > 折叠行 > 展开体）
+        check('控件到面板根的层数 = 5（无栅格 / 分区等中间包裹层）',
+            await dpage.evaluate(() => window.__api.depthOf('novel_include_tags')), 5);
+        check('开关控件到面板根的层数 = 6（多一层 label 承载整行点击）',
+            await dpage.evaluate(() => window.__api.depthOf('novel_show_toast')), 6);
 
         await dpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-desktop-serial.png') });
         await clickTab(dpage, 'filter');
@@ -367,6 +445,44 @@ async function clickTab(page, key) {
         check('非激活标签背景完全透明',
             tabStyleList.filter((s) => !s.active).every((s) => s.bg === 'rgba(0, 0, 0, 0)'), true);
         await dpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-desktop-filter.png') });
+
+        // ---------------- ④b 折叠块：与背景有区分（v1.17.1） ----------------
+        console.log('\n=== ④b 折叠块：与背景有区分 + 左右对齐（1280×900）===');
+        const dblk = await dpage.evaluate(() => window.__api.blockRects());
+        check('折叠块有区别于背景的底色（半透明白）',
+            /^rgba\(255, 255, 255, 0\.0\d+\)$/.test(dblk.acc.bg), true);
+        check('主开关块用的是同一档底色', dblk.toggleStyle.bg, dblk.closedBg);
+        check('折叠块圆角 = 12px（设计令牌 --nv-radius）', dblk.acc.radius, '12px');
+        check('折叠块是四边等宽描边（整块轮廓，不再是底部发丝线）',
+            dblk.acc.bt === dblk.acc.bl && dblk.acc.bl === dblk.acc.br && dblk.acc.br === dblk.acc.bb, true);
+        check('块之间靠间距分隔（相邻块实际间隙 8px）',
+            dblk.gaps.length > 0 && dblk.gaps.every((g) => Math.abs(g - 8) <= 1), true);
+        check('展开块的底色比收起块更亮（一眼看出哪块展开了）',
+            dblk.openBg !== dblk.closedBg, true);
+        check('展开块带左侧紫罗兰强调竖线（inset 阴影，不吃布局）',
+            /inset/.test(dblk.openShadow || '') && /139, 109, 255/.test(dblk.openShadow || ''), true);
+        check('主开关块同样带左侧紫罗兰强调竖线',
+            /inset/.test(dblk.toggleStyle.shadow) && /139, 109, 255/.test(dblk.toggleStyle.shadow), true);
+        check('主开关块与折叠块左边缘对齐（±1px）',
+            Math.abs(dblk.toggle.left - dblk.firstAcc.left) <= 1, true);
+        check('主开关块与折叠块右边缘对齐（±1px）',
+            Math.abs(dblk.toggle.right - dblk.firstAcc.right) <= 1, true);
+
+        // 收窄是「桌面端」的决定，得确认中间宽度（769–900px，仍走桌面排布）不会翻车：
+        // 这里顺带把 resize → 重排 那条路径也走一遍
+        await dpage.setViewportSize({ width: 800, height: 900 });
+        await dpage.waitForTimeout(200);
+        const drMid = await dpage.evaluate(() => window.__api.rects());
+        check('800px 视口下弹窗仍完整落在视口内', fullyInside(drMid.modal, drMid.vw, drMid.vh), true);
+        check('800px 视口下弹窗仍水平居中',
+            Math.abs((drMid.modal.left + drMid.modal.right) / 2 - drMid.vw / 2) <= 2, true);
+        check('800px 视口下仍用桌面排布（标签栏在内容之上、未吸附底部）',
+            drMid.tabsPos !== 'sticky' && drMid.tabs.bottom <= drMid.panes.top + 1, true);
+        await dpage.setViewportSize({ width: 1280, height: 900 });
+        await dpage.waitForTimeout(200);
+
+        await clickTab(dpage, 'format');
+        await dpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-desktop-format.png') });
         await dctx.close();
 
         // ---------------- 手机端 390×844 ----------------
@@ -394,6 +510,25 @@ async function clickTab(page, key) {
         await mpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-mobile-serial.png') });
         await clickTab(mpage, 'filter');
         await mpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-mobile-filter.png') });
+
+        // ---------------- ⑤b 手机端折叠块：同样的块质感 + 与主开关块对齐（v1.17.1） ----------------
+        console.log('\n=== ⑤b 手机端折叠块样式（390×844）===');
+        const mblk = await mpage.evaluate(() => window.__api.blockRects());
+        check('手机端折叠块底色与桌面端一致', mblk.closedBg, dblk.closedBg);
+        check('手机端折叠块圆角同样是 12px', mblk.acc.radius, '12px');
+        check('手机端块间隙同样是 8px',
+            mblk.gaps.length > 0 && mblk.gaps.every((g) => Math.abs(g - 8) <= 1), true);
+        // 主开关块在 .novel-tabpanes 之外，手机端要自己补 12px，否则边缘比别的块宽一圈
+        check('手机端主开关块与折叠块左边缘对齐（±1px）',
+            Math.abs(mblk.toggle.left - mblk.firstAcc.left) <= 1, true);
+        check('手机端主开关块与折叠块右边缘对齐（±1px）',
+            Math.abs(mblk.toggle.right - mblk.firstAcc.right) <= 1, true);
+
+        await clickTab(mpage, 'format');
+        // 展开「阅读与写入」，让截图能看清 v1.17.1 的开关行（左标题 + 右控件）
+        await mpage.evaluate(() => window.__api.clickAcc('write'));
+        await mpage.waitForTimeout(260);
+        await mpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-mobile-format.png') });
         await clickTab(mpage, 'general');
         await mpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-mobile-general.png') });
         check('手机端切到「通用」后只显示通用面板',

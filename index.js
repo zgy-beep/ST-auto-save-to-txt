@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.17.0',            // 扩展版本号
+    version: '1.17.1',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -2588,257 +2588,220 @@ async function renderSettingsUI(cachedStatus = null) {
                 <div class="novel-tabpanes">
 
                 <div class="novel-tabpane is-active" id="novel_pane_serial" data-nv-pane="serial" role="tabpanel" aria-labelledby="novel_tab_serial">
-                <div class="novel-settings-grid">
-
-                <!-- ▍当前连载 -->
-                <div class="novel-section">
-                    <div class="novel-section-title"><i class="fa-solid fa-book-bookmark"></i> 当前连载</div>
-                    <!-- 折叠行：初始开合由 applyNovelAccordionDefaults 统一决定 ——
-                         本分区只有这一个分组，会被判为「单分组分区」而默认展开 -->
-                    <div class="novel-acc" data-nv-acc="book">
-                        <button type="button" class="novel-acc-head" aria-expanded="false">
-                            <span class="novel-acc-title"><i class="fa-solid fa-file-lines"></i> 连载文件</span>
-                            <span class="novel-acc-summary" id="novel_acc_summary_book">${recentStatus.text || initialFileName}</span>
-                            <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
-                        </button>
-                        <div class="novel-acc-body">
-                            <div class="novel-current-book-card">
-                                <div class="novel-book-card-header">
-                                    <div class="novel-book-filename" id="novel_drawer_filename" title="点击复制完整文件路径">${initialFileName}</div>
-                                    <button type="button" id="novel_copy_filepath_btn" class="novel-copy-pill" title="复制完整文件保存路径">
-                                        <i class="fa-regular fa-copy"></i> 复制路径
-                                    </button>
-                                </div>
-                                <div class="novel-book-path-info"><code id="novel_drawer_filepath">${initialDir}${initialFileName}</code></div>
-                                <div id="novel_recent_status" class="novel-status-line ${recentStatus.state === 'updating' ? 'is-updating' : (recentStatus.state === 'success' ? 'is-success' : (recentStatus.state === 'skipped' ? 'is-skipped' : (recentStatus.state === 'error' ? 'is-error' : 'is-idle')))}">
-                                    <span id="novel_recent_detail">
-                                        ${recentStatus.state === 'success'
-                                            ? `<span><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${recentStatus.text}</span>${recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
-                                            : (recentStatus.state === 'updating'
-                                                ? `<span><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${recentStatus.text}</span>`
-                                                : (recentStatus.state === 'skipped'
-                                                    ? `<span><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${recentStatus.text}</span>${recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
-                                                    : (recentStatus.state === 'error'
-                                                        ? `<span><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${recentStatus.text}</span>`
-                                                        : `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${recentStatus.text}`)))
-                                        }
-                                    </span>
-                                    <span id="novel_recent_time" class="novel-status-time">${recentStatus.time || '--:--:--'}</span>
-                                </div>
-                            </div>
-                            <div id="novel_save_status_badge" class="novel-alert checking">
-                                <i class="fa-solid fa-circle-notch fa-spin"></i>
-                                <div class="novel-alert-text">正在检查连载服务状态...</div>
-                            </div>
-                            <div id="novel_deploy_guide" class="novel-guide-section" style="display: none;"></div>
+                <div class="novel-section-title"><i class="fa-solid fa-book-bookmark"></i> 当前连载</div>
+                <!-- 折叠行：初始开合由 applyNovelAccordionDefaults 统一决定 ——
+                     本分区只有这一个分组，会被判为「单分组分区」而默认展开 -->
+                <div class="novel-acc" data-nv-acc="book">
+                    <button type="button" class="novel-acc-head" aria-expanded="false">
+                        <span class="novel-acc-title"><i class="fa-solid fa-file-lines"></i> 连载文件</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_book">${recentStatus.text || initialFileName}</span>
+                        <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
+                    </button>
+                    <div class="novel-acc-body">
+                        <div class="novel-info-row">
+                            <span class="novel-info-key">文件名</span>
+                            <span class="novel-info-val novel-book-filename" id="novel_drawer_filename" title="点击复制完整文件路径">${initialFileName}</span>
+                            <button type="button" id="novel_copy_filepath_btn" class="novel-copy-pill" title="复制完整文件保存路径">
+                                <i class="fa-regular fa-copy"></i> 复制路径
+                            </button>
                         </div>
+                        <div class="novel-info-row">
+                            <span class="novel-info-key">保存路径</span>
+                            <span class="novel-info-val is-wrap"><code id="novel_drawer_filepath">${initialDir}${initialFileName}</code></span>
+                        </div>
+                        <div id="novel_recent_status" class="novel-status-line ${recentStatus.state === 'updating' ? 'is-updating' : (recentStatus.state === 'success' ? 'is-success' : (recentStatus.state === 'skipped' ? 'is-skipped' : (recentStatus.state === 'error' ? 'is-error' : 'is-idle')))}">
+                            <span id="novel_recent_detail">
+                                ${recentStatus.state === 'success'
+                                    ? `<span><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${recentStatus.text}</span>${recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
+                                    : (recentStatus.state === 'updating'
+                                        ? `<span><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${recentStatus.text}</span>`
+                                        : (recentStatus.state === 'skipped'
+                                            ? `<span><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${recentStatus.text}</span>${recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
+                                            : (recentStatus.state === 'error'
+                                                ? `<span><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${recentStatus.text}</span>`
+                                                : `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${recentStatus.text}`)))
+                                }
+                            </span>
+                            <span id="novel_recent_time" class="novel-status-time">${recentStatus.time || '--:--:--'}</span>
+                        </div>
+                        <div id="novel_save_status_badge" class="novel-alert checking">
+                            <i class="fa-solid fa-circle-notch fa-spin"></i>
+                            <div class="novel-alert-text">正在检查连载服务状态...</div>
+                        </div>
+                        <div id="novel_deploy_guide" class="novel-guide-section" style="display: none;"></div>
                     </div>
                 </div>
-                </div><!-- /.novel-settings-grid -->
                 </div><!-- /.novel-tabpane serial -->
 
                 <div class="novel-tabpane" id="novel_pane_filter" data-nv-pane="filter" role="tabpanel" aria-labelledby="novel_tab_filter">
-                <div class="novel-settings-grid">
+                <div class="novel-section-title"><i class="fa-solid fa-filter"></i> 正文过滤</div>
 
-                <!-- ▍正文过滤 -->
-                <div class="novel-section">
-                    <div class="novel-section-title"><i class="fa-solid fa-filter"></i> 正文过滤</div>
-
-                    <div class="novel-acc" data-nv-acc="include">
-                        <button type="button" class="novel-acc-head" aria-expanded="false">
-                            <span class="novel-acc-title"><i class="fa-solid fa-circle-check"></i> 只保留的标签（白名单）</span>
-                            <span class="novel-acc-summary" id="novel_acc_summary_include">${settings.include_tags ? settings.include_tags : '整篇保留'}</span>
-                            <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
-                        </button>
-                        <div class="novel-acc-body">
-                            <input type="text" id="novel_include_tags" class="text_pole" value="${settings.include_tags || ''}" placeholder="例如: story, response, content" />
-                            <small>留空 = 整篇保留。AI 若把小说写在某个标签内（如 <code>&lt;story&gt;</code>），填入标签名即只提取其中正文，忽略外部元数据。</small>
-                        </div>
-                    </div>
-
-                    <div class="novel-acc" data-nv-acc="exclude">
-                        <button type="button" class="novel-acc-head" aria-expanded="false">
-                            <span class="novel-acc-title"><i class="fa-solid fa-circle-minus"></i> 剔除的标签块（黑名单）</span>
-                            <span class="novel-acc-summary" id="novel_acc_summary_exclude">${settings.exclude_tags ? settings.exclude_tags : '未设置'}</span>
-                            <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
-                        </button>
-                        <div class="novel-acc-body">
-                            <input type="text" id="novel_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: status, memory, details, ooc, note" />
-                            <small>无论在整篇还是正文标签内部，都会彻底剔除这些干扰块。</small>
-                        </div>
-                    </div>
-
-                    <!-- 【会话标签检测】：自动扫描当前聊天出现的标签，一键加入白/黑名单 -->
-                    <div class="novel-acc" data-nv-acc="scan">
-                        <button type="button" class="novel-acc-head" aria-expanded="false">
-                            <span class="novel-acc-title"><i class="fa-solid fa-tags"></i> 会话标签检测</span>
-                            <span class="novel-acc-summary" id="novel_tag_scan_count"></span>
-                            <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
-                        </button>
-                        <div class="novel-acc-body">
-                            <div class="novel-form-group novel-tag-scanner">
-                                <div class="novel-tag-scanner-actions">
-                                    <button type="button" id="novel_rescan_tags_btn" class="novel-chip-btn" title="重新扫描当前会话中出现的标签"><i class="fa-solid fa-rotate"></i> 重新扫描</button>
-                                </div>
-                                <div id="novel_tag_chips" class="novel-tag-chip-list"></div>
-                                <small>点「白」= 只保留该标签内的正文；点「黑」= 彻底剔除该标签块；再次点击可移除；两侧互斥；鼠标悬浮标签可预览其最新内容。</small>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 【过滤效果预览】：动作行，不折叠（要一眼能找到） -->
-                    <div class="novel-acc-flat">
-                        <span class="novel-acc-title"><i class="fa-solid fa-eye"></i> 过滤效果预览</span>
-                        <button type="button" id="novel_preview_btn" class="novel-btn novel-btn-block" title="弹窗展示最近一条 AI 回复经当前白/黑名单过滤后的完整正文">
-                            <i class="fa-solid fa-eye"></i> <span id="novel_preview_btn_label">查看最近一条 AI 回复的过滤效果</span>
-                        </button>
-                        <small id="novel_preview_btn_stat" class="novel-preview-stat"></small>
+                <div class="novel-acc" data-nv-acc="include">
+                    <button type="button" class="novel-acc-head" aria-expanded="false">
+                        <span class="novel-acc-title"><i class="fa-solid fa-circle-check"></i> 只保留的标签（白名单）</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_include">${settings.include_tags ? settings.include_tags : '整篇保留'}</span>
+                        <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
+                    </button>
+                    <div class="novel-acc-body">
+                        <input type="text" id="novel_include_tags" class="text_pole" value="${settings.include_tags || ''}" placeholder="例如: story, response, content" />
+                        <small>留空 = 整篇保留。AI 若把小说写在某个标签内（如 <code>&lt;story&gt;</code>），填入标签名即只提取其中正文，忽略外部元数据。</small>
                     </div>
                 </div>
-                </div><!-- /.novel-settings-grid -->
+
+                <div class="novel-acc" data-nv-acc="exclude">
+                    <button type="button" class="novel-acc-head" aria-expanded="false">
+                        <span class="novel-acc-title"><i class="fa-solid fa-circle-minus"></i> 剔除的标签块（黑名单）</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_exclude">${settings.exclude_tags ? settings.exclude_tags : '未设置'}</span>
+                        <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
+                    </button>
+                    <div class="novel-acc-body">
+                        <input type="text" id="novel_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: status, memory, details, ooc, note" />
+                        <small>无论在整篇还是正文标签内部，都会彻底剔除这些干扰块。</small>
+                    </div>
+                </div>
+
+                <!-- 【会话标签检测】：自动扫描当前聊天出现的标签，一键加入白/黑名单 -->
+                <div class="novel-acc" data-nv-acc="scan">
+                    <button type="button" class="novel-acc-head" aria-expanded="false">
+                        <span class="novel-acc-title"><i class="fa-solid fa-tags"></i> 会话标签检测</span>
+                        <span class="novel-acc-summary" id="novel_tag_scan_count"></span>
+                        <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
+                    </button>
+                    <div class="novel-acc-body">
+                        <button type="button" id="novel_rescan_tags_btn" class="novel-chip-btn novel-acc-action" title="重新扫描当前会话中出现的标签"><i class="fa-solid fa-rotate"></i> 重新扫描</button>
+                        <div id="novel_tag_chips" class="novel-tag-chip-list"></div>
+                        <small>点「白」= 只保留该标签内的正文；点「黑」= 彻底剔除该标签块；再次点击可移除；两侧互斥；鼠标悬浮标签可预览其最新内容。</small>
+                    </div>
+                </div>
+
+                <!-- 【过滤效果预览】：动作行，不折叠（要一眼能找到） -->
+                <div class="novel-acc-flat">
+                    <span class="novel-acc-title"><i class="fa-solid fa-eye"></i> 过滤效果预览</span>
+                    <button type="button" id="novel_preview_btn" class="novel-btn novel-btn-block" title="弹窗展示最近一条 AI 回复经当前白/黑名单过滤后的完整正文">
+                        <i class="fa-solid fa-eye"></i> <span id="novel_preview_btn_label">查看最近一条 AI 回复的过滤效果</span>
+                    </button>
+                    <small id="novel_preview_btn_stat" class="novel-preview-stat"></small>
+                </div>
                 </div><!-- /.novel-tabpane filter -->
 
                 <div class="novel-tabpane" id="novel_pane_format" data-nv-pane="format" role="tabpanel" aria-labelledby="novel_tab_format">
-                <div class="novel-settings-grid">
+                <div class="novel-section-title"><i class="fa-solid fa-sliders"></i> 排版与行为</div>
 
-                <!-- ▍排版与行为 -->
-                <div class="novel-section">
-                    <div class="novel-section-title"><i class="fa-solid fa-sliders"></i> 排版与行为</div>
-
-                    <div class="novel-acc" data-nv-acc="style">
-                        <button type="button" class="novel-acc-head" aria-expanded="false">
-                            <span class="novel-acc-title"><i class="fa-solid fa-list-ol"></i> 章节目录风格</span>
-                            <span class="novel-acc-summary" id="novel_acc_summary_style"></span>
-                            <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
-                        </button>
-                        <div class="novel-acc-body">
-                            <select id="novel_chapter_style" class="text_pole novel-select">
-                                <option value="numbered_floor" ${settings.chapter_style !== 'numbered' && settings.chapter_style !== 'separator' && settings.chapter_style !== 'dialogue' ? 'selected' : ''}>第 X 章 · 角色名 (原楼层: Y)（默认推荐：带楼层标记，方便快速定位排查问题）</option>
-                                <option value="numbered" ${settings.chapter_style === 'numbered' ? 'selected' : ''}>第 X 节 · 角色名（纯净小说目录，无楼层）</option>
-                                <option value="separator" ${settings.chapter_style === 'separator' ? 'selected' : ''}>优雅分割线（* * * 散文小说连续阅读）</option>
-                                <option value="dialogue" ${settings.chapter_style === 'dialogue' ? 'selected' : ''}>【角色名】正文（纯净戏剧体，无章节号）</option>
-                            </select>
-                            <small>
-                                切换后仅对<b>新写入章节</b>生效；想让已写内容统一为新样式，点一次【同步历史连载】即可全书重写。「原楼层」= 聊天记录中从上到下的消息序号（含问候语与你的发言），与酒馆界面楼层一致。
-                            </small>
-                        </div>
-                    </div>
-
-                    <div class="novel-acc" data-nv-acc="naming">
-                        <button type="button" class="novel-acc-head" aria-expanded="false">
-                            <span class="novel-acc-title"><i class="fa-solid fa-file-signature"></i> 文件命名规则</span>
-                            <span class="novel-acc-summary" id="novel_acc_summary_naming"></span>
-                            <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
-                        </button>
-                        <div class="novel-acc-body">
-                            <select id="novel_naming_rule" class="text_pole novel-select">
-                                <option value="char_chat" ${settings.naming_rule !== 'char_only' ? 'selected' : ''}>角色名 - 对话名（推荐：新聊天自动新建小说，绝不覆盖旧聊天）</option>
-                                <option value="char_only" ${settings.naming_rule === 'char_only' ? 'selected' : ''}>仅角色名（所有聊天合为一本，如 角色名.txt）</option>
-                            </select>
-                            <small>
-                                开启新聊天或平行分支时，默认会自动保存为新小说（如 <code>艾莉丝 - 2026-09-10.txt</code> 或自定义对话名），旧小说绝不被覆盖或串台！
-                            </small>
-                        </div>
-                    </div>
-
-                    <div class="novel-acc" data-nv-acc="write">
-                        <button type="button" class="novel-acc-head" aria-expanded="false">
-                            <span class="novel-acc-title"><i class="fa-solid fa-pen-nib"></i> 阅读与写入</span>
-                            <span class="novel-acc-summary" id="novel_acc_summary_write"></span>
-                            <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
-                        </button>
-                        <div class="novel-acc-body">
-                            <!-- 包含主角互动开关 -->
-                            <label class="checkbox_label" title="开启后，你的提问与互动也会作为主角对白融入小说中；关闭则只收录纯故事正文">
-                                <input type="checkbox" id="novel_include_user" ${settings.include_user_dialogue ? 'checked' : ''} />
-                                <span>将你的发言作为主角对白融入小说</span>
-                            </label>
-
-                            <!-- 中文段落缩进 -->
-                            <label class="checkbox_label" title="每段开头空两格（全角空格），符合中文出版小说排版规范">
-                                <input type="checkbox" id="novel_indent_paragraphs" ${settings.indent_paragraphs ? 'checked' : ''} />
-                                <span>段落首行空两格（中文小说规范缩进）</span>
-                            </label>
-
-                            <!-- 草稿缓冲（延迟归档最新楼层） -->
-                            <label class="checkbox_label" title="开启后，最新一楼暂不写入连载文件，留出充分的 Roll 点与修改空间；待下一轮剧情推进时再正式定稿入书">
-                                <input type="checkbox" id="novel_buffer_latest" ${settings.buffer_latest_message ? 'checked' : ''} />
-                                <span>草稿缓冲（最新楼层延迟定稿）</span>
-                            </label>
-                        </div>
+                <div class="novel-acc" data-nv-acc="style">
+                    <button type="button" class="novel-acc-head" aria-expanded="false">
+                        <span class="novel-acc-title"><i class="fa-solid fa-list-ol"></i> 章节目录风格</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_style"></span>
+                        <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
+                    </button>
+                    <div class="novel-acc-body">
+                        <select id="novel_chapter_style" class="text_pole novel-select">
+                            <option value="numbered_floor" ${settings.chapter_style !== 'numbered' && settings.chapter_style !== 'separator' && settings.chapter_style !== 'dialogue' ? 'selected' : ''}>第 X 章 · 角色名 (原楼层: Y)（默认推荐：带楼层标记，方便快速定位排查问题）</option>
+                            <option value="numbered" ${settings.chapter_style === 'numbered' ? 'selected' : ''}>第 X 节 · 角色名（纯净小说目录，无楼层）</option>
+                            <option value="separator" ${settings.chapter_style === 'separator' ? 'selected' : ''}>优雅分割线（* * * 散文小说连续阅读）</option>
+                            <option value="dialogue" ${settings.chapter_style === 'dialogue' ? 'selected' : ''}>【角色名】正文（纯净戏剧体，无章节号）</option>
+                        </select>
+                        <small>
+                            切换后仅对<b>新写入章节</b>生效；想让已写内容统一为新样式，点一次【同步历史连载】即可全书重写。「原楼层」= 聊天记录中从上到下的消息序号（含问候语与你的发言），与酒馆界面楼层一致。
+                        </small>
                     </div>
                 </div>
-                </div><!-- /.novel-settings-grid -->
+
+                <div class="novel-acc" data-nv-acc="naming">
+                    <button type="button" class="novel-acc-head" aria-expanded="false">
+                        <span class="novel-acc-title"><i class="fa-solid fa-file-signature"></i> 文件命名规则</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_naming"></span>
+                        <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
+                    </button>
+                    <div class="novel-acc-body">
+                        <select id="novel_naming_rule" class="text_pole novel-select">
+                            <option value="char_chat" ${settings.naming_rule !== 'char_only' ? 'selected' : ''}>角色名 - 对话名（推荐：新聊天自动新建小说，绝不覆盖旧聊天）</option>
+                            <option value="char_only" ${settings.naming_rule === 'char_only' ? 'selected' : ''}>仅角色名（所有聊天合为一本，如 角色名.txt）</option>
+                        </select>
+                        <small>
+                            开启新聊天或平行分支时，默认会自动保存为新小说（如 <code>艾莉丝 - 2026-09-10.txt</code> 或自定义对话名），旧小说绝不被覆盖或串台！
+                        </small>
+                    </div>
+                </div>
+
+                <div class="novel-acc" data-nv-acc="write">
+                    <button type="button" class="novel-acc-head" aria-expanded="false">
+                        <span class="novel-acc-title"><i class="fa-solid fa-pen-nib"></i> 阅读与写入</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_write"></span>
+                        <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
+                    </button>
+                    <div class="novel-acc-body">
+                        <!-- 三个开关都是「左标题 + 右控件」的扁平行，分隔靠发丝线（样式见 .novel-acc-body > .checkbox_label） -->
+                        <label class="checkbox_label" title="开启后，你的提问与互动也会作为主角对白融入小说中；关闭则只收录纯故事正文">
+                            <input type="checkbox" id="novel_include_user" ${settings.include_user_dialogue ? 'checked' : ''} />
+                            <span>将你的发言作为主角对白融入小说</span>
+                        </label>
+                        <label class="checkbox_label" title="每段开头空两格（全角空格），符合中文出版小说排版规范">
+                            <input type="checkbox" id="novel_indent_paragraphs" ${settings.indent_paragraphs ? 'checked' : ''} />
+                            <span>段落首行空两格（中文小说规范缩进）</span>
+                        </label>
+                        <label class="checkbox_label" title="开启后，最新一楼暂不写入连载文件，留出充分的 Roll 点与修改空间；待下一轮剧情推进时再正式定稿入书">
+                            <input type="checkbox" id="novel_buffer_latest" ${settings.buffer_latest_message ? 'checked' : ''} />
+                            <span>草稿缓冲（最新楼层延迟定稿）</span>
+                        </label>
+                    </div>
+                </div>
                 </div><!-- /.novel-tabpane format -->
 
                 <div class="novel-tabpane" id="novel_pane_file" data-nv-pane="file" role="tabpanel" aria-labelledby="novel_tab_file">
-                <div class="novel-settings-grid">
+                <div class="novel-section-title"><i class="fa-solid fa-folder-open"></i> 文件与导出</div>
 
-                <!-- ▍文件与导出 -->
-                <div class="novel-section">
-                    <div class="novel-section-title"><i class="fa-solid fa-folder-open"></i> 文件与导出</div>
-                    <!-- 【保存文件夹设置】：自定义存储路径 -->
-                    <div class="novel-acc" data-nv-acc="dir">
-                        <button type="button" class="novel-acc-head" aria-expanded="false">
-                            <span class="novel-acc-title"><i class="fa-solid fa-folder"></i> 保存位置</span>
-                            <span class="novel-acc-summary" id="novel_acc_summary_dir"></span>
-                            <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
-                        </button>
-                        <div class="novel-acc-body">
-                            <input type="text" id="novel_save_dir" class="text_pole" value="${settings.save_dir || ''}" placeholder="留空默认存至 plugins/auto-save/logs；填写服务端有效目录" />
-                            <small title="若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 D:\），此时建议留空并用【导出整本 TXT】下载">服务端（运行酒馆的机器）目录，留空为默认。当前：<code id="novel_save_dir_preview">${initialDir}${initialFileName}</code></small>
-                        </div>
-                    </div>
-
-                    <!-- 动作行：不折叠，要一眼能找到 -->
-                    <div class="novel-acc-flat">
-                        <span class="novel-acc-title"><i class="fa-solid fa-file-export"></i> 导出与同步</span>
-                        <!-- 操作按钮组：导出为主按钮，同步为次按钮，试写为弱化诊断按钮 -->
-                        <div class="novel-action-buttons">
-                            <button type="button" id="novel_export_all_btn" class="novel-btn btn-export" style="flex: 1;" title="无需服务端插件，直接在浏览器中将所有聊天编排为小说 TXT 并下载">
-                                <i class="fa-solid fa-download"></i> 导出整本 TXT
-                            </button>
-                            <button type="button" id="novel_sync_all_btn" class="novel-btn btn-sync" style="flex: 1;" title="将当前聊天所有历史章节完整编排并同步写入服务端文件">
-                                <i class="fa-solid fa-file-import"></i> 同步历史连载
-                            </button>
-                            <button type="button" id="novel_test_btn" class="novel-btn btn-test novel-btn-minor" style="flex: 0 0 auto;" title="测试服务端插件连通性与标签清洗效果">
-                                <i class="fa-solid fa-feather-pointed"></i> 试写一章
-                            </button>
-                        </div>
+                <div class="novel-acc" data-nv-acc="dir">
+                    <button type="button" class="novel-acc-head" aria-expanded="false">
+                        <span class="novel-acc-title"><i class="fa-solid fa-folder"></i> 保存位置</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_dir"></span>
+                        <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
+                    </button>
+                    <div class="novel-acc-body">
+                        <input type="text" id="novel_save_dir" class="text_pole" value="${settings.save_dir || ''}" placeholder="留空默认存至 plugins/auto-save/logs；填写服务端有效目录" />
+                        <small title="若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 D:\），此时建议留空并用【导出整本 TXT】下载">服务端（运行酒馆的机器）目录，留空为默认。当前：<code id="novel_save_dir_preview">${initialDir}${initialFileName}</code></small>
                     </div>
                 </div>
-                </div><!-- /.novel-settings-grid -->
+
+                <!-- 动作行：不折叠，要一眼能找到。按钮的伸缩由 .novel-acc-flat > .novel-btn 的 CSS 决定，不写内联样式 -->
+                <div class="novel-acc-flat">
+                    <span class="novel-acc-title"><i class="fa-solid fa-file-export"></i> 导出与同步</span>
+                    <div class="novel-btn-row">
+                        <button type="button" id="novel_export_all_btn" class="novel-btn btn-export" title="无需服务端插件，直接在浏览器中将所有聊天编排为小说 TXT 并下载">
+                            <i class="fa-solid fa-download"></i> 导出整本 TXT
+                        </button>
+                        <button type="button" id="novel_sync_all_btn" class="novel-btn btn-sync" title="将当前聊天所有历史章节完整编排并同步写入服务端文件">
+                            <i class="fa-solid fa-file-import"></i> 同步历史连载
+                        </button>
+                    </div>
+                    <button type="button" id="novel_test_btn" class="novel-btn btn-test novel-btn-minor novel-btn-inline" title="测试服务端插件连通性与标签清洗效果">
+                        <i class="fa-solid fa-feather-pointed"></i> 试写一章
+                    </button>
+                </div>
                 </div><!-- /.novel-tabpane file -->
 
                 <div class="novel-tabpane" id="novel_pane_general" data-nv-pane="general" role="tabpanel" aria-labelledby="novel_tab_general">
-                <div class="novel-settings-grid">
-
-                <!-- ▍通用：界面显示偏好（总开关已常驻头部，这里只放展示类开关） -->
-                <div class="novel-section">
-                    <div class="novel-section-title"><i class="fa-solid fa-gear"></i> 通用</div>
-                    <div class="novel-acc" data-nv-acc="display">
-                        <button type="button" class="novel-acc-head" aria-expanded="false">
-                            <span class="novel-acc-title"><i class="fa-solid fa-desktop"></i> 界面显示</span>
-                            <span class="novel-acc-summary" id="novel_acc_summary_display"></span>
-                            <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
-                        </button>
-                        <div class="novel-acc-body">
-                            <label class="checkbox_label" title="显示右下角悬浮入口：常显连载进度，点击打开本设置弹窗；按住可拖动到任意位置（位置会被记住）">
-                                <input type="checkbox" id="novel_show_floating_window" ${settings.show_floating_window ? 'checked' : ''} />
-                                <span>右下角悬浮入口</span>
-                            </label>
-                            <label class="checkbox_label" title="在最新一条 AI 回复底部显示内嵌快捷操作条（连载进度、查看过滤效果、一键导出）">
-                                <input type="checkbox" id="novel_show_embedded_toolbar" ${settings.show_embedded_toolbar !== false ? 'checked' : ''} />
-                                <span>回复底部内嵌工具条</span>
-                            </label>
-                            <label class="checkbox_label" title="每当新章节连载更新完成时，在屏幕右上角弹出轻量提示通知">
-                                <input type="checkbox" id="novel_show_toast" ${settings.show_toast !== false ? 'checked' : ''} />
-                                <span>更新时弹窗提示</span>
-                            </label>
-                        </div>
+                <div class="novel-section-title"><i class="fa-solid fa-gear"></i> 通用</div>
+                <div class="novel-acc" data-nv-acc="display">
+                    <button type="button" class="novel-acc-head" aria-expanded="false">
+                        <span class="novel-acc-title"><i class="fa-solid fa-desktop"></i> 界面显示</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_display"></span>
+                        <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
+                    </button>
+                    <div class="novel-acc-body">
+                        <label class="checkbox_label" title="显示右下角悬浮入口：常显连载进度，点击打开本设置弹窗；按住可拖动到任意位置（位置会被记住）">
+                            <input type="checkbox" id="novel_show_floating_window" ${settings.show_floating_window ? 'checked' : ''} />
+                            <span>右下角悬浮入口</span>
+                        </label>
+                        <label class="checkbox_label" title="在最新一条 AI 回复底部显示内嵌快捷操作条（连载进度、查看过滤效果、一键导出）">
+                            <input type="checkbox" id="novel_show_embedded_toolbar" ${settings.show_embedded_toolbar !== false ? 'checked' : ''} />
+                            <span>回复底部内嵌工具条</span>
+                        </label>
+                        <label class="checkbox_label" title="每当新章节连载更新完成时，在屏幕右上角弹出轻量提示通知">
+                            <input type="checkbox" id="novel_show_toast" ${settings.show_toast !== false ? 'checked' : ''} />
+                            <span>更新时弹窗提示</span>
+                        </label>
                     </div>
                 </div>
-                </div><!-- /.novel-settings-grid -->
                 </div><!-- /.novel-tabpane general -->
 
                 </div><!-- /.novel-tabpanes -->
@@ -3173,21 +3136,20 @@ async function renderSettingsUI(cachedStatus = null) {
             const cmdDirectScript = `bash install.sh`;
             const cmdManualDocker = `docker exec sillytavern cp -r /home/node/app/data/default-user/extensions/ST-auto-save-to-txt/plugins/auto-save /home/node/app/plugins/`;
 
+            // 结构上刻意保持扁平：三块「方案」+ 若干「一行」。行内的左右排布一律交给
+            // .novel-guide-row / .novel-info-row，不再往模板里塞内联 flex 样式。
             guideEl.innerHTML = `
-                <!-- 零配置免安装直接导出高亮卡片 -->
                 <div class="novel-plan-c-card">
-                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
-                        <i class="fa-solid fa-circle-check" style="color: #2ecc71;"></i>
-                        <b>即开即用：零配置直接导出（推荐）</b>
+                    <div class="novel-guide-row">
+                        <span class="novel-guide-title"><i class="fa-solid fa-circle-check"></i> 即开即用：零配置直接导出（推荐）</span>
                     </div>
-                    无需配置服务器或 Docker 挂载！随时点击下方<b>【导出整本 TXT】</b>，浏览器可直接排版、生成带楼层/目录的完整小说并一键下载，零门槛、零网络报错！
+                    <p class="novel-guide-text">无需配置服务器或 Docker 挂载！在【文件】标签点一次<b>【导出整本 TXT】</b>，浏览器即可排版、生成带楼层与目录的完整小说并一键下载，零门槛、零网络报错。</p>
                 </div>
 
-                <!-- 方案一：一键脚本自动部署 -->
                 <div class="novel-deploy-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: bold; opacity: 0.95;"><i class="fa-solid fa-wand-magic-sparkles"></i> 方案一：一键命令自动部署（国内 CDN 高速加速）</span>
-                        <small style="opacity: 0.7; font-size: 11px;">极简一行直达</small>
+                    <div class="novel-guide-row">
+                        <span class="novel-guide-title"><i class="fa-solid fa-wand-magic-sparkles"></i> 方案一：一键命令自动部署</span>
+                        <small class="novel-guide-tag">极简一行直达</small>
                     </div>
                     <div class="novel-tab-bar">
                         <button type="button" class="novel-tab-btn active" data-tab="universal"><i class="fa-brands fa-linux"></i> Linux / Docker / NAS (推荐)</button>
@@ -3195,42 +3157,39 @@ async function renderSettingsUI(cachedStatus = null) {
                         <button type="button" class="novel-tab-btn" data-tab="script"><i class="fa-solid fa-terminal"></i> 离线/本地运行</button>
                     </div>
                     <div class="novel-code-wrapper">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-size: 11px; opacity: 0.75;" id="novel_tab_hint">在服务器终端（SSH 或控制台）直接粘贴执行（国内 CDN 高速直连，自动穿透 Docker）：</span>
+                        <div class="novel-guide-row">
+                            <small class="novel-guide-hint" id="novel_tab_hint">在服务器终端（SSH 或控制台）直接粘贴执行（国内 CDN 高速直连，自动穿透 Docker）：</small>
                             <button type="button" class="novel-copy-btn" id="novel_copy_cmd_btn"><i class="fa-solid fa-copy"></i> 复制命令</button>
                         </div>
                         <code class="novel-code-text" id="novel_cmd_display">${cmdOnlineLinux}</code>
                     </div>
-                    <small style="opacity: 0.75; font-size: 11px; line-height: 1.5;">
-                        <b>第 1 步：</b>粘贴执行上述命令（全自动感知 Docker 容器、定位挂载卷并完成部署）；<br>
+                    <small class="novel-guide-text">
+                        <b>第 1 步：</b>粘贴执行上述命令（自动感知 Docker 容器、定位挂载卷并完成部署）；<br>
                         <b>第 2 步：</b>确认酒馆 <code>config.yaml</code> 中 <code>enableServerPlugins: true</code> 并重启酒馆。
                     </small>
                 </div>
 
-                <!-- 方案二：醒目手动复制保底卡片 -->
                 <div class="novel-manual-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: bold; color: #f39c12; display: flex; align-items: center; gap: 6px;">
-                            <i class="fa-solid fa-triangle-exclamation"></i> 方案二：若脚本自动部署失败，请手动复制（100% 成功保底）
-                        </span>
-                        <small style="color: #f39c12; font-weight: bold; font-size: 11px;">终极保底</small>
+                    <div class="novel-guide-row">
+                        <span class="novel-guide-title"><i class="fa-solid fa-triangle-exclamation"></i> 方案二：脚本失败时手动复制（100% 保底）</span>
+                        <small class="novel-guide-tag">终极保底</small>
                     </div>
-                    <div style="font-size: 11px; opacity: 0.9; line-height: 1.4;">
-                        当环境特殊或脚本无法自动感知目录时，只需手动复制一个文件夹即可完全搞定：
+                    <small class="novel-guide-text">环境特殊或脚本无法自动感知目录时，手动复制一个文件夹即可完全搞定：</small>
+                    <div class="novel-info-row">
+                        <span class="novel-info-key">复制源</span>
+                        <span class="novel-info-val is-wrap"><code>SillyTavern/data/default-user/extensions/ST-auto-save-to-txt/plugins/auto-save</code></span>
                     </div>
-                    <div class="novel-manual-paths">
-                        <div><b>📂 复制源路径：</b><br><code>SillyTavern/data/default-user/extensions/ST-auto-save-to-txt/plugins/auto-save</code></div>
-                        <div style="margin-top: 4px;"><b>🎯 粘贴至目标：</b><br><code>SillyTavern/plugins/auto-save</code></div>
+                    <div class="novel-info-row">
+                        <span class="novel-info-key">粘贴至</span>
+                        <span class="novel-info-val is-wrap"><code>SillyTavern/plugins/auto-save</code></span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 2px;">
-                        <span style="font-size: 11px; opacity: 0.85;">🐳 <b>Docker 容器内直连手动复制命令：</b></span>
-                        <button type="button" class="novel-copy-btn" id="novel_copy_docker_manual_btn" style="padding: 2px 8px; font-size: 10px;">
+                    <div class="novel-guide-row">
+                        <small class="novel-guide-text">🐳 <b>Docker 容器内直连手动复制命令：</b></small>
+                        <button type="button" class="novel-copy-btn" id="novel_copy_docker_manual_btn">
                             <i class="fa-solid fa-copy"></i> 复制 Docker 手动命令
                         </button>
                     </div>
-                    <div style="font-size: 11px; opacity: 0.8; line-height: 1.4; border-top: 1px dashed rgba(230, 126, 34, 0.3); padding-top: 5px;">
-                        💡 <b>提示：</b>复制完成后，请确认酒馆 <code>config.yaml</code> 中开启 <code>enableServerPlugins: true</code>，重启酒馆（Docker 执行 <code>docker restart &lt;容器名&gt;</code>），刷新网页即可正常使用！
-                    </div>
+                    <small class="novel-guide-text novel-guide-foot">💡 <b>提示：</b>复制完成后，请确认酒馆 <code>config.yaml</code> 中开启 <code>enableServerPlugins: true</code>，重启酒馆（Docker 执行 <code>docker restart &lt;容器名&gt;</code>），刷新网页即可正常使用。</small>
                 </div>
             `;
 
