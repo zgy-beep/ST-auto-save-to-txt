@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.12.2',            // 扩展版本号
+    version: '1.13.0',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -51,8 +51,10 @@ const DEFAULT_SETTINGS = {
     save_dir: '',                 // 自定义保存文件夹路径（留空则保存至默认 plugins/auto-save/logs；支持任意绝对路径如 D:\MyNovels）
     show_toast: true,             // 连载更新时弹出轻量提示通知
     show_embedded_toolbar: true,  // 最新 AI 楼层底部是否显示内嵌快捷工具条
-    show_floating_window: false,  // 屏幕右下角常驻悬浮快捷窗（opt-in 默认关闭；开启后不依赖具体楼层，随时查看进度/开关连载/快速导出）
+    show_floating_window: true,   // 常驻悬浮快捷窗（v1.13 起为默认入口：开关连载/看进度/导出；可在设置里关闭）
     floating_window_collapsed: true, // 悬浮窗折叠态：true = 只显示药丸，false = 展开面板（持久化记忆）
+    float_pos: null,              // 悬浮窗被拖动后的位置 { left, top }；null = 默认右下角
+    ui_v113_migrated: false,      // v1.13 一次性迁移标记（老用户自动补开悬浮窗作为主入口）
     userDisabled: false,          // 用户是否主动手动关闭了连载
 };
 
@@ -242,85 +244,171 @@ function refreshLatestToolbar() {
 }
 
 /**
- * 打开完整设置面板：展开内嵌抽屉并滚动至可见位置（悬浮窗【完整设置】按钮复用）
+ * 打开完整设置面板（魔法棒菜单项 / 悬浮窗【完整设置】/ 楼层工具条共用）
  */
 function openFullSettings() {
-    const panel = document.getElementById('auto-save-to-txt-settings');
-    if (!panel) {
-        if (window.toastr) window.toastr.info('请在酒馆顶部【扩展管理】中打开「小说连载阅读」面板', '小说连载');
-        return;
-    }
-    const toggle = panel.querySelector('.inline-drawer-toggle');
-    const content = panel.querySelector('.inline-drawer-content');
-    // 面板已收起时先展开（ST 原生 inline-drawer 行为：点击 toggle 切换 content 显隐）
-    if (toggle && content && content.style.display === 'none') {
-        toggle.click();
-    }
-    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    openNovelSettingsModal();
 }
 
-// ⑥ 左下角魔法棒入口：与酒馆发送栏原生按钮（回形针/魔法棒同排）并列，
-//    点击直达完整设置面板；入口指示灯随连载开关亮灭，任何页面位置一键可达
+// ⑥ 左下角「魔法棒」入口：注册为酒馆原生扩展菜单（#extensionsMenu）的一项，
+//    点击魔法棒 → 「小说连载阅读」→ 打开设置弹窗。
+//    幂等：酒馆重绘菜单后可再次调用补回；返回是否已就位（未就位由启动轮询兜底）
 function injectWandEntry() {
     if (typeof document === 'undefined') return false;
-    if (document.getElementById('novel-wand-entry')) return true;
+    if (document.getElementById('novel-wand-menu-item')) return true;
 
-    const btn = document.createElement('div');
-    btn.id = 'novel-wand-entry';
-    btn.className = 'editor_button';
-    btn.title = '小说连载阅读 · 点击打开设置面板';
-    btn.setAttribute('role', 'button');
-    btn.setAttribute('tabindex', '0');
-    btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i>';
-    btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openFullSettings();
-    });
-    btn.addEventListener('keydown', (e) => {
+    const menu = document.getElementById('extensionsMenu');
+    if (!menu) return false;
+
+    // 标记与酒馆官方扩展菜单项一致：#extensionsMenu 的直接子元素 + list-group-item 外观
+    // （酒馆自身每秒检查「菜单里是否有可见项」来决定魔法棒按钮显隐，本项即作为可见项）
+    const item = document.createElement('div');
+    item.id = 'novel-wand-menu-item';
+    item.className = 'list-group-item flex-container flexGap5';
+    item.setAttribute('role', 'button');
+    item.setAttribute('tabindex', '0');
+    item.title = '小说连载阅读：打开设置面板（开关连载 / 过滤配置 / 导出整本 TXT）';
+    item.innerHTML = '<div class="fa-solid fa-book-bookmark extensionsMenuExtensionButton"></div><span class="novel-wand-item-label">小说连载阅读</span><span class="novel-wand-item-state" id="novel_wand_menu_state"></span>';
+
+    // 注意：不能 stopPropagation，酒馆靠 body/html 上的点击监听来收起这个下拉菜单
+    const activate = () => openNovelSettingsModal();
+    item.addEventListener('click', activate);
+    item.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            openFullSettings();
+            activate();
         }
     });
 
-    // 优先落在发送栏左侧按钮列（与回形针/魔法棒同排）；发送栏在但按钮列不在时挂发送栏；
-    // 两者都不在说明酒馆尚未渲染完成，返回 false 由启动轮梢兜底重试
-    const holder = document.getElementById('send_but_holder');
-    if (holder) {
-        holder.appendChild(btn);
-        syncWandEntryState();
-        return true;
-    }
-    const sendForm = document.getElementById('send_form');
-    if (sendForm) {
-        sendForm.insertBefore(btn, sendForm.firstChild);
-        syncWandEntryState();
-        return true;
-    }
-    return false;
+    menu.appendChild(item);
+    syncWandEntryState();
+    return true;
 }
 
-// 魔法棒入口状态灯：连载开启时金色高亮，关闭时灰化（与悬浮窗药丸语义一致）
+// 魔法棒菜单项状态副标（连载中 / 已关闭），与悬浮窗药丸语义一致
 function syncWandEntryState() {
     if (typeof document === 'undefined') return;
-    const btn = document.getElementById('novel-wand-entry');
-    if (!btn) return;
-    btn.classList.toggle('is-active', !!getSettings().enabled);
+    const stateEl = document.getElementById('novel_wand_menu_state');
+    if (!stateEl) return;
+    const settings = getSettings();
+    const on = !!settings.enabled;
+    stateEl.textContent = on ? '连载中' : '已关闭';
+    stateEl.classList.toggle('is-on', on);
 }
 
-// ⑤ 右下角悬浮快捷窗：药丸常显（点击展开面板），折叠态持久化；
-//    与内嵌工具条互补——不依赖任何楼层 DOM，全局随时可达；无 DOM 环境（node 测试）直接跳过
-function anchorFloatingWindow() {
+// ⑤ 悬浮快捷窗：v1.13 起为默认入口之一。药丸常驻且可自由拖拽移动，点击展开面板；
+//    位置与折叠态均持久化；不依赖任何楼层 DOM，切聊天全程跟随；无 DOM 环境（node 测试）直接跳过
+let fwLastDragAt = 0;
+
+/** 读取用户拖动后的悬浮窗坐标（从未拖动过返回 null = 默认右下角） */
+function getUserFloatPos() {
+    const pos = getSettings().float_pos;
+    if (!pos || typeof pos.left !== 'number' || typeof pos.top !== 'number') return null;
+    return pos;
+}
+
+/** 坐标夹取：保证窗口怎么拖都出不了可视区 */
+function clampFloatPos(left, top, w, h) {
+    const maxLeft = Math.max(0, (window.innerWidth || 0) - w);
+    const maxTop = Math.max(0, (window.innerHeight || 0) - h);
+    return {
+        left: Math.min(Math.max(0, left), maxLeft),
+        top: Math.min(Math.max(0, top), maxTop)
+    };
+}
+
+/** 落地悬浮窗位置：未拖动过走 CSS 默认（右下角），拖动过用持久化坐标并夹取回可视区 */
+function applyFloatPos() {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
     const win = document.getElementById('novel-floating-window');
     if (!win) return;
-    // 与弹窗/旧版快捷栏同理：部分环境 fixed 退化为文档定位会把窗口带跑，
-    // 用 scrollY+innerHeight 显式钉在当前可视区右下角（桌面 scrollY=0 时视觉等同 fixed）
-    const bottomOffset = 12;
-    const top = (window.scrollY || window.pageYOffset || 0) + window.innerHeight - win.offsetHeight - bottomOffset;
-    win.style.position = 'absolute';
-    win.style.top = Math.max(0, top) + 'px';
+    const pos = getUserFloatPos();
+    if (!pos) {
+        win.style.left = 'auto';
+        win.style.top = 'auto';
+        win.style.right = '';
+        win.style.bottom = '';
+        win.classList.remove('is-moved');
+        return;
+    }
+    const c = clampFloatPos(pos.left, pos.top, win.offsetWidth || 0, win.offsetHeight || 0);
+    win.style.right = 'auto';
     win.style.bottom = 'auto';
+    win.style.left = `${c.left}px`;
+    win.style.top = `${c.top}px`;
+    win.classList.add('is-moved');
+}
+
+// ---- 拖拽（指针事件，鼠标 / 触屏共用；4px 阈值区分「点击展开」与「拖动移动」） ----
+const fwDrag = { active: false, moved: false, startX: 0, startY: 0, startLeft: 0, startTop: 0 };
+let fwDragBound = false;
+
+function onFwPointerMove(e) {
+    if (!fwDrag.active) return;
+    const win = document.getElementById('novel-floating-window');
+    if (!win) {
+        fwDrag.active = false;
+        return;
+    }
+    const dx = e.clientX - fwDrag.startX;
+    const dy = e.clientY - fwDrag.startY;
+    if (!fwDrag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    fwDrag.moved = true;
+    if (e.cancelable) e.preventDefault();
+    const c = clampFloatPos(fwDrag.startLeft + dx, fwDrag.startTop + dy, win.offsetWidth, win.offsetHeight);
+    win.style.left = `${c.left}px`;
+    win.style.top = `${c.top}px`;
+}
+
+function onFwPointerUp() {
+    if (!fwDrag.active) return;
+    const win = document.getElementById('novel-floating-window');
+    fwDrag.active = false;
+    if (win) {
+        win.classList.remove('is-dragging');
+        if (fwDrag.moved) {
+            // 记录拖动时间：随后浏览器补发的 click 不再触发「点击展开/收起」与「点外收起」
+            fwLastDragAt = Date.now();
+            const settings = getSettings();
+            settings.float_pos = {
+                left: parseFloat(win.style.left) || 0,
+                top: parseFloat(win.style.top) || 0
+            };
+            win.classList.add('is-moved');
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        }
+    }
+    fwDrag.moved = false;
+}
+
+/** 绑定拖拽把手（药丸 + 面板标题栏）；document 级监听全程只绑一次，避免反复重建时重复挂载 */
+function bindFloatingWindowDrag(win, handles) {
+    if (!fwDragBound && typeof document !== 'undefined') {
+        fwDragBound = true;
+        document.addEventListener('pointermove', onFwPointerMove, { passive: false });
+        document.addEventListener('pointerup', onFwPointerUp);
+        document.addEventListener('pointercancel', onFwPointerUp);
+    }
+    handles.filter(Boolean).forEach((handle) => {
+        handle.classList.add('novel-fw-drag-handle');
+        handle.addEventListener('pointerdown', (e) => {
+            if (e.button !== undefined && e.button !== 0) return;
+            if (e.target.closest('button, input, select, textarea, a, label')) return;
+            const rect = win.getBoundingClientRect();
+            fwDrag.active = true;
+            fwDrag.moved = false;
+            fwDrag.startX = e.clientX;
+            fwDrag.startY = e.clientY;
+            fwDrag.startLeft = rect.left;
+            fwDrag.startTop = rect.top;
+            // 先落成像素坐标再拖，避免 right/bottom 锚点在拖动过程中跳动
+            win.style.right = 'auto';
+            win.style.bottom = 'auto';
+            win.style.left = `${rect.left}px`;
+            win.style.top = `${rect.top}px`;
+            win.classList.add('is-dragging');
+        });
+    });
 }
 
 function buildFloatingWindow() {
@@ -329,13 +417,14 @@ function buildFloatingWindow() {
     win.id = 'novel-floating-window';
     win.className = 'novel-floating-window';
     win.innerHTML = `
-        <div class="novel-fw-pill" id="novel_fw_pill" title="点击展开/收起小说连载悬浮窗">
+        <div class="novel-fw-pill" id="novel_fw_pill" title="点击展开/收起 · 按住可拖动移动位置">
+            <i class="fa-solid fa-grip-vertical novel-fw-grip"></i>
             <i class="fa-solid fa-book-open"></i>
             <span id="novel_fw_pill_text">小说连载</span>
             <i class="fa-solid fa-chevron-up novel-fw-chevron" id="novel_fw_chevron"></i>
         </div>
         <div class="novel-fw-panel" id="novel_fw_panel">
-            <div class="novel-fw-header">
+            <div class="novel-fw-header" title="按住此处可拖动移动悬浮窗">
                 <span class="novel-fw-title"><i class="fa-solid fa-book-bookmark"></i> 小说连载</span>
                 <span class="novel-fw-chapter" id="novel_fw_chapter">尚未入书</span>
                 <button type="button" class="novel-fw-close" id="novel_fw_collapse" title="收起为药丸"><i class="fa-solid fa-chevron-down"></i></button>
@@ -359,13 +448,21 @@ function buildFloatingWindow() {
     `;
     document.body.appendChild(win);
 
+    // 药丸与面板标题栏都是拖拽把手（把手里含按钮/输入框时自动放行，不影响点击）
+    bindFloatingWindowDrag(win, [win.querySelector('#novel_fw_pill'), win.querySelector('.novel-fw-header')]);
+
     const setCollapsed = (collapsed) => {
         settings.floating_window_collapsed = collapsed;
         if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
         refreshFloatingWindow();
     };
 
-    win.querySelector('#novel_fw_pill').addEventListener('click', () => setCollapsed(!settings.floating_window_collapsed));
+    win.querySelector('#novel_fw_pill').addEventListener('click', (e) => {
+        // 刚发生过拖动：浏览器补发的 click 不再当作「点击展开/收起」
+        if (Date.now() - fwLastDragAt < 300) return;
+        e.stopPropagation();
+        setCollapsed(!settings.floating_window_collapsed);
+    });
     win.querySelector('#novel_fw_collapse').addEventListener('click', () => setCollapsed(true));
 
     // 连载总开关：走共享 setNovelEnabled（服务端未就绪时自动回取消勾选并提示，防 404）
@@ -394,15 +491,15 @@ function buildFloatingWindow() {
 
     // 点击面板外部任意处收起（buildFloatingWindow 全程只构建一次，天然只绑一次）
     document.addEventListener('click', (e) => {
+        if (Date.now() - fwLastDragAt < 300) return;
         if (settings.floating_window_collapsed) return;
         const w = document.getElementById('novel-floating-window');
         if (w && !w.contains(e.target)) setCollapsed(true);
     });
 
-    // 滚动/缩放/横竖屏切换时重钉可视区（fixed 退化环境也能始终贴角可见）
-    window.addEventListener('scroll', anchorFloatingWindow, { passive: true });
-    window.addEventListener('resize', anchorFloatingWindow);
-    window.addEventListener('orientationchange', () => setTimeout(anchorFloatingWindow, 200));
+    // 视口变化时夹取坐标，保证拖过的窗口不会因缩小窗口/横竖屏切换而跑到屏幕外
+    window.addEventListener('resize', applyFloatPos);
+    window.addEventListener('orientationchange', () => setTimeout(applyFloatPos, 200));
     return win;
 }
 
@@ -443,13 +540,14 @@ function refreshFloatingWindow() {
     const bufferEl = win.querySelector('#novel_fw_buffer');
     if (bufferEl) bufferEl.checked = !!settings.buffer_latest_message;
 
-    anchorFloatingWindow();
+    applyFloatPos();
 }
 
-// 连载界面 surfaces 统一刷新：楼层内嵌工具条 + 右下角悬浮窗 + 左下角魔法棒入口指示灯
+// 连载界面 surfaces 统一刷新：楼层内嵌工具条 + 悬浮窗 + 魔法棒菜单项（含被酒馆重绘后的自动补回）
 function refreshNovelToolbars() {
     refreshLatestToolbar();
     refreshFloatingWindow();
+    injectWandEntry();
     syncWandEntryState();
 }
 
@@ -489,6 +587,14 @@ function getSettings() {
             if (extSettings[EXTENSION_NAME][key] === undefined) {
                 extSettings[EXTENSION_NAME][key] = DEFAULT_SETTINGS[key];
             }
+        }
+
+        // v1.13 一次性迁移：界面入口从「扩展抽屉」改为「魔法棒菜单 + 悬浮窗」，
+        // 悬浮窗升级为主入口，老用户补开一次（此后用户自己关掉即尊重其选择）
+        if (!extSettings[EXTENSION_NAME].ui_v113_migrated) {
+            extSettings[EXTENSION_NAME].ui_v113_migrated = true;
+            extSettings[EXTENSION_NAME].show_floating_window = true;
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
         }
     }
     return extSettings[EXTENSION_NAME];
@@ -1694,7 +1800,7 @@ function analyzeRemovedContent(raw, settings) {
  */
 function openFilterPreviewModal() {
     if (typeof document === 'undefined') return;
-    const overlay = document.getElementById('novel_preview_modal');
+    const overlay = ensurePreviewModal();
     if (!overlay) return;
     const settings = getSettings();
 
@@ -1772,13 +1878,9 @@ function openFilterPreviewModal() {
         }
     }
 
-    // 健壮定位：部分环境（ancestor transform 等）fixed 会退化为 absolute 跑到文档顶部，
-    // 改用绝对坐标显式锚定当前可视区（scrollY 补偿），任何滚动位置都贴在用户眼前
-    overlay.style.position = 'absolute';
-    overlay.style.top = `${window.scrollY}px`;
-    overlay.style.left = '0';
-    overlay.style.height = `${window.innerHeight}px`;
     overlay.style.display = 'flex';
+    // 健壮定位：fixed 铺满视口；fixed 退化环境自动降级为绝对坐标锚定当前可视区
+    positionOverlay(overlay);
 }
 
 function closeFilterPreviewModal() {
@@ -1889,7 +1991,153 @@ function throttledNovelSuccessToast(message, title, opts = {}) {
     if (window.toastr) window.toastr.success(message, title, opts);
 }
 
-let renderRetryTimer = null;
+/* ============================================================
+   v1.13 界面入口重构
+   设置面板不再塞进酒馆「扩展程序」抽屉（那里入口深、抽屉折叠时弹窗还会被一起隐藏），
+   统一改为 body 级弹窗：入口 = 左下角魔法棒菜单 / 悬浮窗 / 楼层内嵌工具条
+   ============================================================ */
+
+/**
+ * 弹窗定位：默认 fixed 铺满视口；fixed 退化的环境（ancestor transform 等）
+ * 自动降级为绝对坐标锚定当前可视区，任何滚动位置都贴在用户眼前
+ */
+function positionOverlay(overlay) {
+    if (!overlay) return;
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.right = '0';
+    overlay.style.bottom = '0';
+    overlay.style.height = '';
+    const rect = overlay.getBoundingClientRect();
+    if (Math.abs(rect.top) > 1 || Math.abs(rect.left) > 1) {
+        overlay.style.position = 'absolute';
+        overlay.style.top = `${window.scrollY || window.pageYOffset || 0}px`;
+        overlay.style.left = '0';
+        overlay.style.right = '0';
+        overlay.style.bottom = 'auto';
+        overlay.style.height = `${window.innerHeight}px`;
+    }
+}
+
+// Esc 只关闭最上层弹窗（预览弹窗优先于设置弹窗），全局只绑一次
+let novelEscBound = false;
+function bindNovelEscClose() {
+    if (novelEscBound || typeof document === 'undefined') return;
+    novelEscBound = true;
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const preview = document.getElementById('novel_preview_modal');
+        if (preview && preview.style.display !== 'none') {
+            closeFilterPreviewModal();
+            return;
+        }
+        const settingsModal = document.getElementById('novel_settings_modal');
+        if (settingsModal && settingsModal.style.display !== 'none') closeNovelSettingsModal();
+    });
+}
+
+/** 创建设置弹窗外壳（body 级，全程只建一次），面板内容由 renderSettingsUI 填充 */
+function ensureSettingsModal() {
+    if (typeof document === 'undefined') return null;
+    let overlay = document.getElementById('novel_settings_modal');
+    if (overlay) return overlay;
+
+    overlay = document.createElement('div');
+    overlay.id = 'novel_settings_modal';
+    overlay.className = 'novel-modal-overlay';
+    overlay.style.display = 'none';
+    overlay.innerHTML = `
+        <div class="novel-modal novel-modal-settings" role="dialog" aria-modal="true" aria-label="小说连载阅读设置">
+            <div class="novel-modal-header">
+                <b><i class="fa-solid fa-book-bookmark"></i> 小说连载阅读 <span class="novel-modal-ver">v${DEFAULT_SETTINGS.version}</span></b>
+                <span class="novel-modal-header-meta">
+                    <span id="novel_header_status" class="novel-modal-status"></span>
+                    <button type="button" id="novel_settings_close" class="novel-chip-btn" title="关闭设置"><i class="fa-solid fa-xmark"></i></button>
+                </span>
+            </div>
+            <div class="novel-modal-body novel-modal-body-settings" id="novel_settings_body"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeNovelSettingsModal();
+    });
+    const closeBtn = overlay.querySelector('#novel_settings_close');
+    if (closeBtn) closeBtn.addEventListener('click', closeNovelSettingsModal);
+    bindNovelEscClose();
+    return overlay;
+}
+
+/** 打开设置弹窗（魔法棒菜单项 / 悬浮窗【完整设置】共用） */
+function openNovelSettingsModal() {
+    if (typeof document === 'undefined') return;
+    const overlay = ensureSettingsModal();
+    if (!overlay) return;
+    const body = overlay.querySelector('#novel_settings_body');
+    if (!document.getElementById('auto-save-to-txt-settings')) {
+        // 懒渲染兜底：面板尚未就绪（服务端探针仍在等待）时先给个占位，随后补渲染
+        if (body) body.innerHTML = '<div class="novel-mv-hint">正在载入设置…</div>';
+        renderSettingsUI();
+    }
+    positionOverlay(overlay);
+    overlay.style.display = 'flex';
+    if (body) body.scrollTop = 0;
+}
+
+function closeNovelSettingsModal() {
+    if (typeof document === 'undefined') return;
+    const overlay = document.getElementById('novel_settings_modal');
+    if (overlay) overlay.style.display = 'none';
+}
+
+/** 创建过滤效果预览弹窗（body 级，全程只建一次） */
+function ensurePreviewModal() {
+    if (typeof document === 'undefined') return null;
+    let overlay = document.getElementById('novel_preview_modal');
+    if (overlay) return overlay;
+
+    overlay = document.createElement('div');
+    overlay.id = 'novel_preview_modal';
+    overlay.className = 'novel-modal-overlay';
+    overlay.style.display = 'none';
+    overlay.innerHTML = `
+        <div class="novel-modal novel-modal-preview" role="dialog" aria-modal="true" aria-label="过滤效果预览">
+            <div class="novel-modal-header">
+                <b><i class="fa-solid fa-eye"></i> 过滤效果预览</b>
+                <span class="novel-modal-header-meta">
+                    <span class="novel-mv-badge" id="novel_modal_speaker"></span>
+                    <span class="novel-mv-badge" id="novel_modal_floor"></span>
+                    <span class="novel-mv-badge is-draft" id="novel_modal_draft" style="display: none;"><i class="fa-solid fa-pen-ruler"></i> 草稿未定稿</span>
+                    <button type="button" id="novel_modal_close" class="novel-chip-btn" title="关闭预览"><i class="fa-solid fa-xmark"></i></button>
+                </span>
+            </div>
+            <div class="novel-mv-statbar" id="novel_modal_statbar"></div>
+            <div class="novel-modal-body novel-mv-body">
+                <div class="novel-mv-grid">
+                    <section class="novel-mv-col is-clean">
+                        <div class="novel-mv-col-title"><i class="fa-solid fa-book-open"></i> 入书正文<span class="novel-mv-count" id="novel_modal_clean_count"></span></div>
+                        <div id="novel_modal_clean" class="novel-mv-text"></div>
+                    </section>
+                    <section class="novel-mv-col is-raw">
+                        <div class="novel-mv-col-title"><i class="fa-solid fa-code"></i> 原始回复<span class="novel-mv-count" id="novel_modal_raw_count"></span><span class="novel-mv-legend"><mark class="novel-mv-removed"></mark> 高亮 = 被剔除</span></div>
+                        <div id="novel_modal_raw" class="novel-mv-text"></div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeFilterPreviewModal();
+    });
+    const closeBtn = overlay.querySelector('#novel_modal_close');
+    if (closeBtn) closeBtn.addEventListener('click', () => closeFilterPreviewModal());
+    bindNovelEscClose();
+    return overlay;
+}
 
 /**
  * 连载总开关共享逻辑（面板复选框与底部快捷栏共用）：
@@ -1927,26 +2175,13 @@ async function setNovelEnabled(wantEnable) {
 }
 
 async function renderSettingsUI(cachedStatus = null) {
+    if (typeof document === 'undefined') return;
     const settings = getSettings();
-    let container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
-    if (!container) {
-        if (renderRetryTimer) clearInterval(renderRetryTimer);
-        let retries = 0;
-        renderRetryTimer = setInterval(() => {
-            retries++;
-            container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
-            if (container) {
-                clearInterval(renderRetryTimer);
-                renderRetryTimer = null;
-                renderSettingsUI(cachedStatus);
-            } else if (retries > 15) {
-                clearInterval(renderRetryTimer);
-                renderRetryTimer = null;
-                console.warn('[AutoSaveTxt] 未能定位到 extensions_settings 容器');
-            }
-        }, 300);
-        return;
-    }
+    // 设置面板统一挂到 body 级设置弹窗内（不再进入酒馆「扩展程序」抽屉）
+    const overlay = ensureSettingsModal();
+    if (!overlay) return;
+    const container = overlay.querySelector('#novel_settings_body');
+    if (!container) return;
 
     const status = cachedStatus || await checkServerPluginStatus();
 
@@ -1967,25 +2202,14 @@ async function renderSettingsUI(cachedStatus = null) {
 
     let panel = document.getElementById('auto-save-to-txt-settings');
     if (panel) panel.remove();
-    // 弹窗若已移出面板挂载在 body，旧面板移除时清理不掉，先手动清除防重复 ID
-    const staleModal = document.getElementById('novel_preview_modal');
-    if (staleModal) staleModal.remove();
+    container.textContent = '';
 
     panel = document.createElement('div');
     panel.id = 'auto-save-to-txt-settings';
-    panel.className = 'inline-drawer';
+    panel.className = 'novel-drawer-inner';
 
-    // 默认折叠，顶栏极简整洁（与酒馆原生抽屉 1:1 一致）；展开后为四分区信息架构：开关置顶，依次为 当前连载 / 正文过滤 / 排版与行为 / 文件与导出
+    // 分区信息架构：开关置顶，依次为 当前连载 / 正文过滤 / 排版与行为 / 文件与导出
     panel.innerHTML = `
-        <div class="inline-drawer-toggle inline-drawer-header">
-            <b>小说连载阅读 <span style="font-weight: normal; opacity: 0.7;">v${DEFAULT_SETTINGS.version}</span></b>
-            <div style="display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;">
-                <span id="novel_header_status" style="font-size: 11px; opacity: 0.85;"></span>
-                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
-            </div>
-        </div>
-        <div class="inline-drawer-content" style="display: none;">
-            <div class="novel-drawer-inner">
                 <!-- 主开关置顶 -->
                 <div class="novel-toggle-row">
                     <label class="checkbox_label" title="开启后，每轮 AI 回复将像小说章节一样自动写入 txt，随时用手机或阅读器翻阅">
@@ -2000,9 +2224,9 @@ async function renderSettingsUI(cachedStatus = null) {
                         <input type="checkbox" id="novel_show_embedded_toolbar" ${settings.show_embedded_toolbar !== false ? 'checked' : ''} />
                         <span>显示内嵌工具条</span>
                     </label>
-                    <label class="checkbox_label" title="在屏幕右下角显示常驻悬浮窗：随时查看连载进度、开关连载/草稿缓冲、快速导出（不依赖具体楼层，切聊天也全程跟随）">
+                    <label class="checkbox_label" title="显示常驻悬浮窗（默认开启）：随时查看连载进度、开关连载/草稿缓冲、快速导出；按住药丸或标题栏可拖动到任意位置，位置会被记住">
                         <input type="checkbox" id="novel_show_floating_window" ${settings.show_floating_window ? 'checked' : ''} />
-                        <span>显示悬浮窗</span>
+                        <span>显示悬浮窗（可拖动移动）</span>
                     </label>
                 </div>
 
@@ -2148,35 +2372,6 @@ async function renderSettingsUI(cachedStatus = null) {
                     </div>
                 </div>
 
-                <!-- 过滤效果预览弹窗（左右对照 + 统计栏，点遮罩 / 右上角 / Esc 均可关闭） -->
-                <div id="novel_preview_modal" class="novel-modal-overlay" style="display: none;">
-                    <div class="novel-modal novel-modal-preview" role="dialog" aria-modal="true" aria-label="过滤效果预览">
-                        <div class="novel-modal-header">
-                            <b><i class="fa-solid fa-eye"></i> 过滤效果预览</b>
-                            <span class="novel-modal-header-meta">
-                                <span class="novel-mv-badge" id="novel_modal_speaker"></span>
-                                <span class="novel-mv-badge" id="novel_modal_floor"></span>
-                                <span class="novel-mv-badge is-draft" id="novel_modal_draft" style="display: none;"><i class="fa-solid fa-pen-ruler"></i> 草稿未定稿</span>
-                                <button type="button" id="novel_modal_close" class="novel-chip-btn" title="关闭预览"><i class="fa-solid fa-xmark"></i></button>
-                            </span>
-                        </div>
-                        <div class="novel-mv-statbar" id="novel_modal_statbar"></div>
-                        <div class="novel-modal-body novel-mv-body">
-                            <div class="novel-mv-grid">
-                                <section class="novel-mv-col is-clean">
-                                    <div class="novel-mv-col-title"><i class="fa-solid fa-book-open"></i> 入书正文<span class="novel-mv-count" id="novel_modal_clean_count"></span></div>
-                                    <div id="novel_modal_clean" class="novel-mv-text"></div>
-                                </section>
-                                <section class="novel-mv-col is-raw">
-                                    <div class="novel-mv-col-title"><i class="fa-solid fa-code"></i> 原始回复<span class="novel-mv-count" id="novel_modal_raw_count"></span><span class="novel-mv-legend"><mark class="novel-mv-removed"></mark> 高亮 = 被剔除</span></div>
-                                    <div id="novel_modal_raw" class="novel-mv-text"></div>
-                                </section>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     `;
 
     container.appendChild(panel);
@@ -2235,7 +2430,7 @@ async function renderSettingsUI(cachedStatus = null) {
 
     // 同步更新顶栏状态指示
     if (recentStatus.state !== 'idle') {
-        const headerStatus = panel.querySelector('#novel_header_status');
+        const headerStatus = document.getElementById('novel_header_status');
         if (headerStatus) {
             if (recentStatus.state === 'updating') {
                 headerStatus.innerHTML = '<span class="novel-header-state is-updating"><i class="fa-solid fa-spinner fa-spin"></i> 连载中...</span>';
@@ -2291,7 +2486,7 @@ async function renderSettingsUI(cachedStatus = null) {
             refreshFloatingWindow();
             if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
             if (e.target.checked && window.toastr) {
-                window.toastr.success('悬浮窗已开启：位于屏幕右下角，点击药丸可展开面板，随时可再收起', '小说连载', { timeOut: 4000 });
+                window.toastr.success('悬浮窗已开启：默认在屏幕右下角，点击药丸展开面板，按住药丸可拖动到任意位置', '小说连载', { timeOut: 4000 });
             }
         });
     }
@@ -2382,30 +2577,12 @@ async function renderSettingsUI(cachedStatus = null) {
         });
     }
 
-    // 「查看过滤效果预览」按钮 + 弹窗关闭（点遮罩 / 右上角 / Esc 键）
+    // 「查看过滤效果预览」按钮（弹窗本体由 ensurePreviewModal 独立挂 body，点遮罩/Esc 关闭）
     const previewBtn = panel.querySelector('#novel_preview_btn');
     if (previewBtn) {
         previewBtn.addEventListener('click', () => {
             openFilterPreviewModal();
         });
-    }
-    const modalOverlay = panel.querySelector('#novel_preview_modal');
-    if (modalOverlay) {
-        modalOverlay.addEventListener('click', (e) => {
-            if (e.target === modalOverlay) closeFilterPreviewModal();
-        });
-        const modalCloseBtn = modalOverlay.querySelector('#novel_modal_close');
-        if (modalCloseBtn) {
-            modalCloseBtn.addEventListener('click', () => closeFilterPreviewModal());
-        }
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeFilterPreviewModal();
-        });
-        // 弹窗挂载到 body：抽屉折叠（display:none）时也能从楼层工具条正常弹出
-        // （必须在事件绑定完成之后再移动，监听器挂在元素上随元素走）
-        if (document.body.contains(modalOverlay)) {
-            document.body.appendChild(modalOverlay);
-        }
     }
 
     // 纯前端一键导出整本小说：与最新 AI 楼层内嵌工具条共用 exportNovelText()
@@ -2696,10 +2873,10 @@ jQuery(async () => {
         updateRecentStatus('ready', '服务端连载服务已就绪，已全自动开启连载功能');
     }
 
-    // 立即执行并配合短延迟补救，确保 100% 渲染至酒馆扩展列表
+    // 立即执行并配合短延迟补救，确保设置面板 100% 渲染进 body 级设置弹窗
     renderSettingsUI(bootStatus);
     setTimeout(() => {
-        // 若用户已展开面板（如正在输入），跳过重复渲染，避免清空其输入与部署指引 tab 状态
+        // 面板已存在则跳过重复渲染，避免清空用户正在输入的内容与部署指引状态
         if (!document.getElementById('auto-save-to-txt-settings')) {
             renderSettingsUI(bootStatus);
         }
@@ -2707,14 +2884,15 @@ jQuery(async () => {
 
     seedLastSavedSignature();
 
-    // 左下角魔法棒入口：即插即用 + 短轮询兜底（酒馆慢渲染时也能落到发送栏按钮列）
-    injectWandEntry();
-    let wandRetries = 0;
-    const wandRetryTimer = setInterval(() => {
-        if (document.getElementById('novel-wand-entry') || ++wandRetries > 20) {
-            clearInterval(wandRetryTimer);
-        } else {
-            injectWandEntry();
+    // 魔法棒菜单项 + 悬浮窗：立即就位，并用短轮询兜底酒馆慢渲染 / 菜单后置重绘
+    refreshNovelToolbars();
+    let uiRetries = 0;
+    const uiRetryTimer = setInterval(() => {
+        uiRetries++;
+        const wandReady = injectWandEntry();
+        refreshNovelToolbars();
+        if ((wandReady && uiRetries > 3) || uiRetries > 20) {
+            clearInterval(uiRetryTimer);
         }
     }, 500);
 

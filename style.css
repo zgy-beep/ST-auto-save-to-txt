@@ -871,20 +871,35 @@
     .novel-lt-btn { width: 100%; }
 }
 
-/* ==================== v1.12.1 右下角悬浮快捷窗（opt-in 开关） ==================== */
-/* 定位由 anchorFloatingWindow() 动态钉在当前可视区右下角（兼容 fixed 退化环境） */
+/* ==================== v1.13 悬浮快捷窗（默认入口之一，可拖拽移动） ==================== */
+/* 默认贴右下角；拖动后由 applyFloatPos() 写入 left/top 像素坐标并持久化 */
 .novel-floating-window {
     position: fixed;
     right: 12px;
     bottom: 12px;
     z-index: 1000010;
     display: flex;
-    flex-direction: column;
+    /* column-reverse：药丸固定在下方，面板向上展开，贴角时不会把药丸顶走 */
+    flex-direction: column-reverse;
     align-items: flex-end;
     gap: 8px;
     font-size: 12px;
     user-select: none;
 }
+/* 拖拽把手：药丸与面板标题栏；禁用触摸滚动/长按选择，保证移动端也能拖 */
+.novel-fw-drag-handle {
+    cursor: grab;
+    touch-action: none;
+    -webkit-touch-callout: none;
+}
+.novel-floating-window.is-dragging .novel-fw-drag-handle { cursor: grabbing; }
+.novel-floating-window.is-dragging { user-select: none; }
+.novel-fw-grip {
+    font-size: 9px;
+    opacity: 0.45;
+    margin-right: -2px;
+}
+.novel-fw-pill:hover .novel-fw-grip { opacity: 0.8; }
 .novel-fw-pill {
     display: inline-flex;
     align-items: center;
@@ -963,19 +978,26 @@
     .novel-fw-panel { width: min(260px, calc(100vw - 16px)); }
 }
 
-/* ==================== v1.12.2 左下角魔法棒入口 ==================== */
-/* 沿用酒馆原生 editor_button 外观，仅追加入口状态灯（连载开启=金色，关闭=灰化） */
-#novel-wand-entry {
-    cursor: pointer;
+/* ==================== v1.13 左下角魔法棒菜单入口 ==================== */
+/* 注册在酒馆原生魔法棒下拉菜单 #extensionsMenu 中，外观沿用原生菜单项（list-group-item） */
+.novel-wand-item-label {
+    flex: 1 1 auto;
 }
-#novel-wand-entry i {
-    color: var(--SmartThemeEmColor, #888);
-    transition: color 0.2s ease, text-shadow 0.2s ease;
+.novel-wand-item-state {
+    margin-left: auto;
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: var(--SmartThemeEmColor, #999);
+    white-space: nowrap;
+    align-self: center;
 }
-#novel-wand-entry:hover i { color: var(--SmartThemeEmColor, #ddd); }
-#novel-wand-entry.is-active i {
+.novel-wand-item-state.is-on {
+    background: rgba(255, 209, 102, 0.14);
+    border-color: rgba(255, 209, 102, 0.38);
     color: #ffd166;
-    text-shadow: 0 0 8px rgba(255, 209, 102, 0.55);
 }
 
 /* ==================== v1.12.2 过滤预览弹窗重构（统计栏 + 左右对照） ==================== */
@@ -1125,4 +1147,23 @@
     .novel-mv-text { max-height: 40vh; }
     .novel-mv-col.is-raw .novel-mv-text { max-height: 26vh; }
     .novel-modal-preview { width: 100%; }
+}
+
+/* ==================== v1.13 设置弹窗（脱离酒馆「扩展程序」抽屉） ==================== */
+/* 面板本体迁入 body 级弹窗，字号沿用原抽屉风格（原 `#id .novel-drawer-inner` 选择器已失效） */
+#auto-save-to-txt-settings { font-size: 13px; }
+#novel_settings_body { padding: 0; }
+.novel-modal-body-settings { padding: 14px 16px; }
+.novel-modal-settings { width: min(760px, 100%); max-height: 86vh; }
+.novel-modal-ver { font-weight: 400; font-size: 11px; opacity: 0.6; margin-left: 4px; }
+.novel-modal-status { font-size: 11px; opacity: 0.85; }
+
+/* 层级：悬浮窗 < 设置弹窗 < 过滤预览弹窗（预览可从设置弹窗 / 悬浮窗 / 楼层工具条任一处唤起） */
+#novel_settings_modal { z-index: 1000015; }
+#novel_preview_modal { z-index: 1000025; }
+
+@media (max-width: 768px) {
+    .novel-modal-body-settings { padding: 10px 12px; }
+    .novel-modal-settings { max-height: 92vh; }
+    .novel-modal-settings .novel-modal-header { flex-wrap: wrap; }
 }

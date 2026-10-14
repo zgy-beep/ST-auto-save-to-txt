@@ -2,17 +2,21 @@
  * UI 接线与递归守卫回归测试
  * 运行方式: node test/test-ui-wiring.js
  *
- * 背景：v1.12.1 曾因全局替换把 refreshNovelToolbars() 内部的调用替换成自身，
- * 造成无限递归（每次保存/切聊天都栈溢出，UI 刷新全线失效）。
- * 本测试从 index.js 抽取真实源码做结构断言 + 对 analyzeRemovedContent 做行为断言，
- * 防止同类事故复发。
+ * 覆盖历史事故与 v1.13 入口重构：
+ *  - v1.12.1 曾因全局替换把 refreshNovelToolbars() 内部的调用替换成自身，造成无限递归
+ *  - v1.12.2 把入口误插到发送按钮旁（#send_but_holder），魔法棒菜单未生效
+ *  - v1.13 设置面板迁出酒馆「扩展程序」抽屉，改为魔法棒菜单 + body 级弹窗 + 可拖拽悬浮窗
+ * 本测试从 index.js / style.css 抽取真实源码做结构与行为断言。
  */
 
 const fs = require('fs');
 const path = require('path');
 
-const INDEX_PATH = path.join(__dirname, '..', 'index.js');
+const ROOT = path.join(__dirname, '..');
+const INDEX_PATH = path.join(ROOT, 'index.js');
+const CSS_PATH = path.join(ROOT, 'style.css');
 const src = fs.readFileSync(INDEX_PATH, 'utf8');
+const css = fs.readFileSync(CSS_PATH, 'utf8');
 
 let pass = 0;
 let fail = 0;
@@ -39,25 +43,64 @@ const refreshBody = refreshFn ? refreshFn.slice(refreshFn.indexOf('{')) : '';
 check('函数体内不含自身调用（防无限递归）', /refreshNovelToolbars\s*\(/.test(refreshBody), false);
 check('函数体调用 refreshLatestToolbar', /refreshLatestToolbar\s*\(/.test(refreshFn || ''), true);
 check('函数体调用 refreshFloatingWindow', /refreshFloatingWindow\s*\(/.test(refreshFn || ''), true);
+check('函数体调用 injectWandEntry', /injectWandEntry\s*\(/.test(refreshFn || ''), true);
 check('函数体调用 syncWandEntryState', /syncWandEntryState\s*\(/.test(refreshFn || ''), true);
 
-console.log('\n=== ② 关键函数与设置项存在性 ===');
-for (const fn of ['injectWandEntry', 'syncWandEntryState', 'openFullSettings', 'analyzeRemovedContent', 'refreshFloatingWindow']) {
+console.log('\n=== ② 入口架构（v1.13：魔法棒菜单 + 悬浮窗，不再进扩展抽屉）===');
+for (const fn of ['injectWandEntry', 'syncWandEntryState', 'openFullSettings', 'ensureSettingsModal',
+    'openNovelSettingsModal', 'closeNovelSettingsModal', 'ensurePreviewModal',
+    'bindFloatingWindowDrag', 'onFwPointerMove', 'onFwPointerUp', 'applyFloatPos', 'clampFloatPos']) {
     check(`${fn} 已定义`, src.includes(`function ${fn}(`), true);
 }
-check('DEFAULT_SETTINGS 含 show_floating_window', src.includes('show_floating_window:'), true);
-check('DEFAULT_SETTINGS 含 floating_window_collapsed', src.includes('floating_window_collapsed:'), true);
-check('魔法棒入口容器 id 存在（novel-wand-entry）', src.includes("'novel-wand-entry'"), true);
-check('启动轮询兜底逻辑存在', /wandRetryTimer/.test(src), true);
+check('魔法棒菜单项挂在 #extensionsMenu', /getElementById\('extensionsMenu'\)/.test(src), true);
+check('菜单项 id 为 novel-wand-menu-item', src.includes("'novel-wand-menu-item'"), true);
+check('菜单项使用酒馆官方图标类 extensionsMenuExtensionButton', src.includes('extensionsMenuExtensionButton'), true);
+check('不再渲染进酒馆扩展抽屉', /getElementById\('extensions_settings'\)/.test(src), false);
+check('设置面板挂到独立的设置弹窗容器', src.includes("querySelector('#novel_settings_body')"), true);
+check('预览弹窗独立挂 body（不再嵌在面板内）',
+    /function ensurePreviewModal/.test(src) && !/panel\.querySelector\('#novel_preview_modal'\)/.test(src), true);
+check('旧入口残留已清除（send_but_holder / novel-wand-entry）',
+    /send_but_holder|novel-wand-entry/.test(src), false);
+check('启动轮询兜底逻辑存在（uiRetryTimer）', /uiRetryTimer/.test(src), true);
+check('悬浮窗默认开启（主入口之一）', src.includes('show_floating_window: true'), true);
+check('悬浮窗位置持久化字段 float_pos', src.includes('float_pos:'), true);
+check('老用户一次性迁移标记 ui_v113_migrated', src.includes('ui_v113_migrated'), true);
 
-console.log('\n=== ③ 新版弹窗结构（旧 id 已下线）===');
+console.log('\n=== ③ 悬浮窗拖拽与展开行为 ===');
+const dragFn = extractFn('bindFloatingWindowDrag') || '';
+check('拖拽把手绑定 pointerdown', /pointerdown/.test(dragFn), true);
+check('拖拽把手避让按钮/输入框', /closest\('button, input/.test(dragFn), true);
+const moveFn = extractFn('onFwPointerMove') || '';
+check('4px 阈值区分「点击展开」与「拖动移动」', /Math\.abs\(dx\) < 4 && Math\.abs\(dy\) < 4/.test(moveFn), true);
+check('拖拽坐标经 clampFloatPos 夹取（拖不出屏幕）', /clampFloatPos\(fwDrag\.startLeft/.test(moveFn), true);
+const upFn = extractFn('onFwPointerUp') || '';
+check('拖动结束写入 float_pos 并持久化', /settings\.float_pos = \{/.test(upFn) && /saveSettingsDebounced/.test(upFn), true);
+check('拖动后抑制补发的 click（fwLastDragAt）', /fwLastDragAt = Date\.now\(\)/.test(upFn), true);
+const pillClick = (src.match(/novel_fw_pill'\)\.addEventListener\('click'[\s\S]{0,220}/) || [''])[0];
+check('药丸点击含拖动守卫', /fwLastDragAt/.test(pillClick), true);
+check('拖拽状态只绑一次 document 监听（fwDragBound）', /fwDragBound/.test(dragFn), true);
+check('窗口使用 column-reverse 向上展开', /\.novel-floating-window \{[\s\S]*?column-reverse/.test(css), true);
+check('拖拽把手禁用触摸滚动（touch-action: none）', /\.novel-fw-drag-handle \{[\s\S]*?touch-action: none/.test(css), true);
+check('悬浮窗为 fixed 定位', /\.novel-floating-window \{[\s\S]*?position: fixed/.test(css), true);
+check('启动即渲染悬浮窗（init 调用 refreshNovelToolbars）', /seedLastSavedSignature\(\);[\s\S]{0,400}refreshNovelToolbars\(\)/.test(src), true);
+
+console.log('\n=== ④ 弹窗定位与层级 ===');
+check('positionOverlay 具备 fixed 退化兜底',
+    /Math\.abs\(rect\.top\) > 1 \|\| Math\.abs\(rect\.left\) > 1/.test(src), true);
+check('预览弹窗层级高于设置弹窗',
+    /#novel_preview_modal \{ z-index: 1000025/.test(css) && /#novel_settings_modal \{ z-index: 1000015/.test(css), true);
+check('Esc 关闭逻辑只绑一次且预览优先', /novelEscBound/.test(src) && /bindNovelEscClose/.test(src), true);
+
+console.log('\n=== ⑤ 新版弹窗结构（旧 id 已下线）===');
 check('统计栏容器 novel_modal_statbar', src.includes('id="novel_modal_statbar"'), true);
 check('入书正文列 novel_modal_clean', src.includes('id="novel_modal_clean"'), true);
 check('原始回复列 novel_modal_raw', src.includes('id="novel_modal_raw"'), true);
 check('头部徽标 novel_modal_speaker', src.includes('id="novel_modal_speaker"'), true);
 check('旧版单栏 body 已移除', src.includes('novel_modal_body'), false);
+check('设置弹窗容器 novel_settings_body', src.includes('id="novel_settings_body"'), true);
+check('设置弹窗头部状态位 novel_header_status', src.includes('id="novel_header_status"'), true);
 
-console.log('\n=== ④ analyzeRemovedContent 行为断言（真实源码执行）===');
+console.log('\n=== ⑥ analyzeRemovedContent 行为断言（真实源码执行）===');
 const escapeFn = extractFn('escapeHtml');
 const parseFn = extractFn('parseTagList');
 const analyzeFn = extractFn('analyzeRemovedContent');
@@ -91,6 +134,26 @@ if (escapeFn && parseFn && analyzeFn) {
 
     const r3 = analyzeRemovedContent('', settings);
     check('空输入安全返回', r3.removedCount === 0 && r3.html === '', true);
+}
+
+console.log('\n=== ⑦ 悬浮窗坐标夹取行为（真实源码执行）===');
+const clampFn = extractFn('clampFloatPos');
+check('clampFloatPos 可抽取', !!clampFn, true);
+if (clampFn) {
+    const clamp = new Function(`${clampFn}\nreturn clampFloatPos;`)();
+    const win = { innerWidth: 1000, innerHeight: 800 };
+    const g = globalThis.window;
+    globalThis.window = win;
+    try {
+        let c = clamp(-50, -20, 200, 100);
+        check('左上越界被夹回 0', c.left === 0 && c.top === 0, true);
+        c = clamp(5000, 5000, 200, 100);
+        check('右下越界被夹到可视区内', c.left === 800 && c.top === 700, true);
+        c = clamp(120, 340, 200, 100);
+        check('正常坐标原样保留', c.left === 120 && c.top === 340, true);
+    } finally {
+        globalThis.window = g;
+    }
 }
 
 console.log(`\nUI 接线测试结果: 通过: ${pass}, 失败: ${fail}`);
