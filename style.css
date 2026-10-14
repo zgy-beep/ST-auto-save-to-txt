@@ -962,3 +962,167 @@
     .novel-floating-window { bottom: 8px; right: 8px; }
     .novel-fw-panel { width: min(260px, calc(100vw - 16px)); }
 }
+
+/* ==================== v1.12.2 左下角魔法棒入口 ==================== */
+/* 沿用酒馆原生 editor_button 外观，仅追加入口状态灯（连载开启=金色，关闭=灰化） */
+#novel-wand-entry {
+    cursor: pointer;
+}
+#novel-wand-entry i {
+    color: var(--SmartThemeEmColor, #888);
+    transition: color 0.2s ease, text-shadow 0.2s ease;
+}
+#novel-wand-entry:hover i { color: var(--SmartThemeEmColor, #ddd); }
+#novel-wand-entry.is-active i {
+    color: #ffd166;
+    text-shadow: 0 0 8px rgba(255, 209, 102, 0.55);
+}
+
+/* ==================== v1.12.2 过滤预览弹窗重构（统计栏 + 左右对照） ==================== */
+.novel-modal-preview { width: min(860px, 100%); }
+
+/* 头部徽标行：角色 / 楼层 / 草稿态 */
+.novel-modal-header-meta { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.novel-mv-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 400;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--SmartThemeEmColor, #ccc);
+    white-space: nowrap;
+}
+.novel-mv-badge.is-draft {
+    background: rgba(255, 209, 102, 0.12);
+    border-color: rgba(255, 209, 102, 0.35);
+    color: #ffd166;
+}
+
+/* 统计栏：字数变化 + 过滤率 + 剔除标签明细 */
+.novel-mv-statbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 12px;
+    color: var(--SmartThemeEmColor, #bbb);
+}
+.novel-mv-stat b { font-size: 14px; color: var(--SmartThemeEmColor, #eee); margin-right: 2px; }
+.novel-mv-stat.is-clean b { color: #7fd97f; }
+.novel-mv-stat.is-removed b { color: #ff9d76; }
+.novel-mv-arrow { opacity: 0.45; font-size: 10px; }
+.novel-mv-stat-sep { width: 1px; height: 14px; background: rgba(255, 255, 255, 0.15); }
+.novel-mv-stats-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.novel-mv-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: rgba(255, 157, 118, 0.12);
+    border: 1px solid rgba(255, 157, 118, 0.25);
+    color: #ffb59d;
+    white-space: nowrap;
+}
+.novel-mv-tag code { font-size: 10px; background: none; padding: 0; }
+.novel-mv-tag.is-warn {
+    background: rgba(255, 209, 102, 0.12);
+    border-color: rgba(255, 209, 102, 0.35);
+    color: #ffd166;
+}
+.novel-mv-tag.is-ok {
+    background: rgba(127, 217, 127, 0.1);
+    border-color: rgba(127, 217, 127, 0.28);
+    color: #9fe09f;
+}
+.novel-mv-hint { font-size: 11px; opacity: 0.55; }
+
+/* 左右对照主体 */
+.novel-mv-body { padding: 0; }
+.novel-mv-grid {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 0;
+    min-height: 0;
+}
+.novel-mv-col { display: flex; flex-direction: column; min-width: 0; }
+.novel-mv-col + .novel-mv-col { border-left: 1px solid rgba(255, 255, 255, 0.1); }
+.novel-mv-col-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.03);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.novel-mv-col.is-clean .novel-mv-col-title { color: #9fe09f; }
+.novel-mv-col.is-raw .novel-mv-col-title { color: var(--SmartThemeEmColor, #aaa); }
+.novel-mv-count { margin-left: auto; font-size: 11px; font-weight: 400; opacity: 0.65; }
+.novel-mv-legend { font-size: 10px; font-weight: 400; opacity: 0.6; display: inline-flex; align-items: center; gap: 4px; }
+.novel-mv-text {
+    padding: 12px 14px;
+    overflow-y: auto;
+    max-height: 58vh;
+    font-size: 13px;
+    line-height: 1.85;
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+.novel-mv-col.is-clean .novel-mv-text {
+    color: var(--SmartThemeEmColor, #e8e8e8);
+    font-size: 14px;
+}
+.novel-mv-col.is-raw .novel-mv-text {
+    color: var(--SmartThemeEmColor, #999);
+    font-size: 12px;
+    line-height: 1.7;
+}
+/* 被剔除内容高亮 */
+.novel-mv-removed {
+    background: rgba(255, 99, 71, 0.22);
+    border-bottom: 1px dashed rgba(255, 99, 71, 0.55);
+    border-radius: 2px;
+    padding: 0 1px;
+    color: #ffb0a0;
+}
+/* 空态 / 警告卡片 */
+.novel-mv-alert {
+    display: flex;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 13px;
+}
+.novel-mv-alert > i { font-size: 18px; margin-top: 2px; opacity: 0.8; }
+.novel-mv-alert b { display: block; margin-bottom: 4px; }
+.novel-mv-alert p { margin: 0; font-size: 12px; opacity: 0.7; line-height: 1.6; }
+.novel-mv-alert.is-warn {
+    background: rgba(255, 209, 102, 0.08);
+    border-color: rgba(255, 209, 102, 0.3);
+}
+.novel-mv-alert.is-warn > i { color: #ffd166; }
+
+/* 窄屏：对照列纵向堆叠，原始列限高可折叠滚动 */
+@media (max-width: 768px) {
+    .novel-mv-grid { grid-template-columns: 1fr; }
+    .novel-mv-col + .novel-mv-col { border-left: none; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+    .novel-mv-text { max-height: 40vh; }
+    .novel-mv-col.is-raw .novel-mv-text { max-height: 26vh; }
+    .novel-modal-preview { width: 100%; }
+}

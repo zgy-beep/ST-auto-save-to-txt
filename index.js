@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.12.1',            // 扩展版本号
+    version: '1.12.2',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -259,6 +259,56 @@ function openFullSettings() {
     panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// ⑥ 左下角魔法棒入口：与酒馆发送栏原生按钮（回形针/魔法棒同排）并列，
+//    点击直达完整设置面板；入口指示灯随连载开关亮灭，任何页面位置一键可达
+function injectWandEntry() {
+    if (typeof document === 'undefined') return false;
+    if (document.getElementById('novel-wand-entry')) return true;
+
+    const btn = document.createElement('div');
+    btn.id = 'novel-wand-entry';
+    btn.className = 'editor_button';
+    btn.title = '小说连载阅读 · 点击打开设置面板';
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
+    btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i>';
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openFullSettings();
+    });
+    btn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openFullSettings();
+        }
+    });
+
+    // 优先落在发送栏左侧按钮列（与回形针/魔法棒同排）；发送栏在但按钮列不在时挂发送栏；
+    // 两者都不在说明酒馆尚未渲染完成，返回 false 由启动轮梢兜底重试
+    const holder = document.getElementById('send_but_holder');
+    if (holder) {
+        holder.appendChild(btn);
+        syncWandEntryState();
+        return true;
+    }
+    const sendForm = document.getElementById('send_form');
+    if (sendForm) {
+        sendForm.insertBefore(btn, sendForm.firstChild);
+        syncWandEntryState();
+        return true;
+    }
+    return false;
+}
+
+// 魔法棒入口状态灯：连载开启时金色高亮，关闭时灰化（与悬浮窗药丸语义一致）
+function syncWandEntryState() {
+    if (typeof document === 'undefined') return;
+    const btn = document.getElementById('novel-wand-entry');
+    if (!btn) return;
+    btn.classList.toggle('is-active', !!getSettings().enabled);
+}
+
 // ⑤ 右下角悬浮快捷窗：药丸常显（点击展开面板），折叠态持久化；
 //    与内嵌工具条互补——不依赖任何楼层 DOM，全局随时可达；无 DOM 环境（node 测试）直接跳过
 function anchorFloatingWindow() {
@@ -396,10 +446,11 @@ function refreshFloatingWindow() {
     anchorFloatingWindow();
 }
 
-// 连载界面 surfaces 统一刷新：楼层内嵌工具条 + 右下角悬浮窗（含章节进度同步）
+// 连载界面 surfaces 统一刷新：楼层内嵌工具条 + 右下角悬浮窗 + 左下角魔法棒入口指示灯
 function refreshNovelToolbars() {
-    refreshNovelToolbars();
+    refreshLatestToolbar();
     refreshFloatingWindow();
+    syncWandEntryState();
 }
 
 /**
@@ -1522,7 +1573,7 @@ function toggleTagInList(tag, action) {
 }
 
 // 供弹窗展示用的最近一次预览数据（完整正文，不截断）
-let lastFilterPreview = { rawLength: 0, cleaned: '', speaker: '', floor: 0, whitelistMissed: false, isDraft: false };
+let lastFilterPreview = { raw: '', rawLength: 0, cleaned: '', speaker: '', floor: 0, whitelistMissed: false, isDraft: false };
 
 /**
  * 过滤效果预览：刷新面板中"查看预览"按钮的状态与字数统计，正文全文在点击弹窗中展示
@@ -1546,7 +1597,7 @@ function renderFilterPreview() {
         btn.disabled = true;
         if (labelEl) labelEl.textContent = '暂无 AI 回复可供预览';
         if (statEl) statEl.textContent = '';
-        lastFilterPreview = { rawLength: 0, cleaned: '', speaker: '', floor: 0, whitelistMissed: false, isDraft: false };
+        lastFilterPreview = { raw: '', rawLength: 0, cleaned: '', speaker: '', floor: 0, whitelistMissed: false, isDraft: false };
         return;
     }
 
@@ -1568,6 +1619,7 @@ function renderFilterPreview() {
     const isDraft = !!(settings.buffer_latest_message && targetIndex > lastSettledSavedIndex);
 
     lastFilterPreview = {
+        raw,
         rawLength: raw.length,
         cleaned,
         speaker: target.name || '旁白',
@@ -1583,27 +1635,143 @@ function renderFilterPreview() {
 }
 
 /**
- * 打开过滤效果预览弹窗：完整展示过滤后正文 + 字数对比，支持点遮罩 / 右上角 / Esc 关闭
+ * 分析原始回复中被引擎剔除的内容（供预览弹窗"信息显示"使用）：
+ * 分类统计黑名单标签块、思维链类标签、HTML 注释/图片标记的命中次数，
+ * 并返回带 <mark> 高亮的原文 HTML（剔除部分高亮，保留部分原样转义）
+ */
+function analyzeRemovedContent(raw, settings) {
+    const result = { html: '', removedTags: [], removedCount: 0, removedChars: 0 };
+    if (!raw) return result;
+
+    const patterns = [];
+    const excludeTags = parseTagList(settings.exclude_tags);
+    const tagCount = new Map();
+
+    for (const t of excludeTags) {
+        const safeT = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        patterns.push(new RegExp(`<\\s*${safeT}[^>]*>[\\s\\S]*?<\\/\\s*${safeT}\\s*>`, 'gi'));
+        tagCount.set(t.toLowerCase(), 0);
+    }
+    // 思维链/草稿/规划类泛化标签（与 cleanNovelText 阶段零同规则）
+    const genericAux = /<\s*([a-zA-Z0-9_\-~.:#]*(?:think|thought|reasoning|cot|scratchpad|reflection|inner_thought|analysis|plan)[a-zA-Z0-9_\-~.:#]*)[^>]*>[\s\S]*?<\/\s*\1\s*>/gi;
+    patterns.push(genericAux);
+    // HTML 隐藏注释与 Markdown/img 图片标记
+    patterns.push(/<!--[\s\S]*?-->/g);
+    patterns.push(/!\[.*?\]\(.*?\)/g);
+    patterns.push(/<img[^>]*>/gi);
+
+    const combined = new RegExp(patterns.map(p => `(?:${p.source})`).join('|'), 'gi');
+    let html = '';
+    let lastIndex = 0;
+    let m;
+    while ((m = combined.exec(raw)) !== null) {
+        html += escapeHtml(raw.slice(lastIndex, m.index));
+        html += `<mark class="novel-mv-removed">${escapeHtml(m[0])}</mark>`;
+        lastIndex = m.index + m[0].length;
+        result.removedCount++;
+        result.removedChars += m[0].length;
+        // 归类计数：思维链族按通用名计，其余按标签名计
+        const tagMatch = m[0].match(/^<\s*([a-zA-Z0-9_\-~.:#]+)/i);
+        if (tagMatch) {
+            const name = tagMatch[1].toLowerCase();
+            const isGeneric = /(?:think|thought|reasoning|cot|scratchpad|reflection|inner_thought|analysis|plan)/.test(name);
+            const key = isGeneric ? 'think族' : name;
+            tagCount.set(key, (tagCount.get(key) || 0) + 1);
+        } else {
+            tagCount.set('注释/图片', (tagCount.get('注释/图片') || 0) + 1);
+        }
+        if (m.index === combined.lastIndex) combined.lastIndex++; // 防空匹配死循环
+    }
+    html += escapeHtml(raw.slice(lastIndex));
+    result.html = html;
+    result.removedTags = [...tagCount.entries()].filter(([, c]) => c > 0).map(([name, count]) => ({ name, count }));
+    return result;
+}
+
+/**
+ * 打开过滤效果预览弹窗：左右对照展示「入书正文 vs 原始回复」，
+ * 顶部统计栏呈现字数变化、过滤率与剔除标签明细，支持点遮罩 / 右上角 / Esc 关闭
  */
 function openFilterPreviewModal() {
     if (typeof document === 'undefined') return;
     const overlay = document.getElementById('novel_preview_modal');
     if (!overlay) return;
-    const body = document.getElementById('novel_modal_body');
-    const stat = document.getElementById('novel_modal_stat');
-    if (stat) {
-        stat.textContent = lastFilterPreview.cleaned
-            ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor}${lastFilterPreview.isDraft ? '（草稿未定稿）' : ''} ｜ 原始 ${lastFilterPreview.rawLength} 字符 → 入书 ${lastFilterPreview.cleaned.length} 字`
-            : (lastFilterPreview.speaker ? `${lastFilterPreview.speaker} · 原楼层 ${lastFilterPreview.floor}${lastFilterPreview.isDraft ? '（草稿未定稿）' : ''}` : '');
-    }
-    if (body) {
-        const warnHtml = lastFilterPreview.whitelistMissed
-            ? '<div class="novel-tag-empty" style="color: #f39c12; margin-bottom: 6px;">⚠️ 白名单标签在当前消息中一个都没匹配到——引擎已<b>整篇保留</b>原文。请检查白名单拼写，或直接用上方检测器点选标签。</div>'
+    const settings = getSettings();
+
+    // ---- 头部徽标：说话角色 / 原楼层 / 草稿态 ----
+    const speakerEl = document.getElementById('novel_modal_speaker');
+    const floorEl = document.getElementById('novel_modal_floor');
+    const draftEl = document.getElementById('novel_modal_draft');
+    if (speakerEl) {
+        speakerEl.innerHTML = lastFilterPreview.speaker
+            ? `<i class="fa-solid fa-user"></i> ${escapeHtml(lastFilterPreview.speaker)}`
             : '';
-        body.innerHTML = warnHtml + (lastFilterPreview.cleaned
-            ? escapeHtml(lastFilterPreview.cleaned).replace(/\n/g, '<br>')
-            : '<div class="novel-tag-empty" style="color: #f39c12;">过滤后无正文可入书——请检查白名单拼写，或确认正文是否被黑名单全部剔除。</div>');
+        speakerEl.style.display = lastFilterPreview.speaker ? '' : 'none';
     }
+    if (floorEl) {
+        floorEl.innerHTML = lastFilterPreview.floor
+            ? `<i class="fa-solid fa-layer-group"></i> 原楼层 ${lastFilterPreview.floor}`
+            : '';
+        floorEl.style.display = lastFilterPreview.floor ? '' : 'none';
+    }
+    if (draftEl) draftEl.style.display = lastFilterPreview.isDraft ? '' : 'none';
+
+    // ---- 统计栏：字数变化 + 过滤率 + 剔除标签明细 ----
+    const statbar = document.getElementById('novel_modal_statbar');
+    if (statbar) {
+        if (!lastFilterPreview.cleaned && !lastFilterPreview.speaker) {
+            statbar.innerHTML = '<span class="novel-mv-hint">当前没有可预览的 AI 回复</span>';
+        } else {
+            const rawLen = lastFilterPreview.rawLength;
+            const cleanLen = lastFilterPreview.cleaned.length;
+            const removed = Math.max(0, rawLen - cleanLen);
+            const rate = rawLen > 0 ? Math.round((removed / rawLen) * 100) : 0;
+            const analysis = analyzeRemovedContent(lastFilterPreview.raw, settings);
+            const tagHtml = analysis.removedTags.length
+                ? analysis.removedTags.map(t => `<span class="novel-mv-tag"><code>&lt;${escapeHtml(t.name)}&gt;</code>×${t.count}</span>`).join('')
+                : '<span class="novel-mv-hint">本次无需剔除的标签</span>';
+            const wlHtml = lastFilterPreview.whitelistMissed
+                ? '<span class="novel-mv-tag is-warn"><i class="fa-solid fa-triangle-exclamation"></i> 白名单未命中任何标签，已整篇保留</span>'
+                : (parseTagList(settings.include_tags).length
+                    ? `<span class="novel-mv-tag is-ok"><i class="fa-solid fa-filter"></i> 白名单：${escapeHtml(settings.include_tags)}</span>`
+                    : '');
+            statbar.innerHTML = `
+                <span class="novel-mv-stat"><b>${rawLen}</b> 字符原始</span>
+                <i class="fa-solid fa-arrow-right novel-mv-arrow"></i>
+                <span class="novel-mv-stat is-clean"><b>${cleanLen}</b> 字入书</span>
+                <span class="novel-mv-stat ${removed > 0 ? 'is-removed' : ''}">剔除 ${removed} 字${rate > 0 ? `（${rate}%）` : ''}</span>
+                <span class="novel-mv-stat-sep"></span>
+                <span class="novel-mv-stats-tags">${tagHtml}${wlHtml}</span>
+            `;
+        }
+    }
+
+    // ---- 对照主体：左入书正文 / 右原始回复（剔除部分高亮） ----
+    const cleanBox = document.getElementById('novel_modal_clean');
+    const rawBox = document.getElementById('novel_modal_raw');
+    const cleanCount = document.getElementById('novel_modal_clean_count');
+    const rawCount = document.getElementById('novel_modal_raw_count');
+    if (cleanCount) cleanCount.textContent = lastFilterPreview.cleaned ? `${lastFilterPreview.cleaned.length} 字` : '';
+    if (rawCount) rawCount.textContent = lastFilterPreview.rawLength ? `${lastFilterPreview.rawLength} 字符` : '';
+
+    if (cleanBox) {
+        if (lastFilterPreview.cleaned) {
+            cleanBox.innerHTML = escapeHtml(lastFilterPreview.cleaned).replace(/\n/g, '<br>');
+        } else {
+            cleanBox.innerHTML = lastFilterPreview.speaker
+                ? '<div class="novel-mv-alert is-warn"><i class="fa-solid fa-triangle-exclamation"></i><div><b>过滤后无正文可入书</b><p>请检查白名单标签拼写，或确认正文是否被黑名单全部剔除。不确定时把白名单完全留空。</p></div></div>'
+                : '<div class="novel-mv-alert"><i class="fa-solid fa-circle-info"></i><div><b>暂无 AI 回复</b><p>先在聊天中产生一条 AI 回复，再来查看过滤效果。</p></div></div>';
+        }
+    }
+    if (rawBox) {
+        if (lastFilterPreview.raw) {
+            const analysis = analyzeRemovedContent(lastFilterPreview.raw, settings);
+            rawBox.innerHTML = analysis.html.replace(/\n/g, '<br>') || '<span class="novel-mv-hint">（空）</span>';
+        } else {
+            rawBox.innerHTML = '<span class="novel-mv-hint">（暂无内容）</span>';
+        }
+    }
+
     // 健壮定位：部分环境（ancestor transform 等）fixed 会退化为 absolute 跑到文档顶部，
     // 改用绝对坐标显式锚定当前可视区（scrollY 补偿），任何滚动位置都贴在用户眼前
     overlay.style.position = 'absolute';
@@ -1980,17 +2148,31 @@ async function renderSettingsUI(cachedStatus = null) {
                     </div>
                 </div>
 
-                <!-- 过滤效果预览弹窗（完整正文，点遮罩 / 右上角 / Esc 均可关闭） -->
+                <!-- 过滤效果预览弹窗（左右对照 + 统计栏，点遮罩 / 右上角 / Esc 均可关闭） -->
                 <div id="novel_preview_modal" class="novel-modal-overlay" style="display: none;">
-                    <div class="novel-modal" role="dialog" aria-modal="true">
+                    <div class="novel-modal novel-modal-preview" role="dialog" aria-modal="true" aria-label="过滤效果预览">
                         <div class="novel-modal-header">
-                            <b><i class="fa-solid fa-eye"></i> 过滤效果预览（最近一条 AI 回复）</b>
-                            <span style="display: inline-flex; align-items: center; gap: 10px;">
-                                <small id="novel_modal_stat" class="novel-preview-stat"></small>
+                            <b><i class="fa-solid fa-eye"></i> 过滤效果预览</b>
+                            <span class="novel-modal-header-meta">
+                                <span class="novel-mv-badge" id="novel_modal_speaker"></span>
+                                <span class="novel-mv-badge" id="novel_modal_floor"></span>
+                                <span class="novel-mv-badge is-draft" id="novel_modal_draft" style="display: none;"><i class="fa-solid fa-pen-ruler"></i> 草稿未定稿</span>
                                 <button type="button" id="novel_modal_close" class="novel-chip-btn" title="关闭预览"><i class="fa-solid fa-xmark"></i></button>
                             </span>
                         </div>
-                        <div id="novel_modal_body" class="novel-modal-body"></div>
+                        <div class="novel-mv-statbar" id="novel_modal_statbar"></div>
+                        <div class="novel-modal-body novel-mv-body">
+                            <div class="novel-mv-grid">
+                                <section class="novel-mv-col is-clean">
+                                    <div class="novel-mv-col-title"><i class="fa-solid fa-book-open"></i> 入书正文<span class="novel-mv-count" id="novel_modal_clean_count"></span></div>
+                                    <div id="novel_modal_clean" class="novel-mv-text"></div>
+                                </section>
+                                <section class="novel-mv-col is-raw">
+                                    <div class="novel-mv-col-title"><i class="fa-solid fa-code"></i> 原始回复<span class="novel-mv-count" id="novel_modal_raw_count"></span><span class="novel-mv-legend"><mark class="novel-mv-removed"></mark> 高亮 = 被剔除</span></div>
+                                    <div id="novel_modal_raw" class="novel-mv-text"></div>
+                                </section>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2524,6 +2706,17 @@ jQuery(async () => {
     }, 500);
 
     seedLastSavedSignature();
+
+    // 左下角魔法棒入口：即插即用 + 短轮询兜底（酒馆慢渲染时也能落到发送栏按钮列）
+    injectWandEntry();
+    let wandRetries = 0;
+    const wandRetryTimer = setInterval(() => {
+        if (document.getElementById('novel-wand-entry') || ++wandRetries > 20) {
+            clearInterval(wandRetryTimer);
+        } else {
+            injectWandEntry();
+        }
+    }, 500);
 
     // 酒馆助手 (JS-Slash-Runner) 软依赖桥接：APP_READY 后探测 + 1s 轮询最多 15 次兜底
     initTavernHelperBridge();
