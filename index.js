@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.14.1',            // 扩展版本号
+    version: '1.15.0',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -2020,10 +2020,11 @@ function ensureSettingsModal() {
     overlay.innerHTML = `
         <div class="novel-modal novel-modal-settings" role="dialog" aria-modal="true" aria-label="小说连载阅读设置">
             <div class="novel-modal-header">
-                <b><i class="fa-solid fa-book-bookmark"></i> 小说连载阅读 <span class="novel-modal-ver">v${DEFAULT_SETTINGS.version}</span></b>
+                <b class="novel-modal-title"><i class="fa-solid fa-book-bookmark"></i>小说连载阅读<span class="novel-modal-ver">v${DEFAULT_SETTINGS.version}</span></b>
                 <span class="novel-modal-header-meta">
                     <span id="novel_header_status" class="novel-modal-status"></span>
-                    <button type="button" id="novel_settings_close" class="novel-chip-btn" title="关闭设置"><i class="fa-solid fa-xmark"></i></button>
+                    <button type="button" id="novel_settings_preview" class="novel-icon-btn is-accent" title="查看最近一条 AI 回复的过滤效果"><i class="fa-solid fa-eye"></i></button>
+                    <button type="button" id="novel_settings_close" class="novel-icon-btn" title="关闭设置"><i class="fa-solid fa-xmark"></i></button>
                 </span>
             </div>
             <div class="novel-modal-body novel-modal-body-settings" id="novel_settings_body"></div>
@@ -2040,6 +2041,9 @@ function ensureSettingsModal() {
     });
     const closeBtn = overlay.querySelector('#novel_settings_close');
     if (closeBtn) closeBtn.addEventListener('click', closeNovelSettingsModal);
+    // 头部紫色强调按钮：直接唤起过滤效果预览（与参考图右侧主按钮同位）
+    const headerPreviewBtn = overlay.querySelector('#novel_settings_preview');
+    if (headerPreviewBtn) headerPreviewBtn.addEventListener('click', () => openFilterPreviewModal());
     bindNovelEscClose();
     return overlay;
 }
@@ -2081,12 +2085,12 @@ function ensurePreviewModal() {
     overlay.innerHTML = `
         <div class="novel-modal novel-modal-preview" role="dialog" aria-modal="true" aria-label="过滤效果预览">
             <div class="novel-modal-header">
-                <b><i class="fa-solid fa-eye"></i> 过滤效果预览</b>
+                <b class="novel-modal-title"><i class="fa-solid fa-eye"></i>过滤效果预览</b>
                 <span class="novel-modal-header-meta">
                     <span class="novel-mv-badge" id="novel_modal_speaker"></span>
                     <span class="novel-mv-badge" id="novel_modal_floor"></span>
                     <span class="novel-mv-badge is-draft" id="novel_modal_draft" style="display: none;"><i class="fa-solid fa-pen-ruler"></i> 草稿未定稿</span>
-                    <button type="button" id="novel_modal_close" class="novel-chip-btn" title="关闭预览"><i class="fa-solid fa-xmark"></i></button>
+                    <button type="button" id="novel_modal_close" class="novel-icon-btn" title="关闭预览"><i class="fa-solid fa-xmark"></i></button>
                 </span>
             </div>
             <div class="novel-mv-statbar" id="novel_modal_statbar"></div>

@@ -1203,3 +1203,578 @@
 /* 弹窗内滚动不穿透到背景页面（手机端尤其明显） */
 .novel-modal-overlay { overscroll-behavior: none; }
 .novel-modal-body { overscroll-behavior: contain; }
+
+/* ==========================================================================
+ * v1.15 视觉重设计：对齐参考图「深色石板 + 紫罗兰强调」设计语言
+ * --------------------------------------------------------------------------
+ * 设计规则：
+ *  ① 底色是深石板 (#161a24)，不用重边框、不用发光，层级只靠「发丝线 + 留白」建立
+ *  ② 结构靠「加粗标题 + 下方 1px 分隔线」表达，而不是给每块内容套一个盒子
+ *  ③ 文字三级：重点=纯白加粗 / 正文=浅灰 / 说明=深灰且更小
+ *  ④ 空态与提示一律用「虚线描边圆角卡」（参考图里的「还没有全局角色」）
+ *  ⑤ 强调色唯一：紫罗兰 #8b6dff，只给主操作、输入焦点环、开启态、选中态
+ *  ⑥ 语义色：成功 #4ade80 / 提醒 #fbbf24 / 危险 #f87171
+ * 作用域说明：本主题只接管酒馆之外的自有浮层（弹窗 / 悬浮入口 / 提示浮层），
+ *           聊天楼层内的工具条沿用酒馆主题变量，避免浅色主题下花屏。
+ * ========================================================================== */
+.novel-modal-overlay,
+.novel-floating-window,
+.novel-chip-tooltip {
+    --nv-bg: #161a24;
+    --nv-bg-2: #1c2130;
+    --nv-bg-3: #232939;
+    --nv-line: rgba(255, 255, 255, 0.07);
+    --nv-line-2: rgba(255, 255, 255, 0.12);
+    --nv-dash: rgba(255, 255, 255, 0.17);
+    --nv-text: #e9ecf3;
+    --nv-text-2: #98a1b3;
+    --nv-text-3: #6c7487;
+    --nv-accent: #8b6dff;
+    --nv-accent-2: #a997ff;
+    --nv-accent-bg: rgba(139, 109, 255, 0.14);
+    --nv-accent-line: rgba(139, 109, 255, 0.4);
+    --nv-ok: #4ade80;
+    --nv-warn: #fbbf24;
+    --nv-danger: #f87171;
+    --nv-radius: 12px;
+}
+
+/* ---------- 遮罩与弹窗外壳：去掉描边感，靠浮起阴影分层 ---------- */
+.novel-modal-overlay { background: rgba(6, 8, 14, 0.72); }
+.novel-modal {
+    background: var(--nv-bg);
+    border: 1px solid var(--nv-line-2);
+    border-radius: 16px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    color: var(--nv-text);
+}
+
+/* ---------- 头部：标题左对齐 + 右侧方形图标按钮（参考图右上角） ---------- */
+.novel-modal-header {
+    padding: 14px 16px;
+    gap: 10px;
+    border-bottom: 1px solid var(--nv-line);
+    background: transparent;
+}
+.novel-modal-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    color: var(--nv-text);
+}
+.novel-modal-title > i { color: var(--nv-accent-2); font-size: 15px; }
+.novel-modal-header-meta { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.novel-modal-ver {
+    margin-left: 2px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--nv-line);
+    color: var(--nv-text-3);
+    font-size: 11px;
+    font-weight: 500;
+    opacity: 1;
+}
+.novel-modal-status { color: var(--nv-text-2); font-size: 11.5px; }
+
+/* 方形图标按钮：34×34 圆角方块；is-accent 为紫罗兰强调按钮 */
+.novel-icon-btn {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--nv-line-2);
+    color: var(--nv-text-2);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.novel-icon-btn:hover { background: rgba(255, 255, 255, 0.1); color: var(--nv-text); }
+.novel-icon-btn:active { transform: scale(0.94); }
+.novel-icon-btn:focus-visible { outline: 2px solid var(--nv-accent); outline-offset: 2px; }
+.novel-icon-btn.is-accent {
+    background: var(--nv-accent-bg);
+    border-color: var(--nv-accent-line);
+    color: var(--nv-accent-2);
+}
+.novel-icon-btn.is-accent:hover { background: rgba(139, 109, 255, 0.24); color: #c9bcff; }
+
+/* ---------- 弹窗主体 ---------- */
+.novel-modal-body { color: var(--nv-text); }
+.novel-modal-body-settings { padding: 16px; }
+
+/* ---------- 顶部主开关卡：只用最淡的一层底，不做重盒子 ---------- */
+.novel-toggle-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--nv-line);
+    border-radius: var(--nv-radius);
+    padding: 12px 14px;
+}
+.novel-toggle-row .checkbox_label { color: var(--nv-text) !important; font-size: 13.5px; }
+.novel-toggle-row .checkbox_label span { color: var(--nv-text) !important; font-size: 13.5px !important; }
+.novel-toggle-row .checkbox_label.is-primary span { font-weight: 700; }
+.novel-toggle-row .checkbox_label.is-primary i { color: var(--nv-accent-2); }
+.novel-toggle-row .checkbox_label:not(.is-primary) i { color: var(--nv-text-3); }
+
+/* ---------- 分区：标题 + 发丝线，卡片底降到几乎不可见 ---------- */
+.novel-settings-grid .novel-section {
+    background: rgba(255, 255, 255, 0.026);
+    border: 1px solid var(--nv-line);
+    border-radius: var(--nv-radius);
+    padding: 14px;
+}
+/* 栅格里每个分区都是独立卡片，不再需要「相邻分区补分隔线」 */
+.novel-settings-grid .novel-section + .novel-section {
+    border-top: 1px solid var(--nv-line);
+    padding-top: 14px;
+}
+#auto-save-to-txt-settings .novel-section-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 0 12px;
+    padding: 0 0 10px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: var(--nv-text);
+    border-left: none;
+    border-bottom: 1px solid var(--nv-line);
+}
+#auto-save-to-txt-settings .novel-section-title i { color: var(--nv-accent-2); font-size: 13px; }
+
+/* ---------- 重点级文字（设置项名）：纯白加粗 ---------- */
+#auto-save-to-txt-settings .novel-label {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--nv-text);
+    opacity: 1;
+    letter-spacing: 0.2px;
+}
+#auto-save-to-txt-settings label.checkbox_label,
+#auto-save-to-txt-settings label.checkbox_label span { color: var(--nv-text) !important; }
+
+/* ---------- 说明级文字：更小更灰（不再靠 opacity 压暗，避免与浅色主题冲突） ---------- */
+#auto-save-to-txt-settings small {
+    display: block;
+    margin-top: 5px;
+    font-size: 11.5px !important;
+    line-height: 1.65 !important;
+    color: var(--nv-text-2) !important;
+    opacity: 1 !important;
+}
+#auto-save-to-txt-settings small b { color: var(--nv-text); font-weight: 600; }
+#auto-save-to-txt-settings small code,
+#auto-save-to-txt-settings code {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--nv-line);
+    color: var(--nv-accent-2);
+    border-radius: 5px;
+    padding: 1px 5px;
+}
+
+/* ---------- 表单控件：深色填底 + 紫色焦点环 ---------- */
+#auto-save-to-txt-settings .text_pole,
+#auto-save-to-txt-settings .novel-select {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--nv-line-2);
+    border-radius: 9px;
+    color: var(--nv-text);
+    font-size: 13px;
+    padding: 8px 10px;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+#auto-save-to-txt-settings .text_pole::placeholder { color: var(--nv-text-3); }
+#auto-save-to-txt-settings .text_pole:focus,
+#auto-save-to-txt-settings .novel-select:focus {
+    outline: none;
+    border-color: var(--nv-accent);
+    box-shadow: 0 0 0 3px var(--nv-accent-bg);
+}
+#auto-save-to-txt-settings .novel-select option { background: var(--nv-bg-2); color: var(--nv-text); }
+#auto-save-to-txt-settings input[type="checkbox"] { accent-color: var(--nv-accent); }
+#auto-save-to-txt-settings .novel-form-group { gap: 6px; }
+
+/* ---------- 按钮三级：主操作=紫罗兰实心 / 次操作=紫色描边 / 诊断=幽灵 ---------- */
+#auto-save-to-txt-settings .novel-btn {
+    height: 36px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 9px;
+    border: 1px solid var(--nv-line-2);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--nv-text);
+}
+#auto-save-to-txt-settings .novel-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
+#auto-save-to-txt-settings .novel-btn.btn-export {
+    background: var(--nv-accent);
+    border-color: var(--nv-accent);
+    color: #ffffff;
+}
+#auto-save-to-txt-settings .novel-btn.btn-export:hover {
+    background: #7c5cff;
+    border-color: #7c5cff;
+    color: #ffffff;
+    filter: none;
+    box-shadow: 0 6px 18px rgba(139, 109, 255, 0.32);
+}
+#auto-save-to-txt-settings .novel-btn.btn-sync {
+    background: var(--nv-accent-bg);
+    border-color: var(--nv-accent-line);
+    color: var(--nv-accent-2);
+}
+#auto-save-to-txt-settings .novel-btn.btn-sync:hover {
+    background: rgba(139, 109, 255, 0.24);
+    border-color: var(--nv-accent);
+    color: #c9bcff;
+}
+#auto-save-to-txt-settings .novel-btn.btn-test {
+    background: transparent;
+    border-color: var(--nv-line-2);
+    color: var(--nv-text-2);
+}
+#auto-save-to-txt-settings .novel-btn.btn-test:hover { background: rgba(255, 255, 255, 0.07); color: var(--nv-text); }
+
+/* ---------- 当前连载卡：内容卡用极淡底，空态才用虚线（参考图对比） ---------- */
+.novel-current-book-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--nv-line);
+    border-radius: 10px;
+    padding: 12px;
+    gap: 8px;
+}
+.novel-current-book-card:hover { background: rgba(255, 255, 255, 0.05); border-color: var(--nv-line-2); }
+.novel-book-title-group { color: var(--nv-accent-2); }
+.novel-book-filename { color: var(--nv-text); font-size: 14px; }
+.novel-book-filename:hover { color: var(--nv-accent-2); }
+.novel-book-path-info { color: var(--nv-text-2); font-size: 12px; }
+.novel-book-path-info code {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--nv-line);
+    color: var(--nv-text-2);
+}
+.novel-copy-pill {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--nv-line-2);
+    color: var(--nv-text-2);
+    border-radius: 999px;
+}
+.novel-copy-pill:hover {
+    background: var(--nv-accent-bg);
+    border-color: var(--nv-accent-line);
+    color: var(--nv-accent-2);
+}
+.novel-copy-pill.copied {
+    background: rgba(74, 222, 128, 0.16) !important;
+    border-color: rgba(74, 222, 128, 0.45) !important;
+    color: #86efac !important;
+}
+
+/* ---------- 连载状态行：颜色即状态 ---------- */
+.novel-status-line {
+    border-top: 1px dashed var(--nv-line-2);
+    font-size: 12px;
+    padding-top: 8px;
+    gap: 4px 8px;
+}
+.novel-status-line.is-idle { color: var(--nv-text-2); }
+.novel-status-line.is-updating { color: var(--nv-accent-2); }
+.novel-status-line.is-success { color: #86efac; }
+.novel-status-line.is-skipped { color: var(--nv-warn); }
+.novel-status-line.is-error { color: var(--nv-danger); }
+.novel-status-time { color: var(--nv-text-3); opacity: 1; }
+.novel-status-file { color: var(--nv-text-2); opacity: 1; }
+
+/* ---------- 状态提示条：中性=虚线卡 / 警告 / 成功 ---------- */
+.novel-alert {
+    border-radius: 10px;
+    border: 1px solid var(--nv-line-2);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--nv-text-2);
+    font-size: 12.5px;
+}
+.novel-alert.checking {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px dashed var(--nv-dash) !important;
+    color: var(--nv-text-2) !important;
+}
+.novel-alert.checking i { color: var(--nv-accent-2); }
+.novel-alert.warning {
+    background: rgba(248, 113, 113, 0.09) !important;
+    border: 1px solid rgba(248, 113, 113, 0.34) !important;
+    color: #fca5a5 !important;
+}
+.novel-alert.success {
+    background: rgba(74, 222, 128, 0.09) !important;
+    border: 1px solid rgba(74, 222, 128, 0.3) !important;
+    color: #86efac !important;
+}
+.novel-alert-text b { color: inherit; }
+
+/* ---------- 会话标签区：容器走「虚线空态卡」，有标签时虚线仍然成立 ---------- */
+.novel-tag-scanner-header .novel-label i { color: var(--nv-accent-2); }
+.novel-tag-scanner-meta { color: var(--nv-text-3); opacity: 1; }
+.novel-tag-chip-list {
+    background: transparent;
+    border: 1px dashed var(--nv-dash);
+    border-radius: 10px;
+    padding: 12px;
+    gap: 7px;
+}
+.novel-tag-chip {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--nv-line-2);
+    border-radius: 999px;
+    color: var(--nv-text-2);
+}
+.novel-tag-chip code { color: var(--nv-accent-2); }
+.novel-chip-count { color: var(--nv-text-3); }
+.novel-tag-empty { color: var(--nv-text-2); font-size: 12px; opacity: 1; line-height: 1.7; }
+.novel-chip-auto {
+    background: var(--nv-accent-bg);
+    border: 1px solid var(--nv-accent-line);
+    color: var(--nv-accent-2);
+    border-radius: 999px;
+}
+.novel-chip-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--nv-line-2);
+    color: var(--nv-text-2);
+    border-radius: 8px;
+}
+.novel-chip-btn:hover { background: rgba(255, 255, 255, 0.12); color: var(--nv-text); }
+.novel-chip-btn.chip-white.active {
+    background: var(--nv-accent-bg);
+    border-color: var(--nv-accent);
+    color: var(--nv-accent-2);
+    font-weight: 700;
+}
+.novel-chip-btn.chip-black.active {
+    background: rgba(248, 113, 113, 0.18);
+    border-color: rgba(248, 113, 113, 0.6);
+    color: #fca5a5;
+    font-weight: 700;
+}
+.novel-preview-stat { color: var(--nv-text-3); opacity: 1; }
+
+/* ---------- 代码块 / 方案卡：新配色 ---------- */
+.novel-code-wrapper {
+    background: rgba(0, 0, 0, 0.34);
+    border: 1px solid var(--nv-line);
+    border-radius: 9px;
+}
+.novel-code-text { color: var(--nv-accent-2); }
+.novel-copy-btn {
+    border: 1px solid var(--nv-accent-line);
+    background: var(--nv-accent-bg);
+    color: var(--nv-accent-2);
+    border-radius: 8px;
+}
+.novel-copy-btn:hover { background: rgba(139, 109, 255, 0.26); color: #c9bcff; }
+.novel-copy-btn.copied { background: rgba(74, 222, 128, 0.2) !important; border-color: #4ade80 !important; color: #86efac !important; }
+.novel-tab-bar { border-bottom: 1px solid var(--nv-line); }
+.novel-tab-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--nv-line-2);
+    color: var(--nv-text-2);
+    border-radius: 8px;
+}
+.novel-tab-btn:hover { background: rgba(255, 255, 255, 0.1); color: var(--nv-text); }
+.novel-tab-btn.active {
+    background: var(--nv-accent-bg);
+    border-color: var(--nv-accent-line);
+    color: var(--nv-accent-2);
+    font-weight: 700;
+}
+.novel-plan-c-card {
+    background: rgba(74, 222, 128, 0.08);
+    border: 1px solid rgba(74, 222, 128, 0.28);
+    border-radius: 10px;
+    color: var(--nv-text-2);
+}
+.novel-plan-c-card b { color: #86efac; }
+.novel-deploy-card {
+    background: rgba(255, 255, 255, 0.028);
+    border: 1px solid var(--nv-line);
+    border-radius: 10px;
+}
+.novel-manual-card {
+    background: rgba(251, 191, 36, 0.07);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 10px;
+    color: var(--nv-text-2);
+}
+.novel-manual-card b { color: var(--nv-warn); }
+.novel-manual-paths {
+    background: rgba(0, 0, 0, 0.34);
+    border: 1px solid var(--nv-line);
+    border-radius: 8px;
+}
+.novel-manual-paths code { color: var(--nv-text-2); background: rgba(0, 0, 0, 0.3); }
+
+/* ---------- 过滤预览弹窗：统计栏 + 左右对照同步换装 ---------- */
+.novel-mv-badge {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--nv-line-2);
+    color: var(--nv-text-2);
+}
+.novel-mv-badge.is-draft {
+    background: rgba(251, 191, 36, 0.12);
+    border-color: rgba(251, 191, 36, 0.34);
+    color: var(--nv-warn);
+}
+.novel-mv-statbar {
+    background: rgba(255, 255, 255, 0.025);
+    border-bottom: 1px solid var(--nv-line);
+    color: var(--nv-text-2);
+}
+.novel-mv-stat b { color: var(--nv-text); }
+.novel-mv-stat.is-clean b { color: #86efac; }
+.novel-mv-stat.is-removed b { color: #fca5a5; }
+.novel-mv-stat-sep { background: var(--nv-line-2); }
+.novel-mv-arrow { color: var(--nv-text-3); }
+.novel-mv-tag {
+    background: rgba(248, 113, 113, 0.1);
+    border: 1px solid rgba(248, 113, 113, 0.24);
+    color: #fca5a5;
+    border-radius: 999px;
+}
+.novel-mv-tag.is-warn { background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.32); color: var(--nv-warn); }
+.novel-mv-tag.is-ok { background: rgba(74, 222, 128, 0.09); border-color: rgba(74, 222, 128, 0.26); color: #86efac; }
+.novel-mv-hint { color: var(--nv-text-3); opacity: 1; }
+.novel-mv-col + .novel-mv-col { border-left: 1px solid var(--nv-line); }
+.novel-mv-col-title {
+    background: rgba(255, 255, 255, 0.025);
+    border-bottom: 1px solid var(--nv-line);
+}
+.novel-mv-col.is-clean .novel-mv-col-title { color: #86efac; }
+.novel-mv-col.is-raw .novel-mv-col-title { color: var(--nv-text-2); }
+.novel-mv-count { color: var(--nv-text-3); opacity: 1; }
+.novel-mv-legend { color: var(--nv-text-3); opacity: 1; }
+.novel-mv-col.is-clean .novel-mv-text { color: var(--nv-text); }
+.novel-mv-col.is-raw .novel-mv-text { color: var(--nv-text-2); }
+.novel-mv-removed {
+    background: rgba(248, 113, 113, 0.18);
+    border-bottom: 1px dashed rgba(248, 113, 113, 0.5);
+    color: #fca5a5;
+    border-radius: 3px;
+}
+.novel-mv-alert {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed var(--nv-dash);
+    border-radius: 10px;
+    color: var(--nv-text-2);
+}
+.novel-mv-alert.is-warn { background: rgba(251, 191, 36, 0.07); border-color: rgba(251, 191, 36, 0.3); }
+.novel-mv-alert.is-warn > i { color: var(--nv-warn); }
+
+/* ---------- 悬浮入口药丸：深色石板 + 紫色书标（参考图右上角强调按钮同色） ---------- */
+.novel-fw-pill {
+    background: var(--nv-bg-2);
+    border: 1px solid var(--nv-line-2);
+    color: var(--nv-text);
+    border-radius: 999px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+    font-weight: 600;
+}
+.novel-fw-pill:hover {
+    background: var(--nv-bg-3);
+    border-color: var(--nv-accent-line);
+    color: #ffffff;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+.novel-fw-book { color: var(--nv-accent-2); }
+.novel-fw-grip, .novel-fw-gear { color: var(--nv-text-3); opacity: 0.75; }
+.novel-fw-pill:hover .novel-fw-grip, .novel-fw-pill:hover .novel-fw-gear { opacity: 1; }
+.novel-fw-pill.is-off { opacity: 0.75; }
+.novel-fw-pill.is-off .novel-fw-book { color: var(--nv-text-3); }
+
+/* ---------- chip 悬浮提示：与弹窗同一套深色 ---------- */
+.novel-chip-tooltip {
+    background: var(--nv-bg-2);
+    border: 1px solid var(--nv-line-2);
+    color: var(--nv-text);
+    border-radius: 9px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.novel-chip-tooltip .novel-chip-tooltip-tag { color: var(--nv-accent-2); }
+
+/* ---------- 魔法棒菜单项（位于酒馆原生 #extensionsMenu 内，沿用原生外观只改强调色） ---------- */
+.novel-wand-item-state.is-on {
+    background: rgba(139, 109, 255, 0.16);
+    border-color: rgba(139, 109, 255, 0.42);
+    color: #b7a6ff;
+}
+
+/* ---------- 楼层内嵌工具条：宿主主题变量打底，仅把强调色换成紫罗兰 ---------- */
+.novel-latest-toolbar {
+    border-radius: 10px;
+    gap: 9px;
+}
+.novel-lt-info { color: var(--SmartThemeEmColor, #ddd); }
+.novel-lt-info i { color: #a997ff; }
+.novel-lt-btn {
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.novel-lt-btn:hover { border-color: rgba(139, 109, 255, 0.45); }
+.novel-mes-badge i { color: #a997ff; }
+
+/* ---------- 重设计下的窄屏适配 ---------- */
+@media (max-width: 900px) {
+    .novel-modal-settings { width: min(680px, 100%); }
+}
+@media (max-width: 768px) {
+    .novel-modal { border-radius: 14px; }
+    .novel-modal-header { padding: 13px 14px; }
+    .novel-modal-title { font-size: 15.5px; }
+    .novel-modal-body-settings { padding: 12px 12px calc(18px + env(safe-area-inset-bottom, 0px)); }
+    .novel-toggle-card { padding: 12px; }
+    .novel-settings-grid .novel-section { padding: 13px; }
+}
+/* 手机全屏 sheet：去掉圆角与描边，让内容顶到屏幕边缘 */
+@media (max-width: 600px) {
+    .novel-modal-overlay { padding: 0; }
+    .novel-modal {
+        width: 100%;
+        height: 100%;
+        max-height: 100%;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+    }
+    .novel-modal-header { padding: 14px 16px; }
+    .novel-modal-title { font-size: 17px; }
+    .novel-icon-btn { width: 40px; height: 40px; border-radius: 12px; font-size: 15px; }
+    /* 手机端头部保持参考图的「标题 + 两个方形按钮」一行式：
+       把右上的连载状态文字收起（同一信息由书卡状态行与悬浮药丸承载），
+       否则标题 + 状态 + 按钮在 390px 下会被挤到第二行 */
+    #novel_header_status { display: none; }
+    .novel-modal-header-meta { gap: 10px; }
+    #auto-save-to-txt-settings .novel-section-title { font-size: 16px; }
+    #auto-save-to-txt-settings .novel-label { font-size: 14px; }
+    #auto-save-to-txt-settings small { font-size: 12px !important; }
+    #auto-save-to-txt-settings .text_pole,
+    #auto-save-to-txt-settings .novel-select { min-height: 44px; font-size: 14px; }
+    #auto-save-to-txt-settings .novel-btn { min-height: 44px; font-size: 14px; }
+    .novel-tag-chip-list { padding: 12px; }
+    .novel-tag-chip { font-size: 12.5px; padding: 5px 5px 5px 10px; }
+    .novel-chip-btn { min-height: 32px; padding: 4px 10px; }
+}

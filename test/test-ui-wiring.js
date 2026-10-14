@@ -175,6 +175,44 @@ check('说明文字弱化（11.5px / opacity .6）',
 check('楼层工具条章节信息 = 设置入口', /data-lt="settings"/.test(src) && /novel-lt-info/.test(src), true);
 check('已无 openFullSettings 死代码', /function openFullSettings/.test(src), false);
 
+console.log('\n=== ⑨ v1.15 视觉重设计（参考图：深色石板 + 紫罗兰强调）===');
+// 设计令牌：深色石板底 / 紫罗兰强调 / 发丝线 / 虚线空态
+check('设计令牌已定义（深色石板底 #161a24）', /--nv-bg: #161a24;/.test(css), true);
+check('强调色唯一为紫罗兰 #8b6dff', /--nv-accent: #8b6dff;/.test(css), true);
+check('发丝分隔线令牌 --nv-line', /--nv-line: rgba\(255, 255, 255, 0\.07\);/.test(css), true);
+check('虚线空态描边令牌 --nv-dash', /--nv-dash: rgba\(255, 255, 255, 0\.17\);/.test(css), true);
+check('令牌作用域限定在自有浮层（不污染聊天楼层）',
+    /\.novel-modal-overlay,\s*\n\.novel-floating-window,\s*\n\.novel-chip-tooltip \{/.test(css), true);
+// 头部：标题 + 右侧方形图标按钮（参考图右上角）
+check('弹窗头部标题类 novel-modal-title', src.includes('class="novel-modal-title"'), true);
+check('设置弹窗头部含紫色强调方形按钮', src.includes('id="novel_settings_preview"') && /id="novel_settings_preview" class="novel-icon-btn is-accent"/.test(src), true);
+check('两个弹窗的关闭按钮统一为方形图标按钮', (src.match(/class="novel-icon-btn"/g) || []).length >= 2, true);
+check('强调按钮已绑定过滤预览', /novel_settings_preview'\)[\s\S]{0,120}openFilterPreviewModal\(\)/.test(src), true);
+// 方形图标按钮尺寸与强调变体
+check('方形图标按钮 34×34 圆角方块', /\.novel-icon-btn \{[\s\S]*?width: 34px;[\s\S]*?height: 34px;/.test(css), true);
+check('强调变体 is-accent 用紫罗兰', /\.novel-icon-btn\.is-accent \{[\s\S]*?background: var\(--nv-accent-bg\)/.test(css), true);
+// 分区标题：靠「标题 + 下方发丝线」建立结构，而不是左边条
+check('分区标题取消左边条、改用下边框发丝线',
+    /#auto-save-to-txt-settings \.novel-section-title \{[\s\S]*?border-left: none;[\s\S]*?border-bottom: 1px solid var\(--nv-line\);/.test(css), true);
+// 空态虚线卡（参考图「还没有全局角色」的签名元素）
+check('会话标签区容器走虚线空态卡',
+    /\.novel-tag-chip-list \{[\s\S]*?border: 1px dashed var\(--nv-dash\);/.test(css), true);
+check('中性状态条亦为虚线卡', /\.novel-alert\.checking \{[\s\S]*?border: 1px dashed var\(--nv-dash\) !important;/.test(css), true);
+// 主操作=紫罗兰实心
+check('主按钮（导出）改为紫罗兰实心',
+    /\.novel-btn\.btn-export \{[\s\S]*?background: var\(--nv-accent\);/.test(css), true);
+// 说明文字：靠颜色而非 opacity 压暗（避免与宿主主题冲突）
+check('说明文字改用灰阶而非 opacity 压暗',
+    /#auto-save-to-txt-settings small \{[\s\S]*?color: var\(--nv-text-2\) !important;[\s\S]*?opacity: 1 !important;/.test(css), true);
+// 输入焦点环 = 紫罗兰
+check('输入框焦点环为紫罗兰',
+    /#auto-save-to-txt-settings \.text_pole:focus[\s\S]*?border-color: var\(--nv-accent\);[\s\S]*?box-shadow: 0 0 0 3px var\(--nv-accent-bg\);/.test(css), true);
+// 手机端全屏 sheet 在新主题下仍然成立
+check('新主题未破坏手机端全屏 sheet（圆角归零 / 去边框）',
+    /@media \(max-width: 600px\) \{[\s\S]*?\.novel-modal \{[\s\S]*?border-radius: 0;/.test(css), true);
+check('手机端图标按钮放大到 40×40（易点中）',
+    /@media \(max-width: 600px\) \{[\s\S]*?\.novel-icon-btn \{ width: 40px; height: 40px;/.test(css), true);
+
 console.log('\n=== ⑧ 悬浮入口坐标夹取行为（真实源码执行）===');
 const clampFn = extractFn('clampFloatPos');
 check('clampFloatPos 可抽取', !!clampFn, true);
