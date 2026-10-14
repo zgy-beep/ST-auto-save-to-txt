@@ -29,3 +29,6 @@ Thumbs.db
 
 # 本地临时文件（截图/草稿等，绝不上传 GitHub）
 temp/
+
+# 本地 AI 工作区记忆（仅本机留存，不上传 GitHub）
+.workbuddy/

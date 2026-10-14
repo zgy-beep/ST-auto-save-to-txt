@@ -870,3 +870,95 @@
     .novel-lt-info { grid-column: 1 / -1; }
     .novel-lt-btn { width: 100%; }
 }
+
+/* ==================== v1.12.1 右下角悬浮快捷窗（opt-in 开关） ==================== */
+/* 定位由 anchorFloatingWindow() 动态钉在当前可视区右下角（兼容 fixed 退化环境） */
+.novel-floating-window {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    z-index: 1000010;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    font-size: 12px;
+    user-select: none;
+}
+.novel-fw-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--SmartThemeBlurTintColor, rgba(22, 24, 30, 0.95));
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: var(--SmartThemeEmColor, #ddd);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+.novel-fw-pill:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.novel-fw-pill > i:first-child { color: #ffd166; }
+.novel-fw-pill.is-off { opacity: 0.65; }
+.novel-fw-pill.is-off > i:first-child { color: var(--SmartThemeEmColor, #999); }
+.novel-fw-chevron { font-size: 10px; opacity: 0.7; }
+.novel-fw-panel {
+    width: min(240px, calc(100vw - 24px));
+    background: var(--SmartThemeBlurTintColor, rgba(22, 24, 30, 0.97));
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+.novel-fw-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-weight: 600;
+}
+.novel-fw-title i { color: #ffd166; }
+.novel-fw-chapter { margin-left: auto; font-weight: 400; font-size: 11px; opacity: 0.75; white-space: nowrap; }
+.novel-fw-close {
+    border: none;
+    background: transparent;
+    color: var(--SmartThemeEmColor, #ddd);
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 12px;
+    line-height: 1;
+}
+.novel-fw-close:hover { color: #fff; }
+.novel-fw-rows { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.novel-fw-check { font-size: 12px; }
+.novel-fw-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 0 10px 10px;
+}
+.novel-fw-btn {
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--SmartThemeEmColor, #ddd);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    transition: all 0.15s ease;
+}
+.novel-fw-btn:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+/* 完整设置为主操作，独占一行 */
+.novel-fw-actions .novel-fw-btn:first-child { grid-column: 1 / -1; }
+
+@media (max-width: 768px) {
+    .novel-floating-window { bottom: 8px; right: 8px; }
+    .novel-fw-panel { width: min(260px, calc(100vw - 16px)); }
+}

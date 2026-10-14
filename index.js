@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.12.0',            // 扩展版本号
+    version: '1.12.1',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -51,6 +51,8 @@ const DEFAULT_SETTINGS = {
     save_dir: '',                 // 自定义保存文件夹路径（留空则保存至默认 plugins/auto-save/logs；支持任意绝对路径如 D:\MyNovels）
     show_toast: true,             // 连载更新时弹出轻量提示通知
     show_embedded_toolbar: true,  // 最新 AI 楼层底部是否显示内嵌快捷工具条
+    show_floating_window: false,  // 屏幕右下角常驻悬浮快捷窗（opt-in 默认关闭；开启后不依赖具体楼层，随时查看进度/开关连载/快速导出）
+    floating_window_collapsed: true, // 悬浮窗折叠态：true = 只显示药丸，false = 展开面板（持久化记忆）
     userDisabled: false,          // 用户是否主动手动关闭了连载
 };
 
@@ -239,6 +241,184 @@ function refreshLatestToolbar() {
     textEl.appendChild(bar);
 }
 
+/**
+ * 打开完整设置面板：展开内嵌抽屉并滚动至可见位置（悬浮窗【完整设置】按钮复用）
+ */
+function openFullSettings() {
+    const panel = document.getElementById('auto-save-to-txt-settings');
+    if (!panel) {
+        if (window.toastr) window.toastr.info('请在酒馆顶部【扩展管理】中打开「小说连载阅读」面板', '小说连载');
+        return;
+    }
+    const toggle = panel.querySelector('.inline-drawer-toggle');
+    const content = panel.querySelector('.inline-drawer-content');
+    // 面板已收起时先展开（ST 原生 inline-drawer 行为：点击 toggle 切换 content 显隐）
+    if (toggle && content && content.style.display === 'none') {
+        toggle.click();
+    }
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ⑤ 右下角悬浮快捷窗：药丸常显（点击展开面板），折叠态持久化；
+//    与内嵌工具条互补——不依赖任何楼层 DOM，全局随时可达；无 DOM 环境（node 测试）直接跳过
+function anchorFloatingWindow() {
+    const win = document.getElementById('novel-floating-window');
+    if (!win) return;
+    // 与弹窗/旧版快捷栏同理：部分环境 fixed 退化为文档定位会把窗口带跑，
+    // 用 scrollY+innerHeight 显式钉在当前可视区右下角（桌面 scrollY=0 时视觉等同 fixed）
+    const bottomOffset = 12;
+    const top = (window.scrollY || window.pageYOffset || 0) + window.innerHeight - win.offsetHeight - bottomOffset;
+    win.style.position = 'absolute';
+    win.style.top = Math.max(0, top) + 'px';
+    win.style.bottom = 'auto';
+}
+
+function buildFloatingWindow() {
+    const settings = getSettings();
+    const win = document.createElement('div');
+    win.id = 'novel-floating-window';
+    win.className = 'novel-floating-window';
+    win.innerHTML = `
+        <div class="novel-fw-pill" id="novel_fw_pill" title="点击展开/收起小说连载悬浮窗">
+            <i class="fa-solid fa-book-open"></i>
+            <span id="novel_fw_pill_text">小说连载</span>
+            <i class="fa-solid fa-chevron-up novel-fw-chevron" id="novel_fw_chevron"></i>
+        </div>
+        <div class="novel-fw-panel" id="novel_fw_panel">
+            <div class="novel-fw-header">
+                <span class="novel-fw-title"><i class="fa-solid fa-book-bookmark"></i> 小说连载</span>
+                <span class="novel-fw-chapter" id="novel_fw_chapter">尚未入书</span>
+                <button type="button" class="novel-fw-close" id="novel_fw_collapse" title="收起为药丸"><i class="fa-solid fa-chevron-down"></i></button>
+            </div>
+            <div class="novel-fw-rows">
+                <label class="checkbox_label novel-fw-check" title="实时连载总开关（与服务端探测联动，未部署服务端时自动防误触）">
+                    <input type="checkbox" id="novel_fw_enabled" ${settings.enabled ? 'checked' : ''} />
+                    <span>开启连载</span>
+                </label>
+                <label class="checkbox_label novel-fw-check" title="最新楼层暂作草稿：可随意 Roll 点/修改，发送下一条消息后才定稿入书">
+                    <input type="checkbox" id="novel_fw_buffer" ${settings.buffer_latest_message ? 'checked' : ''} />
+                    <span>草稿缓冲</span>
+                </label>
+            </div>
+            <div class="novel-fw-actions">
+                <button type="button" class="novel-fw-btn" id="novel_fw_settings"><i class="fa-solid fa-gear"></i> 完整设置</button>
+                <button type="button" class="novel-fw-btn" id="novel_fw_preview"><i class="fa-solid fa-eye"></i> 过滤效果</button>
+                <button type="button" class="novel-fw-btn" id="novel_fw_export"><i class="fa-solid fa-download"></i> 导出 TXT</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(win);
+
+    const setCollapsed = (collapsed) => {
+        settings.floating_window_collapsed = collapsed;
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        refreshFloatingWindow();
+    };
+
+    win.querySelector('#novel_fw_pill').addEventListener('click', () => setCollapsed(!settings.floating_window_collapsed));
+    win.querySelector('#novel_fw_collapse').addEventListener('click', () => setCollapsed(true));
+
+    // 连载总开关：走共享 setNovelEnabled（服务端未就绪时自动回取消勾选并提示，防 404）
+    const fwEnabled = win.querySelector('#novel_fw_enabled');
+    fwEnabled.addEventListener('change', async (e) => {
+        fwEnabled.disabled = true;
+        try {
+            await setNovelEnabled(e.target.checked);
+        } finally {
+            fwEnabled.disabled = false;
+            refreshFloatingWindow();
+        }
+    });
+
+    // 草稿缓冲开关：与面板 novel_buffer_latest 同键同效
+    win.querySelector('#novel_fw_buffer').addEventListener('change', (e) => {
+        settings.buffer_latest_message = e.target.checked;
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        updateRecentStatus('idle', e.target.checked ? '已开启草稿缓冲：最新回复将等你发送下一条消息后定稿入书' : '已关闭草稿缓冲：每轮回复即时入书');
+        refreshFloatingWindow();
+    });
+
+    win.querySelector('#novel_fw_settings').addEventListener('click', openFullSettings);
+    win.querySelector('#novel_fw_preview').addEventListener('click', openFilterPreviewModal);
+    win.querySelector('#novel_fw_export').addEventListener('click', exportNovelText);
+
+    // 点击面板外部任意处收起（buildFloatingWindow 全程只构建一次，天然只绑一次）
+    document.addEventListener('click', (e) => {
+        if (settings.floating_window_collapsed) return;
+        const w = document.getElementById('novel-floating-window');
+        if (w && !w.contains(e.target)) setCollapsed(true);
+    });
+
+    // 滚动/缩放/横竖屏切换时重钉可视区（fixed 退化环境也能始终贴角可见）
+    window.addEventListener('scroll', anchorFloatingWindow, { passive: true });
+    window.addEventListener('resize', anchorFloatingWindow);
+    window.addEventListener('orientationchange', () => setTimeout(anchorFloatingWindow, 200));
+    return win;
+}
+
+function refreshFloatingWindow() {
+    if (typeof document === 'undefined') return;
+    const settings = getSettings();
+    const existing = document.getElementById('novel-floating-window');
+    if (settings.show_floating_window === false) {
+        existing?.remove();
+        return;
+    }
+    const win = existing || buildFloatingWindow();
+
+    // 章节统计与内嵌工具条同源：楼层映射 + 最近状态取最大
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    let chapterTotal = 0;
+    for (const v of Object.values(savedChapterMap)) chapterTotal = Math.max(chapterTotal, v);
+    chapterTotal = Math.max(chapterTotal, recentStatus.chapter || 0);
+    const chapterText = !settings.enabled
+        ? '连载已关'
+        : (chapterTotal > 0 ? `第 ${chapterTotal} 章` : ((Array.isArray(chatLog) && chatLog.length > 0) ? '未开书' : '等待开书'));
+
+    const pillText = win.querySelector('#novel_fw_pill_text');
+    if (pillText) pillText.textContent = chapterText;
+    win.querySelector('#novel_fw_pill')?.classList.toggle('is-off', !settings.enabled);
+
+    const collapsed = settings.floating_window_collapsed !== false;
+    const panel = win.querySelector('#novel_fw_panel');
+    if (panel) panel.style.display = collapsed ? 'none' : 'flex';
+    const chevron = win.querySelector('#novel_fw_chevron');
+    if (chevron) chevron.className = collapsed ? 'fa-solid fa-chevron-up novel-fw-chevron' : 'fa-solid fa-chevron-down novel-fw-chevron';
+
+    const chapterEl = win.querySelector('#novel_fw_chapter');
+    if (chapterEl) chapterEl.textContent = chapterTotal > 0 ? `已连载 ${chapterTotal} 章` : '尚未入书';
+
+    const enabledEl = win.querySelector('#novel_fw_enabled');
+    if (enabledEl) enabledEl.checked = !!settings.enabled;
+    const bufferEl = win.querySelector('#novel_fw_buffer');
+    if (bufferEl) bufferEl.checked = !!settings.buffer_latest_message;
+
+    anchorFloatingWindow();
+}
+
+// 连载界面 surfaces 统一刷新：楼层内嵌工具条 + 右下角悬浮窗（含章节进度同步）
+function refreshNovelToolbars() {
+    refreshNovelToolbars();
+    refreshFloatingWindow();
+}
+
+/**
+ * 语义版本比较（按数值段逐段比较，杜绝字符串比较陷阱）
+ * 背景：JS 字符串比较下 '1.12.0' < '1.7.8' 为 true（逐字符比 '1' vs '7'），
+ * 会让版本门控全面误判——v1.12.0 服务端会被当成"低于 1.7.8"而跳过问候语补写。
+ * 返回：-1 = a 低于 b；0 = 相等；1 = a 高于 b
+ */
+function compareVersion(a, b) {
+    const pa = String(a || '0').split('.').map(n => parseInt(n, 10) || 0);
+    const pb = String(b || '0').split('.').map(n => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const na = pa[i] || 0;
+        const nb = pb[i] || 0;
+        if (na !== nb) return na < nb ? -1 : 1;
+    }
+    return 0;
+}
+
 function getSettings() {
     const extSettings = ctx.extension_settings || ext_settings_raw || window.extension_settings || {};
     if (!extSettings[EXTENSION_NAME]) {
@@ -246,7 +426,7 @@ function getSettings() {
     } else {
         // 版本平滑迁移：针对升级用户，如果版本低于 1.6.0，自动切换历史默认值至 'numbered_floor'
         const curVer = extSettings[EXTENSION_NAME].version;
-        if (!curVer || curVer < '1.6.0') {
+        if (!curVer || compareVersion(curVer, '1.6.0') < 0) {
             if (extSettings[EXTENSION_NAME].chapter_style === 'numbered') {
                 extSettings[EXTENSION_NAME].chapter_style = 'numbered_floor';
             }
@@ -703,20 +883,6 @@ function cleanNovelText(rawText, settings = {}) {
 }
 
 /**
- * 动态获取当前扩展相对于酒馆 Web 根目录的相对路径（彻底杜绝硬编码目录名）
- */
-function getExtensionRelativePath() {
-    try {
-        const scriptUrl = new URL(import.meta.url);
-        const pathName = scriptUrl.pathname;
-        const dir = pathName.substring(0, pathName.lastIndexOf('/'));
-        return dir.replace(/^\/+/, '');
-    } catch (e) {
-        return 'scripts/extensions/third-party/ST-auto-save-to-txt';
-    }
-}
-
-/**
  * 检测服务端连载插件运行状态（优先探测状态探针，降级探测 append 接口）
  */
 async function checkServerPluginStatus() {
@@ -969,7 +1135,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
         if (!res.skipped) {
             savedChapterMap[messageIndex] = chapterNumber;
             refreshMessageBadges();
-            refreshLatestToolbar();
+            refreshNovelToolbars();
         }
     } else {
         const is404 = res && (res.status === 404 || (res.error && String(res.error).includes('404')));
@@ -1012,7 +1178,7 @@ let serverPluginVersion = null;
  */
 async function ensureGreetingSerialized(settings, chatLog) {
     if (!Array.isArray(chatLog) || chatLog.length !== 2) return;
-    if (serverPluginVersion && serverPluginVersion < '1.7.8') return;
+    if (serverPluginVersion && compareVersion(serverPluginVersion, '1.7.8') < 0) return;
     const greeting = chatLog[0];
     if (!greeting || greeting.is_user) return;
     if (!chatLog[1] || !chatLog[1].is_user) return;
@@ -1051,7 +1217,7 @@ async function ensureGreetingSerialized(settings, chatLog) {
         // ①④ 问候语入书：登记第 1 章并重绘徽标与工具条
         savedChapterMap[0] = 1;
         refreshMessageBadges();
-        refreshLatestToolbar();
+        refreshNovelToolbars();
     }
 }
 
@@ -1215,7 +1381,7 @@ async function executeSyncAll(isSilent = false) {
             // ①④ 全书同步后重算楼层入书映射并重绘徽标与最新楼层工具条
             savedChapterMap = computeChapterMap(settings, chatLog);
             refreshMessageBadges();
-            refreshLatestToolbar();
+            refreshNovelToolbars();
             // 聊天改名自动跟随：全书同步同样可能触发小说文件更名
             const syncRenameSuffix = data.renamed_from ? '（检测到聊天改名，小说文件已同步更名）' : '';
             if (!isSilent) {
@@ -1588,7 +1754,7 @@ async function setNovelEnabled(wantEnable) {
     const enableCheckbox = document.getElementById('novel_save_enabled');
     if (enableCheckbox) enableCheckbox.checked = settings.enabled;
     if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
-    refreshLatestToolbar();
+    refreshNovelToolbars();
     return true;
 }
 
@@ -1665,6 +1831,10 @@ async function renderSettingsUI(cachedStatus = null) {
                     <label class="checkbox_label" title="在最新一条 AI 回复底部显示内嵌快捷操作条（显示连载进度、查看过滤效果、一键导出）">
                         <input type="checkbox" id="novel_show_embedded_toolbar" ${settings.show_embedded_toolbar !== false ? 'checked' : ''} />
                         <span>显示内嵌工具条</span>
+                    </label>
+                    <label class="checkbox_label" title="在屏幕右下角显示常驻悬浮窗：随时查看连载进度、开关连载/草稿缓冲、快速导出（不依赖具体楼层，切聊天也全程跟随）">
+                        <input type="checkbox" id="novel_show_floating_window" ${settings.show_floating_window ? 'checked' : ''} />
+                        <span>显示悬浮窗</span>
                     </label>
                 </div>
 
@@ -1927,8 +2097,20 @@ async function renderSettingsUI(cachedStatus = null) {
     if (toolbarEl) {
         toolbarEl.addEventListener('change', (e) => {
             settings.show_embedded_toolbar = e.target.checked;
-            refreshLatestToolbar();
+            refreshNovelToolbars();
             if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+
+    const floatWinEl = panel.querySelector('#novel_show_floating_window');
+    if (floatWinEl) {
+        floatWinEl.addEventListener('change', (e) => {
+            settings.show_floating_window = e.target.checked;
+            refreshFloatingWindow();
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            if (e.target.checked && window.toastr) {
+                window.toastr.success('悬浮窗已开启：位于屏幕右下角，点击药丸可展开面板，随时可再收起', '小说连载', { timeOut: 4000 });
+            }
         });
     }
 
@@ -2371,7 +2553,7 @@ jQuery(async () => {
                 if (settings.buffer_latest_message) {
                     updateRecentStatus('idle', '草稿缓冲中（所选分支将在你发送下一条消息后定稿入书）');
                     refreshMessageBadges();
-                    refreshLatestToolbar();
+                    refreshNovelToolbars();
                     return;
                 }
                 // 角色问候语的滑动/重新生成同样不入书：连载只从真实对话开始
@@ -2385,7 +2567,7 @@ jQuery(async () => {
                 debouncedRenderTagTools();
                 // ST 滑动楼层会重建 mes_text 导致内嵌元素丢失：幂等重绘补救
                 refreshMessageBadges();
-                refreshLatestToolbar();
+                refreshNovelToolbars();
             });
         }
 
@@ -2403,7 +2585,7 @@ jQuery(async () => {
                 updateDrawerHeaderFileBadge();
                 // ST 编辑楼层会重建 mes_text 导致内嵌元素丢失：幂等重绘补救
                 refreshMessageBadges();
-                refreshLatestToolbar();
+                refreshNovelToolbars();
             });
         }
 
@@ -2416,7 +2598,7 @@ jQuery(async () => {
             const ctxChat = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
             savedChapterMap = computeChapterMap(getSettings(), ctxChat);
             refreshMessageBadges();
-            refreshLatestToolbar();
+            refreshNovelToolbars();
         };
 
         if (event_types.CHAT_CHANGED) {
