@@ -70,7 +70,8 @@ const FNS = [
     'positionOverlay', 'pinElementToVisibleViewport', 'getVisibleViewportBox',
     'measureHostFixedOffset', 'clampFloatPos', 'applyFloatPos', 'getUserFloatPos',
     'isFloatPosUsableForViewport', 'floatBottomClearance', 'readFloatGap',
-    'measureSafeAreaBottom', 'keepFloatWindowInsideViewport', 'getDocScrollTop'
+    'measureSafeAreaBottom', 'keepFloatWindowInsideViewport', 'ensureFloatingWindowVisible',
+    'ensureFloatPosEventually', 'getDocScrollTop', 'ensureTopLayer', 'mountInTopLayer'
 ].map(extractFn).join('\n');
 
 const HTML = `<!DOCTYPE html>
@@ -107,11 +108,34 @@ function rectOf(el) {
 function fullyInside(r, w, h) { return r.left >= -0.6 && r.top >= -0.6 && r.right <= w + 0.6 && r.bottom <= h + 0.6; }
 
 function scenario(name) {
-    document.querySelectorAll('#novel_settings_modal,#novel_preview_modal,#novel-floating-window').forEach(n => n.remove());
+    document.querySelectorAll('#novel_settings_modal,#novel_preview_modal,#novel-floating-window,dialog.novel-tl').forEach(n => {
+        try { n.close(); } catch { /* 非 dialog */ }
+        n.remove();
+    });
+    document.getElementById('nv-env-killer')?.remove();
     document.documentElement.removeAttribute('style');
     document.body.removeAttribute('style');
     STUB.float_pos = null;
 
+    // 场景 J：视口暂时量不到（页面刚加载 / 切回后台标签时 innerWidth 会短暂为 0）。
+    // 老代码在 applyFloatPos 里遇到 vp 为 0 直接 return，什么都不做，而且没有事件会通知它重试。
+    if (name.includes('novp')) window.__breakViewportFor(3);
+
+    // 模拟「手机端锚点声明整体失效」：某些浏览器 / App 内置 WebView 不认 env()，
+    // bottom: calc(74px + env(...)) 会在 computed-value 阶段整条作废 → bottom 回退 auto；
+    // 若 right 也一并失效，position:fixed 的药丸就落到「静态位置」= body 流末尾。
+    // 这里用 bottom/right: auto !important 复现该终态。
+    if (name.includes('noenv')) {
+        // 撑出一个真实的文档流（模拟酒馆里 #chat / #send_form 撑着高度），
+        // 让药丸的静态位置落在屏幕之外，而不是仅仅跑到左上角。
+        const spacer = document.createElement('div');
+        spacer.style.cssText = 'height:' + Math.round(window.innerHeight * 1.9) + 'px;';
+        document.body.appendChild(spacer);
+        const killer = document.createElement('style');
+        killer.id = 'nv-env-killer';
+        killer.textContent = '.novel-floating-window { bottom: auto !important; right: auto !important; }';
+        document.head.appendChild(killer);
+    }
     if (name.includes('tall')) document.body.style.height = Math.round(window.innerHeight * 1.25) + 'px';
     if (name.includes('scrolled')) {
         document.body.style.height = Math.round(window.innerHeight * 1.6) + 'px';
@@ -131,27 +155,34 @@ function scenario(name) {
     overlay.className = 'novel-modal-overlay';
     overlay.style.display = 'none';
     overlay.innerHTML = SETTINGS_MODAL_HTML;
-    document.body.appendChild(overlay);
+    // v1.17.3：与产品一致，浮层挂进 top-layer 载体
+    mountInTopLayer('novel-tl-settings', overlay);
 
     const pv = document.createElement('div');
     pv.id = 'novel_preview_modal';
     pv.className = 'novel-modal-overlay';
     pv.style.display = 'none';
     pv.innerHTML = '<div class="novel-modal novel-modal-preview"><div class="novel-modal-header"><b class="novel-modal-title">x</b></div><div class="novel-modal-body novel-mv-body"><div class="novel-mv-grid"><section class="novel-mv-col is-clean"><div class="novel-mv-text">t</div></section></div></div></div>';
-    document.body.appendChild(pv);
+    mountInTopLayer('novel-tl-preview', pv);
 
     const win = document.createElement('div');
     win.id = 'novel-floating-window';
     win.className = 'novel-floating-window';
     win.innerHTML = FW_HTML;
-    document.body.appendChild(win);
+    mountInTopLayer('novel-tl-floating', win);
 
     overlay.style.display = 'flex';
     positionOverlay(overlay);
     pv.style.display = 'flex';
     positionOverlay(pv);
-    applyFloatPos();
+    const done = { vpbroke: !!name.includes('novp') };
+    // 视口量不到的场景要走产品里的有界重试（产品代码在 refreshFloatingWindow 里调它）
+    if (name.includes('novp')) done.resolved = ensureFloatPosEventually();
+    else applyFloatPos();
+    return { win, overlay, pv, done };
+}
 
+function measure(win, overlay, pv, done) {
     const vp = VPB();
     const gap = GAP(win);
     const out = {
@@ -165,13 +196,65 @@ function scenario(name) {
     out.modalOk = fullyInside(out.modal, vp.width, vp.height);
     out.previewOk = fullyInside(out.preview, vp.width, vp.height);
     out.fwOk = fullyInside(out.fw, vp.width, vp.height);
+    // 药丸是否被「屏幕坐标硬放」接管（applyFloatPos 的默认分支会把 left 写成 auto）
+    out.fwForced = !!win.style.left && win.style.left !== 'auto';
+    // 锚点：不论走哪条分支，最终都必须贴在右下角（而不是被顶到左上角 / 屏幕中央）
+    out.fwAnchored = out.fw.right >= vp.width - 40 && out.fw.bottom >= vp.height * 0.6;
     // 手机端额外要求：药丸要让开底部常驻输入栏
     out.fwAboveInput = out.fw.bottom <= vp.height - Math.min(gap.bottom, 74) + 0.6;
     out.phoneGap = gap.bottom > 20;
-    out.allOk = out.modalOk && out.previewOk && out.fwOk && (!out.phoneGap || out.fwAboveInput);
+    // ---- v1.17.3 top layer 专项 ----
+    // 浮层必须挂在 <dialog class="novel-tl"> 里（非模态 show()，不进 top layer 就前功尽弃）
+    const tlOf = (el) => (el.closest ? el.closest('dialog.novel-tl') : null);
+    out.tlFloating = !!tlOf(win);
+    out.tlSettings = !!tlOf(overlay);
+    out.tlPreview = !!tlOf(pv);
+    // 载体必须已 show()（open 属性），否则 dialog 是 display:none，什么都看不见
+    out.tlOpen = [out.tlFloating, out.tlSettings, out.tlPreview]
+        .map((ok, i) => (ok ? tlOf([win, overlay, pv][i]).open : false))
+        .every(Boolean);
+    // 载体不能是模态（showModal 会给文档加 inert → 药丸在弹窗打开时点不到）
+    out.tlNotModal = !document.querySelector('dialog.novel-tl[open]')?.matches(':modal');
+    // 载体铺满视口（内层 absolute 的解析基准就是它）
+    const layer = tlOf(win);
+    if (layer) {
+        const lr = layer.getBoundingClientRect();
+        out.tlBox = { w: +lr.width.toFixed(1), h: +lr.height.toFixed(1) };
+        out.tlCoversViewport = Math.abs(lr.width - vp.width) <= 1 && Math.abs(lr.height - vp.height) <= 1;
+    } else {
+        out.tlBox = { w: 0, h: 0 };
+        out.tlCoversViewport = false;
+    }
+    // 载体不吃指针事件（否则透明 dialog 会把整个页面挡死）
+    out.tlClickThrough = getComputedStyle(layer || document.body).pointerEvents === 'none'
+        || out.tlCoversViewport === false;
+    // 药丸在 top layer 里 → 坐标系就是视口，不该再有任何补偿 transform
+    out.fwNoCompensation = (win.style.transform || '') === '';
+    // 药丸真实可点（elementFromPoint 命中它，而不是被透明载体吃掉）
+    const hit = document.elementFromPoint(out.fw.left + 8, out.fw.top + out.fw.h / 2);
+    out.fwHittable = !!(hit && win.contains(hit));
+    // 载体不能加 contain:strict —— 其 paint 包含会裁剪溢出内容，
+    // 曾经导致设置弹窗正文滚不动（scrollTop 写进去读回 0）。这里钉死这条负面约束。
+    out.tlNoContain = !layer || getComputedStyle(layer).contain === 'none';
+
+    out.allOk = out.modalOk && out.previewOk && out.fwOk && out.fwAnchored
+        && (!out.phoneGap || out.fwAboveInput)
+        && out.tlFloating && out.tlSettings && out.tlPreview
+        && out.tlOpen && out.tlNotModal && out.tlCoversViewport
+        && out.fwNoCompensation && out.fwHittable && out.tlNoContain;
     return out;
 }
-window.__run = scenario;
+// 视口故障注入：前 n 次 getVisibleViewportBox() 返回 0×0，模拟页面刚加载 / 后台标签
+window.__breakViewportFor = (n) => {
+    const orig = window.getVisibleViewportBox;
+    let left = n;
+    window.getVisibleViewportBox = () => (left-- > 0 ? { width: 0, height: 0 } : orig());
+};
+window.__run = async (key) => {
+    const parts = scenario(key);
+    if (parts.done.resolved) await parts.done.resolved;
+    return measure(parts.win, parts.overlay, parts.pv, parts.done);
+};
 </script>
 </body></html>`;
 
@@ -186,7 +269,9 @@ const SCENARIOS = [
     ['E 本设备正常拖拽坐标', 'E-sameDevice-pos'],
     ['F 宿主盒子高于可见区 + 文档被顶起', 'F-tall-scrolled'],
     ['G 普通宿主（无 html transform）', 'G-vanilla-host'],
-    ['H 普通宿主 + 盒子高于可见区', 'H-vanilla-tall']
+    ['H 普通宿主 + 盒子高于可见区', 'H-vanilla-tall'],
+    ['I 手机端锚点声明整体失效（env() 不被识别 → bottom/right 回退 auto）', 'I-noenv-anchor'],
+    ['J 视口暂时量不到（页面刚加载 / 后台标签，innerWidth=0）', 'J-novp-boot']
 ];
 
 (async () => {
@@ -207,9 +292,12 @@ const SCENARIOS = [
         console.log('=== 移动端浮层可见性（真实宿主 CSS 条件：390×844）===');
         for (const [label, key] of SCENARIOS) {
             const r = await page.evaluate((x) => window.__run(x), key);
-            if (r.allOk) {
+            // 场景 I 额外要求：必须是 JS 兜底把它硬放回来的（left/top 显式像素），
+            // 而不是碰巧在屏内 —— 否则这条断言会在旧代码上「侥幸通过」而失去意义。
+            const forcedOk = !key.includes('noenv') || r.fwForced;
+            if (r.allOk && forcedOk) {
                 pass++;
-                console.log(`[PASS] ${label}`);
+                console.log(`[PASS] ${label}` + (key.includes('noenv') ? '（已由 ensureFloatingWindowVisible 兜底移回）' : ''));
             } else {
                 fail++;
                 console.error(`[FAIL] ${label}`);
@@ -217,6 +305,18 @@ const SCENARIOS = [
                 if (!r.previewOk) console.error(`       预览弹窗跑出可见区：${JSON.stringify(r.preview)}`);
                 if (!r.fwOk) console.error(`       悬浮药丸跑出可见区：${JSON.stringify(r.fw)}`);
                 else if (!r.fwAboveInput) console.error(`       悬浮药丸被输入栏压住：${JSON.stringify(r.fw)} bottom 应 ≤ ${(r.vp.h - 74).toFixed(1)}`);
+                else if (!r.fwAnchored) console.error(`       悬浮药丸没贴住右下角：${JSON.stringify(r.fw)}（可见区 ${r.vp.w}×${r.vp.h}）`);
+                if (!r.tlFloating) console.error('       药丸没挂进 top-layer 载体 dialog.novel-tl');
+                if (!r.tlSettings) console.error('       设置弹窗没挂进 top-layer 载体');
+                if (!r.tlPreview) console.error('       预览弹窗没挂进 top-layer 载体');
+                if (!r.tlOpen) console.error('       top-layer 载体没有 show()（缺 open 属性 = display:none）');
+                if (!r.tlNotModal) console.error('       top-layer 载体被 showModal() 了（会给文档加 inert，药丸将点不到）');
+                if (!r.tlCoversViewport) console.error(`       top-layer 载体没铺满视口：${JSON.stringify(r.tlBox)}，内层 absolute 会失去基准`);
+                if (!r.fwNoCompensation) console.error('       药丸在 top layer 里仍带补偿 transform（坐标系已经对了，不该再补偿）');
+                if (!r.fwHittable) console.error('       药丸不可点（透明载体可能吃掉了指针事件）');
+                if (!r.tlNoContain) console.error('       载体带了 contain 属性（paint 包含会裁剪溢出，弹窗正文会滚不动）');
+                if (r.fwOk && !r.fwAnchored) console.error(`       悬浮药丸没贴在右下角（跑到别处去了）：${JSON.stringify(r.fw)}`);
+                if (!forcedOk) console.error('       药丸虽在屏内，但没走 ensureFloatingWindowVisible 兜底 —— 场景失去意义');
             }
         }
         if (pageErrors.length) {

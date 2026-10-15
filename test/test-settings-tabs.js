@@ -101,7 +101,9 @@ const FNS = [
     // 视口变化后的统一重排：窗口 resize / 横竖屏 / URL 栏与软键盘都靠这条链
     'bindOverlayResync', 'scheduleOverlayResync', 'resyncNovelOverlays',
     'bindNovelTabs', 'bindNovelAccordions',
-    'applyNovelAccordionDefaults', 'refreshNovelAccSummaries'
+    'applyNovelAccOpen', 'persistNovelAccOpen', 'refreshNovelAccSummaries',
+    // v1.17.3：top-layer 载体（原生 <dialog>），浮层挂进去才免疫 html transform 劫持
+    'ensureTopLayer', 'mountInTopLayer'
 ].map(extractFn).join('\n') + '\n'
     + extractConstObj('NOVEL_STYLE_SUMMARY') + '\n'
     + extractConstObj('NOVEL_NAMING_SUMMARY');
@@ -137,8 +139,11 @@ let overlayResyncBound = false;
 let cachedSafeAreaBottom = null;
 // 折叠行摘要要读连载状态（与 index.js 里的模块级变量同名同形）
 let recentStatus = { state: 'success', text: '第 12 章 · 艾莉丝', time: '12:34:56', file: '/logs/x.txt', chapter: 12 };
-function getSettings() { return {}; }
-function saveSettingsDebounced() {}
+// 折叠开合要真的走「读设置 → 恢复 / 改 → 落盘」这条链，所以给个可观测的真设置对象
+const __settings = { acc_open: [] };
+let __savedCount = 0;
+function getSettings() { return __settings; }
+function saveSettingsDebounced() { __savedCount++; }
 function closeNovelSettingsModal() {}
 function renderSettingsUI() {}
 
@@ -147,7 +152,8 @@ overlay.id = 'novel_settings_modal';
 overlay.className = 'novel-modal-overlay';
 overlay.style.display = 'none';
 overlay.innerHTML = MODAL_SHELL_HTML;
-document.body.appendChild(overlay);
+// v1.17.3：与产品一致，弹窗挂进 top-layer 载体（<dialog class="novel-tl">）
+mountInTopLayer('novel-tl-settings', overlay);
 
 const panel = document.createElement('div');
 panel.id = 'auto-save-to-txt-settings';
@@ -158,8 +164,8 @@ overlay.querySelector('#novel_settings_body').appendChild(panel);
 // 走真实接线
 bindNovelTabs(panel);
 bindNovelAccordions(panel);
-// 初始开合：与 index.js 挂载点一致（单分组分区默认展开）
-applyNovelAccordionDefaults(panel);
+// 开合：与 index.js 挂载点一致（默认全部收起，按 settings.acc_open 恢复）
+applyNovelAccOpen(panel);
 refreshNovelAccSummaries(panel);
 overlay.style.display = 'flex';
 positionOverlay(overlay);
@@ -227,6 +233,20 @@ window.__api = {
     flatCount: () => document.querySelectorAll('.novel-acc-flat').length,
     openAccordions: () => Array.from(document.querySelectorAll('.novel-acc.is-open')).map((a) => a.dataset.nvAcc),
     clickAcc: (key) => document.querySelector('.novel-acc[data-nv-acc="' + key + '"] .novel-acc-head').click(),
+    /** 只在收起时点开（截图用：盲目 click 会把已展开的块关掉） */
+    ensureAccOpen: (key) => {
+        const it = document.querySelector('.novel-acc[data-nv-acc="' + key + '"]');
+        if (it && !it.classList.contains('is-open')) it.querySelector('.novel-acc-head').click();
+    },
+    // ---- 开合持久化（settings.acc_open + saveSettingsDebounced）----
+    storedAccOpen: () => (Array.isArray(__settings.acc_open) ? __settings.acc_open : []).join(','),
+    savedCount: () => __savedCount,
+    // 模拟「关掉弹窗再重新打开」：清掉所有 is-open（此时 settings 仍留着上次的值），再走恢复
+    reopenAccordions: () => {
+        document.querySelectorAll('.novel-acc').forEach((a) => a.classList.remove('is-open'));
+        applyNovelAccOpen(panel);
+        return Array.from(document.querySelectorAll('.novel-acc.is-open')).map((a) => a.dataset.nvAcc).join(',');
+    },
     accState: (key) => {
         const item = document.querySelector('.novel-acc[data-nv-acc="' + key + '"]');
         const head = item.querySelector('.novel-acc-head');
@@ -434,6 +454,12 @@ async function clickTab(page, key) {
         check('开关控件到面板根的层数 = 6（多一层 label 承载整行点击）',
             await dpage.evaluate(() => window.__api.depthOf('novel_show_toast')), 6);
 
+        // 默认全部收起后，截图里得有一个展开的块才看得出层次（也顺便验证 v1.17.2 的默认值）
+        // 注：② 段的 focusRoundTrip 已点开过「白名单」，这里正好顺势验一次开合被记住了
+        check('桌面端也记住了展开过的分组（settings.acc_open）',
+            (await dpage.evaluate(() => window.__api.openAccordions())).join(','), 'include');
+        await dpage.evaluate(() => window.__api.ensureAccOpen('book'));
+        await dpage.waitForTimeout(260);
         await dpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-desktop-serial.png') });
         await clickTab(dpage, 'filter');
         // 标签激活态：类名正确不代表样式正确，这里按真实计算样式核对，
@@ -444,6 +470,10 @@ async function clickTab(page, key) {
         check('激活标签背景为紫罗兰淡底', /139, 109, 255/.test(activeStyles[0] ? activeStyles[0].bg : ''), true);
         check('非激活标签背景完全透明',
             tabStyleList.filter((s) => !s.active).every((s) => s.bg === 'rgba(0, 0, 0, 0)'), true);
+        // ④b 需要一个真实展开的块做对照（默认全收起），顺便让截图看得到展开体内容
+        // 注意用「确保展开」而不是盲目 click：② 段已把 include 打开过，再点一次会把它关掉
+        await dpage.evaluate(() => window.__api.ensureAccOpen('include'));
+        await dpage.waitForTimeout(260);
         await dpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-desktop-filter.png') });
 
         // ---------------- ④b 折叠块：与背景有区分（v1.17.1） ----------------
@@ -482,6 +512,8 @@ async function clickTab(page, key) {
         await dpage.waitForTimeout(200);
 
         await clickTab(dpage, 'format');
+        await dpage.evaluate(() => window.__api.ensureAccOpen('style'));
+        await dpage.waitForTimeout(260);
         await dpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-desktop-format.png') });
         await dctx.close();
 
@@ -507,8 +539,12 @@ async function clickTab(page, key) {
         check('手机端弹窗完整落在可见视口内', fullyInside(mr.modal, mr.vw, mr.vh), true);
         check('手机端标签仍然 5 个', await mpage.evaluate(() => window.__api.tabCount()), 5);
 
+        await mpage.evaluate(() => window.__api.ensureAccOpen('book'));
+        await mpage.waitForTimeout(260);
         await mpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-mobile-serial.png') });
         await clickTab(mpage, 'filter');
+        await mpage.evaluate(() => window.__api.ensureAccOpen('include'));
+        await mpage.waitForTimeout(260);
         await mpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-mobile-filter.png') });
 
         // ---------------- ⑤b 手机端折叠块：同样的块质感 + 与主开关块对齐（v1.17.1） ----------------
@@ -526,10 +562,12 @@ async function clickTab(page, key) {
 
         await clickTab(mpage, 'format');
         // 展开「阅读与写入」，让截图能看清 v1.17.1 的开关行（左标题 + 右控件）
-        await mpage.evaluate(() => window.__api.clickAcc('write'));
+        await mpage.evaluate(() => window.__api.ensureAccOpen('write'));
         await mpage.waitForTimeout(260);
         await mpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-mobile-format.png') });
         await clickTab(mpage, 'general');
+        await mpage.evaluate(() => window.__api.ensureAccOpen('display'));
+        await mpage.waitForTimeout(260);
         await mpage.screenshot({ path: path.join(ROOT, 'temp', 'shot-v117-mobile-general.png') });
         check('手机端切到「通用」后只显示通用面板',
             (await mpage.evaluate(() => window.__api.visiblePanes())).join(','), 'general');
@@ -552,10 +590,10 @@ async function clickTab(page, key) {
             'book,include,exclude,scan,style,naming,write,dir,display');
         check('不折叠的动作行 2 个（过滤预览、导出与同步）',
             await fpage.evaluate(() => window.__api.flatCount()), 2);
-        // 初始开合规则：单分组分区（连载 / 文件 / 通用）展开，多分组分区（过滤 / 排版）收起
-        check('单分组分区默认展开、多分组分区默认收起',
-            (await fpage.evaluate(() => window.__api.openAccordions())).join(','), 'book,dir,display');
-        check('多分组分区（过滤）里 3 个分组全部收起',
+        // 初始开合：v1.17.2 起**默认全部收起**（不再有「单分组分区自动展开」）
+        check('首次打开时 9 个分组全部收起',
+            (await fpage.evaluate(() => window.__api.openAccordions())).join(','), '');
+        check('多分组分区（过滤）里 3 个分组也全部收起',
             await fpage.evaluate(() => ['include', 'exclude', 'scan']
                 .every((k) => window.__api.accState(k).bodyVisible === false)), true);
 
@@ -580,6 +618,34 @@ async function clickTab(page, key) {
         await fpage.evaluate(() => window.__api.clickAcc('include'));
         await fpage.waitForTimeout(260);
         check('再点一次可收起', (await fpage.evaluate(() => window.__api.accState('include'))).bodyVisible, false);
+
+        // ---- 开合持久化：改一次折叠 → 落盘 → 重开弹窗 → 状态还在 ----
+        console.log('\n=== ⑥b 开合持久化（settings.acc_open）===');
+        check('初始 acc_open 为空（默认全收起）',
+            await fpage.evaluate(() => window.__api.storedAccOpen()), '');
+        // 展开两个不同分区的分组，验证是「列表」而非布尔
+        await fpage.evaluate(() => window.__api.clickAcc('scan'));
+        await fpage.waitForTimeout(120);
+        await clickTab(fpage, 'format');
+        await fpage.evaluate(() => window.__api.clickAcc('naming'));
+        await fpage.waitForTimeout(120);
+        check('展开后写回 settings.acc_open（含两个 key）',
+            await fpage.evaluate(() => window.__api.storedAccOpen().split(',').sort().join(',')),
+            'naming,scan');
+        check('每次开合都调了 saveSettingsDebounced（已落盘）',
+            await fpage.evaluate(() => window.__api.savedCount()) >= 3, true);
+        // 收掉一个，剩下的应当被记住
+        await fpage.evaluate(() => window.__api.clickAcc('scan'));
+        await fpage.waitForTimeout(120);
+        check('收起后从 acc_open 里移除',
+            await fpage.evaluate(() => window.__api.storedAccOpen()), 'naming');
+        // 模拟重开弹窗：DOM 全收起 → 按 acc_open 恢复 → naming 应当自动展开
+        check('重开弹窗后按 acc_open 恢复（naming 仍展开）',
+            await fpage.evaluate(() => window.__api.reopenAccordions()), 'naming');
+        check('恢复后 aria-expanded 同步为 true',
+            (await fpage.evaluate(() => window.__api.accState('naming'))).aria, 'true');
+        check('未被记住的分组保持收起',
+            (await fpage.evaluate(() => window.__api.accState('scan'))).open, false);
 
         // 摘要是「收起也能看出当前值」的唯一线索，必须真实反映当前设置
         const sums = await fpage.evaluate(() => window.__api.summaries());

@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.17.1',            // 扩展版本号
+    version: '1.17.3',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -53,6 +53,7 @@ const DEFAULT_SETTINGS = {
     show_embedded_toolbar: true,  // 最新 AI 楼层底部是否显示内嵌快捷工具条
     show_floating_window: true,   // 常驻悬浮入口（v1.14 起为纯入口按钮：显示章节进度，点击即打开设置弹窗；可拖动移动；可在设置里关闭）
     float_pos: null,              // 悬浮入口被拖动后的位置 { left, top }；null = 默认右下角
+    acc_open: [],                 // 设置弹窗里「展开着的折叠分组」key 列表；空数组 = 全部收起（默认）
     ui_v113_migrated: false,      // v1.13 一次性迁移标记（老用户自动补开悬浮窗作为主入口）
     userDisabled: false,          // 用户是否主动手动关闭了连载
 };
@@ -289,6 +290,72 @@ function syncWandEntryState() {
     stateEl.classList.toggle('is-on', on);
 }
 
+// ============================================================================
+// 浮层载体：原生 <dialog> + top layer
+// ----------------------------------------------------------------------------
+// 为什么必须换成 <dialog>（v1.17.3，根治「手机端悬浮窗看不见」）：
+//
+// 酒馆 public/style.css 给 html 加了
+//     html { -webkit-transform: translateZ(0); -webkit-perspective: 1000; ... }
+// transform 不是 none → **html 成为 position:fixed 的包含块**，
+// 于是 fixed 钉的是「文档盒子」而不是「视口」。而手机端文档盒子远高于可见区
+// （聊天记录 + 常驻输入栏，body 又是 100dvh/overflow:hidden），
+// 任何「用 bottom/right 描述几何」的浮层都会整块跑到屏幕外 ——
+// 用户看到的现象就是「悬浮窗不见了」，跟有没有创建过无关。
+//
+// 浏览器对这套劫持的标准解法就是 **top layer**：原生 <dialog> 的 show()/showModal()
+// 把元素提到浏览器顶层渲染，此时它不参与文档流，**fixed 的包含块重新变回视口**，
+// 完全绕开 html 上的 transform。酒馆自己的弹窗就是这么做的
+// （酒馆助手 @types/iframe/exported.sillytavern.d.ts：SillyTavern.Popup → dlg: HTMLDialogElement）。
+//
+// 实测（temp/diag-dialog4.js，条件=html劫持 + 文档1.6×高 + scrollTop180 + 锚点整体失效）：
+//     div+fixed（v1.17.2 的做法）    → 药丸 top 550，不贴底 ❌
+//     dialog载体static + 内层fixed   → 药丸 top 224，漂得更远 ❌（载体没铺满视口）
+//     dialog自身fixed:inset:0 + 内层absolute → 药丸 top 730.4，稳稳贴右下 ✅
+// 所以载体必须**自己铺满视口**（fixed + inset:0），内层才改用 absolute，
+// 解析基准就是载体盒子（=视口），与 html 的 transform 完全无关。
+//
+// 为什么不用 showModal()：模态 dialog 会给整个文档加 inert，
+// 药丸在设置弹窗打开时就点不到了（实测 ❌），而入口必须始终可点。
+// 因此统一用非模态 show()，模态语义（点遮罩关闭、Esc）继续由我们自己实现。
+// ============================================================================
+
+/**
+ * 把浮层挂进 top-layer 载体。
+ * 载体是 `<dialog class="novel-tl">`，铺满视口；真正的浮层元素作为它的子节点。
+ *
+ * @param {string} layerId 载体 id（同一浮层复用同一个载体）
+ * @returns {HTMLElement|null} 载体元素；不支持 <dialog> 时返回 null（调用方回退到裸浮层）
+ */
+function ensureTopLayer(layerId) {
+    if (typeof document === 'undefined') return null;
+    const existing = document.getElementById(layerId);
+    if (existing) return existing;
+    // 老环境兜底：极老的 WebView 没有 <dialog>，此时沿用原来的裸浮层方案
+    if (typeof HTMLDialogElement === 'undefined'
+        || typeof HTMLDialogElement.prototype.show !== 'function') return null;
+    const layer = document.createElement('dialog');
+    layer.id = layerId;
+    layer.className = 'novel-tl';
+    layer.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(layer);
+    // show() 非模态：进 top layer 但不给文档加 inert，页面其它部分照常可点
+    try { layer.show(); } catch { /* 已在 top layer */ }
+    return layer;
+}
+
+/**
+ * 把浮层元素移入 top-layer 载体（幂等）。载体不存在时不动，返回是否成功。
+ * 注意只移动元素本身、不动它的 class/样式与事件，浮层的定位样式由内层自己负责。
+ */
+function mountInTopLayer(layerId, el) {
+    if (!el) return false;
+    const layer = ensureTopLayer(layerId);
+    if (!layer) return false;
+    if (el.parentElement !== layer) layer.appendChild(el);
+    return true;
+}
+
 // ⑤ 悬浮入口（v1.14 起简化为「纯入口」）：右下角一枚可拖动的药丸，
 //    常显当前连载进度（第 N 章 / 连载已关 / 等待开书），点击即打开设置弹窗——
 //    不再有二级展开面板，所有操作集中在弹窗内，信息与入口一一对应。
@@ -376,11 +443,17 @@ function isFloatPosUsableForViewport(pos, w, h, vp, gap) {
  * 实测修正：把药丸整颗推回可见区（用 translate 补偿，不动布局坐标，不影响拖拽逻辑）。
  * 覆盖「宿主把 fixed 钉在高于可见区的文档盒子上」「文档被顶起」「跨设备旧坐标」
  * 等所有会让药丸跑到屏幕外的情形；手机端同时保证不让常驻输入栏压住。
+ *
+ * ⚠️ 量之前必须先把上一轮的 transform 清掉：`getBoundingClientRect()` 反映的是
+ * 「CSS 锚点 + 已有补偿」之后的矩形，若拿它去算新的补偿再**替换** transform，
+ * 残差恰好等于旧值 —— 每调用一次就左右各偏一次、永远收敛不了（实测会看到
+ * inlineTransform 在 translate(0,-62) 这类值上来回跳）。
  */
 function keepFloatWindowInsideViewport(win) {
     if (!win) return;
     const vp = getVisibleViewportBox();
     if (!vp.width || !vp.height) return;
+    win.style.transform = '';
     const r = win.getBoundingClientRect();
     const maxBottom = vp.height - floatBottomClearance(readFloatGap(win));
     let dx = 0;
@@ -389,11 +462,83 @@ function keepFloatWindowInsideViewport(win) {
     if (r.left + dx < 0) dx = -r.left;
     if (r.bottom > maxBottom) dy = maxBottom - r.bottom;
     if (r.top + dy < 0) dy = -r.top;
-    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
-        win.style.transform = '';
-        return;
+    if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
+        win.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
     }
-    win.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+}
+
+/**
+ * 最后一道保险：药丸必须在可见区里有实打实的面积，而且贴在该在的位置。
+ *
+ * 上面的定位全都建立在「CSS 锚点（bottom/right）+ 反向补偿」之上，只要宿主或浏览器
+ * 行为超出预期 —— `env()` 不被识别导致整条 bottom 声明作废、fixed 的包含块被换掉、
+ * 断点没匹配上 —— 药丸就会整块落到屏幕外，而用户看到的只是「悬浮窗不见了」。
+ * 这里实测矩形，发现不可见 / 位置不对就**放弃 CSS 锚点**，直接按屏幕坐标硬放一次
+ * （写法与「用户拖过的坐标」同源：left/top + 宿主包含块折算），保证一定看得见且在右下角。
+ *
+ * @param {boolean} enforceDefaultAnchor 用户没拖过（没有持久化坐标）时为 true：
+ *        此时额外要求药丸确实贴在右下角。反例：CSS 锚点整体失效后，
+ *        keepFloatWindowInsideViewport 只能把它拉回「左下角」这种半对不对的位置
+ *        （在屏内，但压在聊天正文上、也不再是拇指区）。
+ *        用户自己拖过的药丸不参与这项校验，否则会被强行拽回右下角。
+ */
+function ensureFloatingWindowVisible(win, enforceDefaultAnchor) {
+    if (!win) return;
+    const vp = getVisibleViewportBox();
+    if (!vp.width || !vp.height) return;
+    const gap = readFloatGap(win);
+    const r = win.getBoundingClientRect();
+    const sizeOk = r.width > 1 && r.height > 1;
+    const inside = r.right > 0 && r.left < vp.width && r.bottom > 0 && r.top < vp.height;
+    // 「贴住右下角」的判定：右缘贴近视口右缘（含 gap.right 的让位），且整体落在下半屏
+    const anchored = !enforceDefaultAnchor
+        || (r.right >= vp.width - Math.max(24, gap.right + 14) && r.bottom >= vp.height * 0.5);
+    if (sizeOk && inside && anchored) return;
+    const w = win.offsetWidth || r.width || 0;
+    const h = win.offsetHeight || r.height || 0;
+    // 尺寸都量不到（例如自身 display:none，父级还没布局完）→ 本轮放弃，等下一帧重排
+    if (w < 2 || h < 2) return;
+    const left = Math.max(0, Math.round(vp.width - gap.right - w));
+    const top = Math.max(0, Math.round(vp.height - floatBottomClearance(gap) - h));
+    const off = measureHostFixedOffset(win);
+    win.style.right = 'auto';
+    win.style.bottom = 'auto';
+    win.style.transform = '';
+    win.style.left = `${left - off.x}px`;
+    win.style.top = `${top - off.y}px`;
+    win.classList.add('is-moved');
+    console.warn('[小说连载] 悬浮入口不在应在的位置，已强制移回右下角。',
+        { rect: { top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width), height: Math.round(r.height) },
+            viewport: { width: Math.round(vp.width), height: Math.round(vp.height) },
+            reason: sizeOk ? (inside ? '锚点失效（位置不对）' : '落在可见区之外') : '尺寸为 0' });
+}
+
+/**
+ * 有界重试：视口还量不到时（页面刚加载 / 切回后台标签，innerWidth 可能短暂为 0），
+ * 单次重排等于没做；而「定位失败」这件事本身没有事件会通知我们。
+ * 这里最多试 60 帧，一旦量到可见区就定位一次并复查药丸是否真的在屏内，不在就继续试。
+ * 返回 Promise 只为方便测试 await，产品代码不依赖它。
+ */
+function ensureFloatPosEventually() {
+    return new Promise((resolve) => {
+        if (typeof document === 'undefined' || typeof requestAnimationFrame !== 'function') { resolve(false); return; }
+        let n = 0;
+        const tick = () => {
+            const win = document.getElementById('novel-floating-window');
+            if (!win || n > 60) { resolve(false); return; }
+            const vp = getVisibleViewportBox();
+            if (vp.width > 0 && vp.height > 0) {
+                applyFloatPos();
+                const r = win.getBoundingClientRect();
+                const ok = r.width > 1 && r.height > 1
+                    && r.right > 0 && r.left < vp.width && r.bottom > 0 && r.top < vp.height;
+                if (ok) { resolve(true); return; }
+            }
+            n++;
+            requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    });
 }
 
 /**
@@ -412,7 +557,8 @@ function applyFloatPos() {
 
     if (isFloatPosUsableForViewport(pos, win.offsetWidth || 0, win.offsetHeight || 0, vp, gap)) {
         // 持久化的是屏幕坐标；宿主包含块被劫持时需折算成宿主坐标再写
-        const off = measureHostFixedOffset();
+        // （v1.17.3：浮层在 top layer 里时 measureHostFixedOffset 直接返回 0/0，折算自动失效）
+        const off = measureHostFixedOffset(win);
         win.style.right = 'auto';
         win.style.bottom = 'auto';
         win.style.left = `${pos.left - off.x}px`;
@@ -427,6 +573,10 @@ function applyFloatPos() {
         win.classList.remove('is-moved');
     }
     keepFloatWindowInsideViewport(win);
+    // 兜底：万一 CSS 锚点整体失效（env() 不被识别 / 包含块被换 / 断点没匹配），
+    // 药丸会跑到左下角甚至屏幕外。这里实测一次，不可见 / 位置不对就用屏幕坐标硬放回来。
+    // 用户自己拖过（pos 存在）时不强制锚点，免得把人家的药丸拽回右下角。
+    ensureFloatingWindowVisible(win, !pos);
 }
 
 // ---- 拖拽 + 轻点（指针事件，鼠标 / 触屏共用） ----
@@ -525,7 +675,7 @@ function bindFloatingWindowDrag(win, handles, onTap) {
             const rect = win.getBoundingClientRect();
             // 拖动前先把「包含块补偿」折成像素坐标：清掉可能叠加的修正 transform，
             // 并把当前屏幕位置换算进宿主坐标系，否则按下瞬间药丸会跳位
-            const off = measureHostFixedOffset();
+            const off = measureHostFixedOffset(win);
             win.style.transform = '';
             fwDrag.hostOffset = off;
             fwDrag.active = true;
@@ -558,7 +708,10 @@ function buildFloatingWindow() {
             <i class="fa-solid fa-sliders novel-fw-gear"></i>
         </div>
     `;
-    document.body.appendChild(win);
+    // 关键：挂进 top-layer 载体（v1.17.3）。
+    // 载体铺满视口并 show()，药丸的 fixed 因此钉的是视口而不是被 transform 劫持的文档盒子 ——
+    // 手机端文档盒子远高于可见区，不这么做药丸整块落在屏幕外，表现就是「悬浮窗看不见」。
+    mountInTopLayer('novel-tl-floating', win);
 
     const pill = win.querySelector('#novel_fw_pill');
     // 轻点动作：由 pointerup 当场执行（见 onFwPointerEnd），移动端不依赖补发的 click
@@ -592,6 +745,8 @@ function refreshFloatingWindow() {
     const existing = document.getElementById('novel-floating-window');
     if (settings.show_floating_window === false) {
         existing?.remove();
+        // 载体是空的了就一并撤掉，别在 body 上留个透明 dialog
+        document.getElementById('novel-tl-floating')?.remove();
         return;
     }
     const win = existing || buildFloatingWindow();
@@ -618,6 +773,9 @@ function refreshFloatingWindow() {
     applyFloatPos();
     // 首次构建时样式/字体可能还没落地，量不准药丸尺寸；下一帧再校正一次位置
     scheduleOverlayResync();
+    // 视口暂时量不到时（页面刚加载 / 切回后台标签，innerWidth 可能是 0）单次重排等于没做，
+    // 而「定位失败」没有事件会通知我们 —— 有界地多试几帧，直到药丸真的落在可见区里
+    ensureFloatPosEventually();
 }
 
 // 连载界面 surfaces 统一刷新：楼层内嵌工具条 + 悬浮窗 + 魔法棒菜单项（含被酒馆重绘后的自动补回）
@@ -2114,8 +2272,15 @@ function getDocScrollTop() {
  * 实测「fixed 元素 style: top/left = 0 时落在屏幕上的坐标」。
  * 正常宿主恒为 (0,0)；酒馆这类被 transform 劫持的宿主在文档滚动后不为 0。
  * 用探针即测即取（同一 tick 内建/测/删），避免缓存过期。
+ *
+ * ⚠️ v1.17.3：浮层挂进 top-layer 载体后，元素改用 absolute、基准是载体盒子（= 视口），
+ * **不再需要任何折算**。而探针仍是普通 fixed div，在被劫持的宿主里会量到非 0 值 ——
+ * 若继续拿来折算，等于把 top-layer 已经正确的坐标又减掉一个偏移量，药丸反而跑偏。
+ * 所以先判断浮层是否在 top layer 里，是则直接返回 (0,0)。
  */
-function measureHostFixedOffset() {
+function measureHostFixedOffset(el) {
+    // 在 top layer 里 → 坐标基准就是视口，无需折算（见上方注释）
+    if (el && el.closest && el.closest('dialog.novel-tl')) return { x: 0, y: 0 };
     if (typeof document === 'undefined' || !document.body) return { x: 0, y: 0 };
     const probe = document.createElement('div');
     probe.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;visibility:hidden;pointer-events:none;';
@@ -2133,13 +2298,20 @@ function measureHostFixedOffset() {
  * 把元素钉满「当前可见视口」。
  * ① 按可见视口给一组几何（已按宿主包含块偏移折算坐标）；
  * ② 实测屏幕矩形，偏差反向补偿，最多两轮（一轮即可收敛，第二轮兜底）。
+ *
+ * v1.17.3：浮层挂进 top-layer 载体后，元素的定位基准是**载体盒子（= 视口）**，
+ * 不再受 html transform 劫持影响，因此：
+ *   - measureHostFixedOffset(el) 直接返回 0/0，折算自动失效（详见该函数注释）
+ *   - position 写 absolute（与 CSS 里 dialog.novel-tl > 的规则一致），
+ *     绝不能写回 fixed —— 那会把元素踢出 top-layer 的坐标系、重新落回被劫持的文档盒子
  */
 function pinElementToVisibleViewport(el) {
     if (!el) return;
     const vp = getVisibleViewportBox();
     if (!vp.width || !vp.height) return;
-    const off = measureHostFixedOffset();
-    el.style.position = 'fixed';
+    const inTopLayer = !!(el.closest && el.closest('dialog.novel-tl'));
+    const off = inTopLayer ? { x: 0, y: 0 } : measureHostFixedOffset(el);
+    el.style.position = inTopLayer ? 'absolute' : 'fixed';
     el.style.right = 'auto';
     el.style.bottom = 'auto';
     el.style.width = `${vp.width}px`;
@@ -2266,7 +2438,8 @@ function ensureSettingsModal() {
             <div class="novel-modal-body novel-modal-body-settings" id="novel_settings_body"></div>
         </div>
     `;
-    document.body.appendChild(overlay);
+    // v1.17.3：挂进 top-layer 载体 —— 弹窗不再受 html transform 劫持 fixed 的影响
+    mountInTopLayer('novel-tl-settings', overlay);
 
     overlay.addEventListener('click', (e) => {
         if (e.target !== overlay) return;
@@ -2303,8 +2476,8 @@ function openNovelSettingsModal() {
     // 不记忆标签：每次打开都回到「连载」（面板在会话内是复用的，必须显式复位）
     const panelEl = document.getElementById('auto-save-to-txt-settings');
     if (panelEl && typeof panelEl.__novelActivateTab === 'function') panelEl.__novelActivateTab('serial');
-    // 折叠开合同样不记忆：否则上次手滑收起的「连载文件」会让下次打开只剩一行标题
-    applyNovelAccordionDefaults(panelEl);
+    // 折叠开合按上次的选择恢复（settings.acc_open；空数组 = 全部收起）
+    applyNovelAccOpen(panelEl);
 }
 
 function closeNovelSettingsModal() {
@@ -2373,6 +2546,8 @@ function bindNovelAccordions(panel) {
             if (!item) return;
             const open = item.classList.toggle('is-open');
             head.setAttribute('aria-expanded', open ? 'true' : 'false');
+            // 开合是本机偏好：改一次就写回扩展设置（跟 float_pos 同模式）
+            persistNovelAccOpen(panel);
         });
     });
     // 任何输入 / 勾选 / 下拉变化后刷新摘要（一处委托，省得逐个 handler 去挂）
@@ -2382,27 +2557,33 @@ function bindNovelAccordions(panel) {
 }
 
 /**
- * 折叠分组的初始开合：**单分组分区默认展开，多分组分区默认收起**。
+ * 折叠分组开合的**唯一数据源**：`settings.acc_open`（展开着的 key 列表）。
  *
- * 为什么不写死「只有连载文件展开」：像「通用」这种分区只有一个分组，
- * 若也默认收起，用户点进来只看到一片空白（实测截图就是这样）；
- * 而「过滤 / 排版」各有 3 个分组，全展开又长得像一堵墙，收起才像一份目录。
+ * 默认全部收起 —— 折叠的本意就是「先给一份目录，想改哪块再点开」，
+ * 一进来就摊开三四屏反而不像设置页了。
+ * （v1.17.0~v1.17.1 之间曾按「分区内分组个数」推导：单分组的`连载/文件/通用`自动展开。
+ *   已按用户要求推翻：一律收起。）
  *
- * 规则按「分区内分组个数」推导而非按 key 写死：以后往某个分区里增删分组，
- * 行为会自动跟着变，不用回来改这里。
+ * 恢复时机 = 每次打开设置弹窗。开合本身持久化，但**标签页仍固定回到「连载」**。
  */
-function applyNovelAccordionDefaults(panel) {
+function applyNovelAccOpen(panel) {
     if (!panel) return;
-    panel.querySelectorAll('.novel-tabpane').forEach((pane) => {
-        const items = Array.from(pane.querySelectorAll('.novel-acc'));
-        if (!items.length) return;
-        const autoOpen = items.length === 1;
-        items.forEach((item) => {
-            const head = item.querySelector('.novel-acc-head');
-            item.classList.toggle('is-open', autoOpen);
-            if (head) head.setAttribute('aria-expanded', autoOpen ? 'true' : 'false');
-        });
+    const raw = getSettings().acc_open;
+    const open = new Set(Array.isArray(raw) ? raw : []);
+    panel.querySelectorAll('.novel-acc').forEach((item) => {
+        const on = open.has(item.dataset.nvAcc);
+        item.classList.toggle('is-open', on);
+        const head = item.querySelector('.novel-acc-head');
+        if (head) head.setAttribute('aria-expanded', on ? 'true' : 'false');
     });
+}
+
+/** 把当前展开着的分组写回 `settings.acc_open` 并落盘。 */
+function persistNovelAccOpen(panel) {
+    if (!panel) return;
+    const settings = getSettings();
+    settings.acc_open = Array.from(panel.querySelectorAll('.novel-acc.is-open')).map((a) => a.dataset.nvAcc);
+    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
 }
 
 // 折叠行摘要用的短名（下拉里的选项文案太长，收起时放不下）
@@ -2481,7 +2662,8 @@ function ensurePreviewModal() {
             </div>
         </div>
     `;
-    document.body.appendChild(overlay);
+    // v1.17.3：挂进 top-layer 载体（与设置弹窗同一个坑，同一个修法）
+    mountInTopLayer('novel-tl-preview', overlay);
 
     overlay.addEventListener('click', (e) => {
         if (e.target === overlay) closeFilterPreviewModal();
@@ -2589,8 +2771,7 @@ async function renderSettingsUI(cachedStatus = null) {
 
                 <div class="novel-tabpane is-active" id="novel_pane_serial" data-nv-pane="serial" role="tabpanel" aria-labelledby="novel_tab_serial">
                 <div class="novel-section-title"><i class="fa-solid fa-book-bookmark"></i> 当前连载</div>
-                <!-- 折叠行：初始开合由 applyNovelAccordionDefaults 统一决定 ——
-                     本分区只有这一个分组，会被判为「单分组分区」而默认展开 -->
+                <!-- 折叠行：默认全部收起，开合由 applyNovelAccOpen 按 settings.acc_open 恢复 -->
                 <div class="novel-acc" data-nv-acc="book">
                     <button type="button" class="novel-acc-head" aria-expanded="false">
                         <span class="novel-acc-title"><i class="fa-solid fa-file-lines"></i> 连载文件</span>
@@ -2813,8 +2994,8 @@ async function renderSettingsUI(cachedStatus = null) {
     bindNovelTabs(panel);
     // 折叠分组接线（替代卡片式分区）
     bindNovelAccordions(panel);
-    // 初始开合：单分组分区默认展开，多分组分区默认收起
-    applyNovelAccordionDefaults(panel);
+    // 开合：默认全部收起，之后按 settings.acc_open 恢复（与打开弹窗时同一套逻辑）
+    applyNovelAccOpen(panel);
     // 面板为全新 DOM：重置 chips 渲染签名，确保尾部 renderTagTools() 一定完成首次绘制
     lastChipsRenderSig = '';
 

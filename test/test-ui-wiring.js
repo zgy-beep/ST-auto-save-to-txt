@@ -136,8 +136,69 @@ check('药丸底部让位由 CSS 变量给出（JS 与样式表单一口径）',
 check('底部安全区由探针实测（env() 在 computedStyle 里读不出解析值）',
     /function measureSafeAreaBottom/.test(src) && /height:env\(safe-area-inset-bottom, 0px\)/.test(src), true);
 check('拖动按下时把包含块补偿折成像素坐标（防按下瞬间跳位）',
-    /const off = measureHostFixedOffset\(\);\s*\n\s*win\.style\.transform = '';/.test(src)
+    /const off = measureHostFixedOffset\(win\);\s*\n\s*win\.style\.transform = '';/.test(src)
     && /fwDrag\.startLeft = rect\.left - off\.x;/.test(src), true);
+
+console.log('\n=== ③c 悬浮窗「绝不能消失」的两道兜底（v1.17.2）===');
+const keepFn = extractFn('keepFloatWindowInsideViewport');
+const ensureFn = extractFn('ensureFloatingWindowVisible');
+const retryFn = extractFn('ensureFloatPosEventually');
+const applyFn = extractFn('applyFloatPos');
+const refreshFwFn = extractFn('refreshFloatingWindow');
+check('keepFloatWindowInsideViewport 量矩形前先清掉上一轮 transform（否则残差=旧值、每帧左右横跳）',
+    /win\.style\.transform = '';\s*\n\s*const r = win\.getBoundingClientRect\(\)/.test(keepFn || ''), true);
+check('兜底一：ensureFloatingWindowVisible 存在且用屏幕坐标硬放',
+    !!ensureFn && /win\.style\.left = `\$\{left - off\.x\}px`/.test(ensureFn || '')
+    && /measureHostFixedOffset\(win\)/.test(ensureFn || ''), true);
+check('兜底一同时校验「位置对不对」（不只看在不在屏内）',
+    /enforceDefaultAnchor/.test(ensureFn || '') && /anchored/.test(ensureFn || ''), true);
+check('兜底一在 applyFloatPos 末尾被调用', /ensureFloatingWindowVisible\(win, !pos\);/.test(applyFn || ''), true);
+check('用户拖过的药丸不被拽回右下角（enforceDefaultAnchor 由「没有持久化坐标」决定）',
+    /ensureFloatingWindowVisible\(win, !pos\)/.test(src) && /const pos = getUserFloatPos\(\)/.test(applyFn || ''), true);
+check('兜底二：ensureFloatPosEventually 有界重试（视口量不到时单次重排等于没做）',
+    !!retryFn && /n > 60/.test(retryFn || '') && /requestAnimationFrame\(tick\)/.test(retryFn || ''), true);
+check('兜底二在 refreshFloatingWindow 里被调用', /ensureFloatPosEventually\(\);/.test(refreshFwFn || ''), true);
+check('CSS 手机端锚点双写 bottom：不认 env() 的浏览器至少拿到不含 env() 的那条',
+    /bottom: 74px;\s*\n\s*bottom: calc\(74px \+ env\(safe-area-inset-bottom/.test(css), true);
+
+console.log('\n=== ③d 浮层载体：原生 <dialog> + top layer（v1.17.3，根治手段）===');
+const ensureTlFn = extractFn('ensureTopLayer');
+const mountTlFn = extractFn('mountInTopLayer');
+const pinFn = extractFn('pinElementToVisibleViewport');
+const hostOffFn = extractFn('measureHostFixedOffset');
+check('载体用原生 <dialog>（酒馆官方弹窗也是这个：SillyTavern.Popup → dlg: HTMLDialogElement）',
+    /document\.createElement\('dialog'\)/.test(ensureTlFn || ''), true);
+check('载体必须 show() 才进 top layer；且用非模态（showModal 会给文档加 inert → 药丸点不到）',
+    /layer\.show\(\)/.test(ensureTlFn || '') && !/showModal/.test(ensureTlFn || ''), true);
+check('老环境兜底：环境不支持 <dialog> 时返回 null，调用方回退裸浮层',
+    /HTMLDialogElement === 'undefined'/.test(ensureTlFn || '') && /return null/.test(ensureTlFn || ''), true);
+check('mountInTopLayer 幂等（已在载体里就不重复搬）',
+    /el\.parentElement !== layer/.test(mountTlFn || ''), true);
+['novel-tl-floating', 'novel-tl-settings', 'novel-tl-preview'].forEach((id) => {
+    check(`浮层挂进 top-layer 载体：${id}`, new RegExp(`mountInTopLayer\\('${id}'`).test(src), true);
+});
+check('三个浮层都不再直接 appendChild 到 body（那会被 html transform 劫持 fixed）',
+    (src.match(/document\.body\.appendChild\((overlay|win|pv)\)/g) || []).length, 0);
+check('载体样式：铺满视口（fixed + inset:0），内层 absolute 的基准就是它',
+    /dialog\.novel-tl \{[\s\S]*?position: fixed;[\s\S]*?inset: 0;/.test(css), true);
+check('载体高度显式写死 100dvh（只给 inset:0 会被文档盒子撑高，实测撑到 1350px）',
+    /dialog\.novel-tl \{[\s\S]*?height: 100dvh;/.test(css), true);
+check('载体不吃指针事件（否则透明 dialog 会把整个页面挡死），子浮层各自恢复',
+    /dialog\.novel-tl \{[\s\S]*?pointer-events: none;/.test(css)
+    && /dialog\.novel-tl > \.novel-floating-window,[\s\S]*?pointer-events: auto;/.test(css), true);
+check('内层浮层改 position:absolute（基准=载体盒子=视口，免疫 html transform）',
+    /dialog\.novel-tl > \.novel-floating-window,[\s\S]*?position: absolute;/.test(css), true);
+check('载体不能加 contain（含 paint 包含会裁剪溢出，弹窗正文会滚不动）',
+    !/dialog\.novel-tl \{[^}]*contain:/.test(css), true);
+check('在 top layer 里时 measureHostFixedOffset 直接返回 0/0（坐标系已是视口，再折算反而跑偏）',
+    /closest\('dialog\.novel-tl'\)\) return \{ x: 0, y: 0 \}/.test(hostOffFn || ''), true);
+check('measureHostFixedOffset 已接收元素参数（三处调用都传了 win/el）',
+    /function measureHostFixedOffset\(el\)/.test(src)
+    && (src.match(/measureHostFixedOffset\(win\)/g) || []).length >= 2, true);
+check('pinElementToVisibleViewport 在 top layer 里写 absolute，绝不写回 fixed',
+    /inTopLayer \? 'absolute' : 'fixed'/.test(pinFn || ''), true);
+check('关闭悬浮入口时连载体一起撤掉（别在 body 上留空 dialog）',
+    /getElementById\('novel-tl-floating'\)\?\.remove\(\)/.test(src), true);
 
 // 行为用例：坐标是否适用于当前视口（纯函数，真实执行）
 const usableFn = extractFn('isFloatPosUsableForViewport');
@@ -436,16 +497,25 @@ check('不折叠的动作行 2 个（过滤预览 / 导出与同步）',
     (src.match(/class="novel-acc-flat"/g) || []).length, 2);
 check('初始开合不在模板里写死（书卡上不预置 is-open）',
     (src.match(/class="novel-acc is-open"/g) || []).length, 0);
-check('初始开合由 applyNovelAccordionDefaults 统一推导',
-    !!extractFn('applyNovelAccordionDefaults'), true);
-check('推导规则 = 「分区内只有一个分组就展开」',
-    /items\.length === 1/.test(extractFn('applyNovelAccordionDefaults') || ''), true);
-check('推导规则按 data-nv-pane 遍历，不按分组 key 写死',
-    !/nvAcc === '(book|dir|display)'/.test(extractFn('applyNovelAccordionDefaults') || ''), true);
-check('面板建好后会应用初始开合',
-    /applyNovelAccordionDefaults\(panel\)/.test(src), true);
-check('每次打开设置都重算开合（不记忆折叠状态）',
-    /applyNovelAccordionDefaults\(panelEl\)/.test(src), true);
+check('开合由 applyNovelAccOpen 统一决定（唯一入口）',
+    !!extractFn('applyNovelAccOpen'), true);
+check('默认全部收起（按 settings.acc_open 恢复，不再按分组个数推导）',
+    /const on = open\.has\(item\.dataset\.nvAcc\)/.test(extractFn('applyNovelAccOpen') || '')
+    && !/items\.length === 1/.test(extractFn('applyNovelAccOpen') || ''), true);
+check('开合状态源 = settings.acc_open（读）',
+    /getSettings\(\)\.acc_open/.test(extractFn('applyNovelAccOpen') || ''), true);
+check('acc_open 是默认设置项（空数组 = 全部收起）',
+    /acc_open:\s*\[\]/.test(src), true);
+check('面板建好后会应用开合',
+    /applyNovelAccOpen\(panel\)/.test(src), true);
+check('每次打开设置按持久化状态恢复开合（记忆折叠）',
+    /applyNovelAccOpen\(panelEl\)/.test(src), true);
+check('折叠开合变更后写回 settings.acc_open',
+    /settings\.acc_open\s*=/.test(extractFn('persistNovelAccOpen') || ''), true);
+check('写回后落盘（saveSettingsDebounced）',
+    /saveSettingsDebounced/.test(extractFn('persistNovelAccOpen') || ''), true);
+check('点击折叠标题时触发持久化',
+    /persistNovelAccOpen\(panel\)/.test(extractFn('bindNovelAccordions') || ''), true);
 check('展开体 aria 语义齐备（aria-expanded）',
     (src.match(/class="novel-acc-head" aria-expanded="/g) || []).length, 9);
 check('折叠行标题带箭头图标（.novel-acc-chev）',

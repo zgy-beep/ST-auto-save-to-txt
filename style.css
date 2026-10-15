@@ -2415,3 +2415,98 @@
 }
 
 
+/* ========================================================================== *
+ * v1.17.2 悬浮入口「手机端看不见」的加固（覆盖块，不动上面的老规则）
+ *
+ * 问题：手机端锚点写成一条
+ *     bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+ * 只要浏览器 / 内置 WebView 不认 env()（老 WebView、部分 App 内置浏览器），
+ * **整条声明会在 computed-value 阶段作废**，bottom 退回 auto ——
+ * position:fixed 的药丸于是落到「静态位置」= body 流的末尾，也就是屏幕外。
+ * 桌面端那条是纯 `bottom: 12px`（不含 env()），所以症状正好是「电脑正常、手机消失」。
+ *
+ * 修法：同一个属性写两遍。前一条不含 env()，浏览器即使丢弃后一条，
+ * 前一条依然成立；支持 env() 时后一条覆盖它，把安全区叠加进去。
+ * （JS 侧另有 ensureFloatingWindowVisible() 兜底，两者互不依赖。）
+ * ========================================================================== */
+@media (max-width: 768px) {
+    .novel-floating-window {
+        bottom: 74px;
+        bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+    }
+}
+
+/* ========================================================================== *
+ * v1.17.3 浮层载体：原生 <dialog> + top layer（根治「手机端悬浮窗看不见」）
+ *
+ * 根因（v1.17.2 那些兜底都没能治本的原因）：
+ * 酒馆 public/style.css 里 html 上有
+ *     html { -webkit-transform: translateZ(0); -webkit-perspective: 1000; ... }
+ * transform 不是 none → **html 成为 position:fixed 的包含块**，
+ * fixed 于是钉「文档盒子」而不是「视口」。而手机端文档盒子远高于可见区
+ * （聊天记录 + 常驻输入栏，body 又是 100dvh + overflow:hidden），
+ * 任何用 bottom/right 描述几何的浮层都会整块跑到屏幕外。
+ *
+ * 解法：原生 <dialog> 的 show() 把元素提到浏览器 **top layer**，
+ * 此时它脱离文档流渲染，fixed 的包含块重新变回视口，**绕开 html 的 transform**。
+ * 酒馆自己的弹窗就是这么做的（酒馆助手 @types：SillyTavern.Popup → dlg: HTMLDialogElement）。
+ *
+ * 两条关键约束（缺一个就前功尽弃，实测过）：
+ *   ① 载体必须**自己铺满视口**（position:fixed; inset:0）。
+ *      只把浮层塞进一个 static 的 dialog 里没用 —— 实测药丸反而漂到 top 224。
+ *   ② 载体必须用**非模态 show()**，不能用 showModal()。
+ *      模态会给整个文档加 inert，设置弹窗打开时药丸就点不到了（实测 ❌）。
+ *
+ * 内层浮层改用 position:absolute：解析基准是载体盒子（=视口），
+ * 与 html 的 transform 完全无关，因此锚点声明整体失效也不会跑偏。
+ * （原来的 fixed 规则保留在下面，被这条覆盖；测试网有断言钉住这个覆盖关系。）
+ * ========================================================================== */
+dialog.novel-tl {
+    position: fixed;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    overflow: visible;
+    background: transparent;
+    color: inherit;
+    /* 载体只是个透明盒子：不吃指针事件，只让子浮层各自处理（否则会挡住整个页面） */
+    pointer-events: none;
+}
+/* 未 show() 的 dialog 是 display:none，显式写出来避免被 UA 样式之外的东西影响 */
+dialog.novel-tl:not([open]) { display: none; }
+/* 子浮层恢复指针事件（药丸可点、弹窗遮罩可点） */
+dialog.novel-tl > .novel-floating-window,
+dialog.novel-tl > .novel-modal-overlay {
+    pointer-events: auto;
+}
+/* 内层改 absolute：基准是载体盒子（= 视口），免疫 html transform 劫持 */
+dialog.novel-tl > .novel-floating-window,
+dialog.novel-tl > .novel-modal-overlay {
+    position: absolute;
+}
+
+/* ---- 载体高度必须显式写死，不能只靠 inset:0 ----
+ * 症状：文档盒子高于可见区时，载体被撑到 1055 / 1350px（跟着文档盒子走），
+ *      于是内层药丸的 absolute 基准也跟着错。
+ * 成因：`height:auto` 的 fixed 元素在部分宿主下会被内容/文档盒子拉伸；
+ *      显式 `height:100vh` + `height:100dvh`（后者跟随手机可见区）才稳定。
+ *      两句都要写：老浏览器不认 dvh 时由 vh 兜底。 */
+dialog.novel-tl {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+}
+/* 载体若被内容撑高，用 overflow:hidden 钉死（双保险）。
+ *
+ * ⚠️ 这里**不能**加 `contain: strict`：它含 paint 包含，会裁剪溢出内容。
+ * 实测（temp/diag-contain.js）设置弹窗的正文滚动区在 contain:strict 的载体里
+ * 完全滚不动 —— `body.scrollTop = 300` 写进去读回 0，弹窗正文根本滑不动。
+ * 尺寸已经由上面显式的 100dvh 钉住了，不需要 contain 帮忙。 */
+dialog.novel-tl {
+    overflow: hidden;
+}
