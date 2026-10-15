@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.17.4',            // 扩展版本号
+    version: '1.17.5',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -362,6 +362,11 @@ function ensureTopLayer(layerId) {
  * 兜底：载体不存在（老环境）时**直接把浮层挂到 body**，
  * 否则调用方拿到的元素从未进过 DOM —— 弹窗会彻底消失且不报错。
  * 回退路径同时补 z-index，保证仍能盖过宿主 UI（宿主最高用到 29999）。
+ *
+ * z-index 分档（v1.17.5）：**不用 int32 顶格 2147483647**。
+ * 顶格会让药丸压在自己打开的设置弹窗之上，还会盖住酒馆后续 show() 的任何东西；
+ * 只保证「高于宿主 29999」，谁高谁低交给 CSS 按 id 分档：
+ * 药丸 1000010 < 设置弹窗 1000015 < 预览弹窗 1000025。
  */
 function mountInTopLayer(layerId, el) {
     if (!el) return false;
@@ -369,7 +374,7 @@ function mountInTopLayer(layerId, el) {
     if (!layer) {
         if (el.parentElement !== document.body) {
             document.body.appendChild(el);
-            if (!el.style.zIndex) el.style.zIndex = '2147483647';
+            if (!el.style.zIndex) el.style.zIndex = '1000010';
         }
         return false;
     }
@@ -400,6 +405,35 @@ function clampFloatPos(left, top, w, h) {
         left: Math.min(Math.max(0, left), maxLeft),
         top: Math.min(Math.max(0, top), maxTop)
     };
+}
+
+/**
+ * 贴边校正：药丸尺寸变了以后，之前保存的「左上角坐标」就对不上当前尺寸了。
+ *
+ * 背景（v1.17.5 药丸从 129×40 缩成 36×36 圆钮时暴露）：
+ * 用户当初把药丸拖到右下角，存的是「左上角 = (250, 700)」；
+ * 药丸缩窄 70px 之后同一个左上角反而离右边缘 104px —— 药丸**悬在半空不贴角**，
+ * 看起来就像「被拖到奇怪的位置」。
+ *
+ * 这里只校正「本意就是贴边」的落点：右/下边距与目标边距的差落在一个旧药丸
+ * 尺寸的窗口内（96px）时，认为用户当初是贴边拖的，按**当前**尺寸重算贴边坐标。
+ * 超出这个窗口 → 视为用户故意摆在中间，原样保留。
+ * 绝不能无条件贴边：那会把用户摆在页面中间的药丸强行拽回右下角。
+ */
+function realignFloatPosToEdge(pos, w, h, vp, gap) {
+    if (!pos) return pos;
+    const tol = 96;   // 一个旧药丸的宽度量级；只有「贴边」的落点才会落在这个窗口内
+    const clearance = floatBottomClearance(gap);
+    const next = { left: pos.left, top: pos.top };
+    const rightGap = vp.width - (pos.left + w);
+    const bottomGap = vp.height - (pos.top + h);
+    if (Math.abs(rightGap - gap.right) <= tol) {
+        next.left = Math.max(0, Math.round(vp.width - gap.right - w));
+    }
+    if (Math.abs(bottomGap - clearance) <= tol) {
+        next.top = Math.max(0, Math.round(vp.height - clearance - h));
+    }
+    return next;
 }
 
 /**
@@ -580,10 +614,12 @@ function applyFloatPos() {
         // 持久化的是屏幕坐标；宿主包含块被劫持时需折算成宿主坐标再写
         // （v1.17.3：浮层在 top layer 里时 measureHostFixedOffset 直接返回 0/0，折算自动失效）
         const off = measureHostFixedOffset(win);
+        // 药丸尺寸变过（版本更新 / 折叠展开 / 字体加载）后，旧坐标不再贴边 → 先校正一次
+        const fixed = realignFloatPosToEdge(pos, win.offsetWidth || 0, win.offsetHeight || 0, vp, gap);
         win.style.right = 'auto';
         win.style.bottom = 'auto';
-        win.style.left = `${pos.left - off.x}px`;
-        win.style.top = `${pos.top - off.y}px`;
+        win.style.left = `${fixed.left - off.x}px`;
+        win.style.top = `${fixed.top - off.y}px`;
         win.classList.add('is-moved');
     } else {
         // 回落到本设备默认锚点（右/下由 CSS 变量给出，手机端已让开输入栏）

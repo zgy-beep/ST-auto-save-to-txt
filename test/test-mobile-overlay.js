@@ -68,7 +68,7 @@ const fwHtml = extractTemplate('function buildFloatingWindow', 'floating');
 
 const FNS = [
     'positionOverlay', 'pinElementToVisibleViewport', 'getVisibleViewportBox',
-    'measureHostFixedOffset', 'clampFloatPos', 'applyFloatPos', 'getUserFloatPos',
+    'measureHostFixedOffset', 'clampFloatPos', 'realignFloatPosToEdge', 'applyFloatPos', 'getUserFloatPos',
     'isFloatPosUsableForViewport', 'floatBottomClearance', 'readFloatGap',
     'measureSafeAreaBottom', 'keepFloatWindowInsideViewport', 'ensureFloatingWindowVisible',
     'ensureFloatPosEventually', 'getDocScrollTop', 'ensureTopLayer', 'mountInTopLayer'
@@ -284,14 +284,51 @@ function measure(win, overlay, pv, done) {
     // 设置弹窗：在它自己那层，判定「命中的是自己 或 自己下层的宿主UI之外的东西」都不算被盖住。
     // 严格判据 = 命中点不是宿主 UI（stui-*）。这才是层叠契约本身。
     out.modalOnTop = !!(hitM && !(hitM.id && hitM.id.startsWith('stui-')));
-    // 载体与内层的 z-index 都必须写死顶层值（实测：只加内层完全无效）
-    out.layerZ = layer ? getComputedStyle(layer).zIndex : '';
-    out.innerZ = layer ? getComputedStyle(overlay).zIndex : '';
-    out.zIndexTop = out.layerZ === '2147483647' && out.innerZ === '2147483647';
-    // 命中点不能落在宿主元素上（双保险：即使 contains 判定漏了也拦得住）
+    // ---- v1.17.5 层级分档 ----
+    // v1.17.4 给三个浮层**全部**写 2147483647（int32 顶格）来盖住宿主 UI，
+    // 副作用是药丸压在自己打开的设置弹窗之上、并且盖住酒馆后续 show() 的任何东西。
+    // 现在改成分档：药丸 1000010 < 设置弹窗 1000015 < 预览弹窗 1000025，
+    // 但**三者都高于宿主最高层 29999**（这是 v1.17.4 修的回归，不能退回去）。
+    const zf = layer ? getComputedStyle(layer).zIndex : '';
+    const zi = layer ? getComputedStyle(overlay).zIndex : '';
+    const zw = layer ? getComputedStyle(document.getElementById('novel-floating-window')).zIndex : '';
+    const zpv = document.getElementById('novel_preview_modal');
+    const zp = zpv ? getComputedStyle(zpv).zIndex : '';
+    out.zLayers = { floating: zf, settings: zi, preview: zp, fwInner: zw };
+    // 契约一：全部高于宿主最高层 29999（v1.17.4 修的「被界面盖住」回归）
+    out.zAboveHost = [zf, zi, zp, zw]
+        .filter((v) => v && v !== 'auto')
+        .every((v) => Number(v) > 29999);
+    // 契约二：没有一个是 int32 顶格（顶格 = 「不管开什么都在最上面」的元凶）
+    out.zNotIntMax = [zf, zi, zp, zw].every((v) => v !== '2147483647');
+    // 契约三：药丸让位给自家弹窗（点药丸开弹窗后，弹窗必须压在药丸之上）
+    out.zPillYieldsToSettings = Number(zi) > Number(zw);
+    // 契约四：预览弹窗（可从设置弹窗内唤起）高于设置弹窗
+    out.zPreviewAboveSettings = Number(zp) > Number(zi);
+    // 命中测试不能落在宿主元素上（双保险：即使 contains 判定漏了也拦得住）
     out.notBehindHost = !(hitF && hitF.id && hitF.id.startsWith('stui-'))
         && !(hitM && hitM.id && hitM.id.startsWith('stui-'));
     out.hostHitIds = [hitF && hitF.id, hitM && hitM.id].filter(Boolean).join(',');
+    // ---- v1.17.5 药丸瘦身 ----
+    // 默认收起成小圆钮（≈36×36），hover / 聚焦才展开成胶囊。
+    // 「视觉小」与「难点」要分开：宽度必须 ≤ 60px，高度必须 ≥ 30px（触摸目标下限）。
+    const pillEl = win.querySelector('.novel-fw-pill');
+    if (pillEl) {
+        const pr = pillEl.getBoundingClientRect();
+        const txt = pillEl.querySelector('#novel_fw_pill_text');
+        const cs = getComputedStyle(pillEl);
+        out.pillSize = { w: +pr.width.toFixed(1), h: +pr.height.toFixed(1) };
+        out.pillTextHidden = txt ? (getComputedStyle(txt).maxWidth === '0px') : false;
+        // 收起态必须 min-width / max-width **同值**锁成正方形：
+        // 只写 max-width → padding:0 让内容归零塌成 2px；只写 width → 展开时展不开（都实测踩过）。
+        out.pillSquareLock = cs.minWidth !== '0px'
+            && cs.minWidth === cs.maxWidth
+            && parseFloat(cs.minWidth) >= 30 && parseFloat(cs.minWidth) <= 40;
+        out.pillCompact = pr.width <= 60 && pr.height >= 30 && pr.height <= 44 && out.pillTextHidden;
+    } else {
+        out.pillCompact = false;
+        out.pillSquareLock = false;
+    }
     out.modalProbe = { probeOn: mPt.target.className, hitClass: hitM && (typeof hitM.className === 'string' ? hitM.className : ''),
         closestSettings: hitM && hitM.closest && hitM.closest('#novel_settings_modal') ? 'YES' : 'NO' };
 
@@ -300,7 +337,10 @@ function measure(win, overlay, pv, done) {
         && out.tlFloating && out.tlSettings && out.tlPreview
         && out.tlOpen && out.tlNotModal && out.tlCoversViewport
         && out.fwNoCompensation && out.fwHittable && out.tlNoContain
-        && out.fwOnTop && out.modalOnTop && out.zIndexTop && out.notBehindHost;
+        && out.fwOnTop && out.modalOnTop && out.notBehindHost
+        && out.zAboveHost && out.zNotIntMax && out.zPillYieldsToSettings && out.zPreviewAboveSettings
+        // 药丸瘦身：默认收起成小圆钮（v1.17.5 之前是 105×40 的大药丸）
+        && out.pillCompact && out.pillSquareLock;
     return out;
 }
 // 视口故障注入：前 n 次 getVisibleViewportBox() 返回 0×0，模拟页面刚加载 / 后台标签
@@ -375,7 +415,12 @@ const SCENARIOS = [
                 if (!r.fwHittable) console.error('       药丸不可点（透明载体可能吃掉了指针事件）');
                 if (!r.fwOnTop) console.error('       药丸被宿主 UI 盖住了（层叠问题，不是定位问题）');
                 if (!r.modalOnTop) console.error(`       设置弹窗被宿主 UI 盖住了（层叠问题）probe=${JSON.stringify(r.modalProbe)} modal=${JSON.stringify(r.modal)}`);
-                if (!r.zIndexTop) console.error(`       z-index 不对：载体=${r.layerZ} 内层=${r.innerZ}（都应为 2147483647）`);
+                if (!r.zAboveHost) console.error(`       层级没盖过宿主（宿主最高 29999）：${JSON.stringify(r.zLayers)}`);
+                if (!r.zNotIntMax) console.error(`       层级用了 int32 顶格 2147483647（会压在任何东西之上）：${JSON.stringify(r.zLayers)}`);
+                if (!r.zPillYieldsToSettings) console.error(`       药丸没让位给设置弹窗（点药丸开弹窗后药丸不该还在最上层）：${JSON.stringify(r.zLayers)}`);
+                if (!r.zPreviewAboveSettings) console.error(`       预览弹窗层级不高于设置弹窗：${JSON.stringify(r.zLayers)}`);
+                if (!r.pillCompact) console.error(`       药丸没收小（应 ≤60×44 且 ≥30 高，文字收起）：${JSON.stringify(r.pillSize)}`);
+                if (!r.pillSquareLock) console.error('       药丸收起态没用 min/max 同值锁成正方形（只写一个会塌成 2px 或展不开）');
                 if (!r.notBehindHost) console.error(`       命中测试落在宿主元素上：${r.hostHitIds}`);
                 if (!r.tlNoContain) console.error('       载体带了 contain 属性（paint 包含会裁剪溢出，弹窗正文会滚不动）');
                 if (r.fwOk && !r.fwAnchored) console.error(`       悬浮药丸没贴在右下角（跑到别处去了）：${JSON.stringify(r.fw)}`);

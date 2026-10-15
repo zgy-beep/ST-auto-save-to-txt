@@ -204,10 +204,13 @@ console.log('\n=== ③e 层叠：浮层必须盖过宿主 UI（v1.17.4，修「�
 // 背景：宿主 html 上的 transform 除了劫持 fixed 包含块，还让 html 成为**层叠上下文**。
 // dialog show() 之后绘制仍困在这个上下文里比较，载体 z-index:auto（=0）直接输给
 // 酒馆 UI 的 29999 → 弹窗/药丸全部被盖住。**top layer 只解决定位，不解决层叠。**
-check('载体写死 z-index 顶层值（auto 会输给宿主 29999，实测弹窗被完全遮住）',
-    /dialog\.novel-tl \{[^}]*z-index: 2147483647;/.test(css), true);
-check('内层也写死同一值（只加载体时药丸仍被宿主底栏半透明背景透过叠加，黄变暗黄）',
-    /dialog\.novel-tl > #novel_settings_modal,[\s\S]*?z-index: 2147483647;/.test(css), true);
+// ⚠️ v1.17.5：这里**不能**再断言 2147483647。顶格是 v1.17.4 的应急写法，
+// 副作用是药丸压在自己打开的弹窗之上、且盖住酒馆后续 show() 的任何东西。
+// 契约已改为「分档且都高于宿主 29999」，见 ③f 段的量化断言。
+check('载体写死了高于宿主 29999 的 z-index（auto 会输给宿主，实测弹窗被完全遮住）',
+    /dialog\.novel-tl[^{]*\{[^}]*z-index: 1\d{6};/.test(css), true);
+check('内层也写死同一档（只加载体时药丸仍被宿主底栏半透明背景透过叠加，黄变暗黄）',
+    /dialog\.novel-tl > #novel_settings_modal \{[^}]*z-index: 1\d{6};/.test(css), true);
 check('内层选择器必须带 id：#novel_settings_modal 特异性 (1,0,0) 胜过 (0,1,2)，只写类会被压过去',
     /dialog\.novel-tl > #novel_settings_modal/.test(css)
     && /dialog\.novel-tl > #novel_preview_modal/.test(css)
@@ -217,11 +220,59 @@ check('预览弹窗同样要写死（它在另一个载体里，靠同一套规�
 check('mountInTopLayer 载体缺失时把浮层挂回 body（否则元素从未进 DOM，弹窗彻底消失且不报错）',
     /if \(!layer\) \{[\s\S]*?document\.body\.appendChild\(el\)/.test(mountTlFn || ''), true);
 check('回退路径补 z-index（挂回 body 仍要能盖住宿主 UI）',
-    /if \(!layer\) \{[\s\S]*?zIndex = '2147483647'/.test(mountTlFn || ''), true);
+    /if \(!layer\) \{[\s\S]*?zIndex = '1000010'/.test(mountTlFn || ''), true);
+check('代码里已不再把浮层 z-index 设成 int32 顶格（顶格 = 不管开什么都在最上面）',
+    /z-index: 2147483647|zIndex = '2147483647'/.test(src), false);
 check('代码注释记录了「top layer 只解决定位不解决层叠」这个坑',
     /top layer \*\*只解决定位，不解决层叠\*\*/.test(src), true);
 check('移动端浮层测试页复刻了宿主 UI 元素（.stui）——没有它就测不出层叠冲突',
     /#stui-sheld/.test(fs.readFileSync(path.join(__dirname, 'test-mobile-overlay.js'), 'utf8')), true);
+
+console.log('\n=== ③f 层级分档 + 药丸瘦身（v1.17.5）===');
+// 诉求：药丸太大影响感官 + 层级太高（int32 顶格）导致不管开什么都在最上面。
+// 分档：药丸 1000010 < 设置弹窗 1000015 < 预览弹窗 1000025，三者都高于宿主 29999。
+// ⚠️ style.css 是 CRLF 行尾；`\s*` 本身已覆盖 \r\n，不要再叠 `\r?\n` ——
+// 叠加后 \s* 会先吃掉 \r，\r? 再要求一个 \r 就永远匹配不上（文本肉眼对得上但断言全 false）。
+check('药丸载体 1000010（高于宿主 29999，但让位给自家弹窗）',
+    /dialog\.novel-tl > #novel-floating-window,\s*dialog\.novel-tl > #novel-floating-window \{\s*z-index: 1000010;/.test(css), true);
+check('设置弹窗档位高于药丸（点药丸开弹窗后，弹窗必须压在药丸之上）',
+    /dialog\.novel-tl > #novel_settings_modal \{\s*z-index: 1000015;/.test(css), true);
+check('预览弹窗档位高于设置弹窗（预览可从设置弹窗内唤起）',
+    /dialog\.novel-tl > #novel_preview_modal \{\s*z-index: 1000025;/.test(css), true);
+// ⚠️ 必须先剥注释再找：说明文字里会引用这个数字（「v1.17.4 写的是 z-index: 2147483647」），
+// 不剥就会把文档本身判成违规 —— 这条断言本身就被这样坑红过一次。
+check('样式表里已没有任何 z-index: 2147483647 声明（顶格会压在任何东西之上）',
+    /z-index:\s*2147483647/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')), false);
+// ⚠️ 以下这几条是**文本断言**，理论上会被后面追加的覆盖块掩盖（空转风险）。
+// 真正的「药丸到底多大、层级到底多少」由 test-mobile-overlay.js 的 computed 值断言
+// （pillCompact / zAboveHost / zNotIntMax / zPillYieldsToSettings）负责 ——
+// 自证时实测过：把这两条文本断言涉及的声明改坏，computed 断言立刻变红，文本断言不会。
+// 所以这里的定位是「锁住设计意图写在了样式表里」，不是「锁住最终行为」。
+check('药丸默认收起成小圆钮（max-width ≤ 60px）',
+    /\.novel-fw-pill \{[\s\S]*?max-width: 34px;/.test(css), true);
+check('药丸圆钮带 box-sizing:border-box —— 扩展浮层拿不到酒馆的全局 reset，没有它 min-height 会与 padding 相加（实测 36+12+2=50px，比改之前还高）',
+    /\.novel-fw-pill \{[\s\S]*?box-sizing: border-box;/.test(css), true);
+check('药丸文字默认收起（max-width:0 + opacity:0），hover / 聚焦才展开',
+    /#novel_fw_pill_text \{[\s\S]*?max-width: 0;[\s\S]*?opacity: 0;/.test(css), true);
+check('hover / focus-visible / 拖动中三种情况都会展开药丸',
+    /\.novel-fw-pill:hover[\s\S]*?max-width: 210px;/.test(css)
+    && /\.novel-fw-pill:focus-visible[\s\S]*?max-width: 210px;/.test(css), true);
+check('装饰图标（grip / gear）默认 width:0 收起，不是永久占位',
+    /\.novel-fw-grip,\s*\n\.novel-fw-gear \{[\s\S]*?max-width: 0;/.test(css), true);
+check('装饰图标收起时必须显式 min-width:0 —— flex 子项 min-width:auto 会让 width:0 失效',
+    /\.novel-fw-grip,\s*\n\.novel-fw-gear \{[\s\S]*?min-width: 0;/.test(css), true);
+check('手机端圆钮 36×36：视觉小但触摸目标不缩水（不再用 v1.14 的 11px/16px 大药丸）',
+    /@media \(max-width: 768px\)[\s\S]*?\.novel-fw-pill \{[\s\S]*?max-width: 36px;[\s\S]*?height: 36px;/.test(css), true);
+check('药丸尺寸变过之后会做贴边校正（旧坐标是按 105px 宽的药丸存的，缩到 36px 会悬在半空）',
+    !!extractFn('realignFloatPosToEdge'), true);
+check('贴边校正只作用于「本意贴边」的落点（有容差窗口），不会把用户摆在中间的药丸拽回角上',
+    /Math\.abs\(rightGap - gap\.right\) <= tol/.test(extractFn('realignFloatPosToEdge') || '')
+    && /Math\.abs\(bottomGap - clearance\) <= tol/.test(extractFn('realignFloatPosToEdge') || ''), true);
+check('applyFloatPos 写坐标前先过一遍贴边校正',
+    /realignFloatPosToEdge\(pos,[\s\S]*?win\.style\.left = `\$\{fixed\.left/.test(src), true);
+check('移动端浮层测试已断言层级契约（分档 / 非顶格 / 药丸让位）与药丸瘦身',
+    /zPillYieldsToSettings/.test(fs.readFileSync(path.join(__dirname, 'test-mobile-overlay.js'), 'utf8'))
+    && /pillCompact/.test(fs.readFileSync(path.join(__dirname, 'test-mobile-overlay.js'), 'utf8')), true);
 
 // 行为用例：坐标是否适用于当前视口（纯函数，真实执行）
 const usableFn = extractFn('isFloatPosUsableForViewport');
