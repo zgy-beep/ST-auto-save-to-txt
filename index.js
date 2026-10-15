@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.17.3',            // 扩展版本号
+    version: '1.17.4',            // 扩展版本号
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -308,6 +308,14 @@ function syncWandEntryState() {
 // 完全绕开 html 上的 transform。酒馆自己的弹窗就是这么做的
 // （酒馆助手 @types/iframe/exported.sillytavern.d.ts：SillyTavern.Popup → dlg: HTMLDialogElement）。
 //
+// ⚠️⚠️ 但 top layer **只解决定位，不解决层叠**（v1.17.4 实测踩坑，代价是弹窗全体消失）：
+// html 上的 transform 同时让 **html 成为一个层叠上下文**，dialog show() 之后绘制
+// 仍在这个层叠上下文里参与比较 —— 载体 `z-index: auto`（等价 0）直接输给酒馆 UI 的
+// 29999，用户看到的是「弹窗显示在酒馆界面后面」。
+// **载体与内层都必须显式写 z-index 顶层值**，且内层那条不能省（只加载体时药丸仍会被
+// 宿主底栏的半透明背景透过叠加）。详见 style.css 末尾 v1.17.4 覆盖块里的实测记录。
+// 教训：判断层叠顺序只能靠**像素采样**，z-index 数值推理在这个场景里会给出错误结论。
+//
 // 实测（temp/diag-dialog4.js，条件=html劫持 + 文档1.6×高 + scrollTop180 + 锚点整体失效）：
 //     div+fixed（v1.17.2 的做法）    → 药丸 top 550，不贴底 ❌
 //     dialog载体static + 内层fixed   → 药丸 top 224，漂得更远 ❌（载体没铺满视口）
@@ -322,7 +330,11 @@ function syncWandEntryState() {
 
 /**
  * 把浮层挂进 top-layer 载体。
- * 载体是 `<dialog class="novel-tl">`，铺满视口；真正的浮层元素作为它的子节点。
+ *
+ * ⚠️ 这里**必须**留一条「挂不进载体就直接挂 body」的兜底：
+ * 一旦载体建不出来（极老 WebView 没有 <dialog>）而调用方又没有兜底，
+ * 浮层元素就**从未被插入 DOM** —— 症状是弹窗彻底消失且毫无报错，
+ * 极难定位。挂回 body 时补一个 z-index，保证仍能盖住宿主 UI。
  *
  * @param {string} layerId 载体 id（同一浮层复用同一个载体）
  * @returns {HTMLElement|null} 载体元素；不支持 <dialog> 时返回 null（调用方回退到裸浮层）
@@ -345,13 +357,22 @@ function ensureTopLayer(layerId) {
 }
 
 /**
- * 把浮层元素移入 top-layer 载体（幂等）。载体不存在时不动，返回是否成功。
- * 注意只移动元素本身、不动它的 class/样式与事件，浮层的定位样式由内层自己负责。
+ * 把浮层元素移入 top-layer 载体（幂等）。
+ *
+ * 兜底：载体不存在（老环境）时**直接把浮层挂到 body**，
+ * 否则调用方拿到的元素从未进过 DOM —— 弹窗会彻底消失且不报错。
+ * 回退路径同时补 z-index，保证仍能盖过宿主 UI（宿主最高用到 29999）。
  */
 function mountInTopLayer(layerId, el) {
     if (!el) return false;
     const layer = ensureTopLayer(layerId);
-    if (!layer) return false;
+    if (!layer) {
+        if (el.parentElement !== document.body) {
+            document.body.appendChild(el);
+            if (!el.style.zIndex) el.style.zIndex = '2147483647';
+        }
+        return false;
+    }
     if (el.parentElement !== layer) layer.appendChild(el);
     return true;
 }

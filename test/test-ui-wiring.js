@@ -200,6 +200,29 @@ check('pinElementToVisibleViewport 在 top layer 里写 absolute，绝不写回 
 check('关闭悬浮入口时连载体一起撤掉（别在 body 上留空 dialog）',
     /getElementById\('novel-tl-floating'\)\?\.remove\(\)/.test(src), true);
 
+console.log('\n=== ③e 层叠：浮层必须盖过宿主 UI（v1.17.4，修「弹窗显示在界面后面」）===');
+// 背景：宿主 html 上的 transform 除了劫持 fixed 包含块，还让 html 成为**层叠上下文**。
+// dialog show() 之后绘制仍困在这个上下文里比较，载体 z-index:auto（=0）直接输给
+// 酒馆 UI 的 29999 → 弹窗/药丸全部被盖住。**top layer 只解决定位，不解决层叠。**
+check('载体写死 z-index 顶层值（auto 会输给宿主 29999，实测弹窗被完全遮住）',
+    /dialog\.novel-tl \{[^}]*z-index: 2147483647;/.test(css), true);
+check('内层也写死同一值（只加载体时药丸仍被宿主底栏半透明背景透过叠加，黄变暗黄）',
+    /dialog\.novel-tl > #novel_settings_modal,[\s\S]*?z-index: 2147483647;/.test(css), true);
+check('内层选择器必须带 id：#novel_settings_modal 特异性 (1,0,0) 胜过 (0,1,2)，只写类会被压过去',
+    /dialog\.novel-tl > #novel_settings_modal/.test(css)
+    && /dialog\.novel-tl > #novel_preview_modal/.test(css)
+    && /dialog\.novel-tl > #novel-floating-window/.test(css), true);
+check('预览弹窗同样要写死（它在另一个载体里，靠同一套规则）',
+    /dialog\.novel-tl > #novel_preview_modal,/.test(css), true);
+check('mountInTopLayer 载体缺失时把浮层挂回 body（否则元素从未进 DOM，弹窗彻底消失且不报错）',
+    /if \(!layer\) \{[\s\S]*?document\.body\.appendChild\(el\)/.test(mountTlFn || ''), true);
+check('回退路径补 z-index（挂回 body 仍要能盖住宿主 UI）',
+    /if \(!layer\) \{[\s\S]*?zIndex = '2147483647'/.test(mountTlFn || ''), true);
+check('代码注释记录了「top layer 只解决定位不解决层叠」这个坑',
+    /top layer \*\*只解决定位，不解决层叠\*\*/.test(src), true);
+check('移动端浮层测试页复刻了宿主 UI 元素（.stui）——没有它就测不出层叠冲突',
+    /#stui-sheld/.test(fs.readFileSync(path.join(__dirname, 'test-mobile-overlay.js'), 'utf8')), true);
+
 // 行为用例：坐标是否适用于当前视口（纯函数，真实执行）
 const usableFn = extractFn('isFloatPosUsableForViewport');
 const clearanceFn = extractFn('floatBottomClearance');

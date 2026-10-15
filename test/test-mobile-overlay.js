@@ -86,8 +86,25 @@ body { margin: 0; padding: 0; width: 100%; height: 100vh; height: 100dvh; overfl
 .text_pole { background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.2); color:#eee; border-radius:4px; padding:6px 8px; font-size:13px; width:100%; box-sizing:border-box; }
 .checkbox_label { display:flex; align-items:center; gap:6px; font-size:13px; }
 .novel-btn { border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.06); color:#ddd; border-radius:5px; padding:7px 12px; display:inline-flex; gap:6px; }
+
+/* ==== 宿主 UI 元素（v1.17.4 新增）====
+ * 之前这个测试页只有 html 的 transform 规则、**没有任何宿主 UI**，
+ * 于是「浮层被酒馆界面盖住」这个致命 bug 永远测不出来 ——
+ * 空文档里 z-index auto 的载体照样压在最上面。
+ * 酒馆真实量级：顶栏/底栏 29998~29999，遮罩 100（扩展用 1e6 系列本应稳赢，
+ * 但 html 的 transform 让它变成了一个层叠上下文，dialog 载体困在里面出不去）。
+ * 这几个元素是**不透明**的，命中测试能直接判定谁在上层。 */
+.stui { position: fixed; }
+#stui-top    { top: 0; left: 0; right: 0; height: 40px; background: #ff0000; z-index: 29999; }
+#stui-sheld  { inset: 0; background: #00ff00; z-index: 100; }
+#stui-drawer { bottom: 0; left: 0; right: 0; height: 74px; background: #0000ff; z-index: 29998; }
+#stui-toast  { top: 50px; right: 10px; width: 120px; height: 40px; background: #00ff00; z-index: 29997; }
 </style>
 </head><body>
+<div class="stui" id="stui-top"></div>
+<div class="stui" id="stui-sheld"></div>
+<div class="stui" id="stui-toast"></div>
+<div class="stui" id="stui-drawer"></div>
 <script>
 const SETTINGS_MODAL_HTML = ${JSON.stringify(settingsModalHtml)};
 const FW_HTML = ${JSON.stringify(fwHtml)};
@@ -236,12 +253,54 @@ function measure(win, overlay, pv, done) {
     // 载体不能加 contain:strict —— 其 paint 包含会裁剪溢出内容，
     // 曾经导致设置弹窗正文滚不动（scrollTop 写进去读回 0）。这里钉死这条负面约束。
     out.tlNoContain = !layer || getComputedStyle(layer).contain === 'none';
+    // ---- v1.17.4 层叠专项：浮层必须真的盖在宿主 UI 上面 ----
+    // 背景：html 的 transform 不只劫持 fixed 的包含块，还让 html 成为**层叠上下文**；
+    // dialog show() 后绘制仍困在这个上下文里比较，载体 z-index:auto（=0）输给宿主 29999，
+    // 症状是「弹窗显示在酒馆界面后面」。本页已补上 .stui 宿主元素来复现该冲突。
+    // 命中测试：命中自己的浮层 = 在最上层；命中 stui-* = 被盖住。
+    //
+    // ⚠️ 探针必须打在**设置弹窗独有**的位置，且判定归属要用 closest('#novel_settings_modal')：
+    // ① 预览弹窗也铺满视口且同样在 top layer，用「视口中心」取点会命中它；
+    // ② 两个弹窗都带 .novel-modal-header，直接 contains 会命中「另一个弹窗的同名节点」；
+    // ③ 测试页里两个弹窗是同时打开的（真实产品里互斥），所以**只比「浮层 vs 宿主 UI」**，
+    //    不比浮层之间的先后 —— 那不是层叠契约。
+    const probePoint = (el, sel, fallbackDy) => {
+        const target = el.querySelector(sel);
+        if (target) {
+            const r = target.getBoundingClientRect();
+            if (r.width > 4 && r.height > 4) return { x: r.left + r.width / 2, y: r.top + r.height / 2, target };
+        }
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + (fallbackDy || 24), target: el };
+    };
+    const mPt = probePoint(overlay, '.novel-modal-settings .novel-modal-header');
+    const fPt = probePoint(win, '.novel-fw-pill');
+    // 宿主 UI 探针：绿遮罩铺满全屏，任何点都该命中它（除非被浮层盖住）
+    const hitM = document.elementFromPoint(mPt.x, mPt.y);
+    const hitF = document.elementFromPoint(fPt.x, fPt.y);
+    // 药丸：它的载体是最早 show 的，测试页里下面还压着两个弹窗，
+    // 因此只在「未被弹窗覆盖」时判定层叠 —— 用药丸自身不与弹窗重叠的点。
+    out.fwOnTop = !!(hitF && win.contains(hitF));
+    // 设置弹窗：在它自己那层，判定「命中的是自己 或 自己下层的宿主UI之外的东西」都不算被盖住。
+    // 严格判据 = 命中点不是宿主 UI（stui-*）。这才是层叠契约本身。
+    out.modalOnTop = !!(hitM && !(hitM.id && hitM.id.startsWith('stui-')));
+    // 载体与内层的 z-index 都必须写死顶层值（实测：只加内层完全无效）
+    out.layerZ = layer ? getComputedStyle(layer).zIndex : '';
+    out.innerZ = layer ? getComputedStyle(overlay).zIndex : '';
+    out.zIndexTop = out.layerZ === '2147483647' && out.innerZ === '2147483647';
+    // 命中点不能落在宿主元素上（双保险：即使 contains 判定漏了也拦得住）
+    out.notBehindHost = !(hitF && hitF.id && hitF.id.startsWith('stui-'))
+        && !(hitM && hitM.id && hitM.id.startsWith('stui-'));
+    out.hostHitIds = [hitF && hitF.id, hitM && hitM.id].filter(Boolean).join(',');
+    out.modalProbe = { probeOn: mPt.target.className, hitClass: hitM && (typeof hitM.className === 'string' ? hitM.className : ''),
+        closestSettings: hitM && hitM.closest && hitM.closest('#novel_settings_modal') ? 'YES' : 'NO' };
 
     out.allOk = out.modalOk && out.previewOk && out.fwOk && out.fwAnchored
         && (!out.phoneGap || out.fwAboveInput)
         && out.tlFloating && out.tlSettings && out.tlPreview
         && out.tlOpen && out.tlNotModal && out.tlCoversViewport
-        && out.fwNoCompensation && out.fwHittable && out.tlNoContain;
+        && out.fwNoCompensation && out.fwHittable && out.tlNoContain
+        && out.fwOnTop && out.modalOnTop && out.zIndexTop && out.notBehindHost;
     return out;
 }
 // 视口故障注入：前 n 次 getVisibleViewportBox() 返回 0×0，模拟页面刚加载 / 后台标签
@@ -314,6 +373,10 @@ const SCENARIOS = [
                 if (!r.tlCoversViewport) console.error(`       top-layer 载体没铺满视口：${JSON.stringify(r.tlBox)}，内层 absolute 会失去基准`);
                 if (!r.fwNoCompensation) console.error('       药丸在 top layer 里仍带补偿 transform（坐标系已经对了，不该再补偿）');
                 if (!r.fwHittable) console.error('       药丸不可点（透明载体可能吃掉了指针事件）');
+                if (!r.fwOnTop) console.error('       药丸被宿主 UI 盖住了（层叠问题，不是定位问题）');
+                if (!r.modalOnTop) console.error(`       设置弹窗被宿主 UI 盖住了（层叠问题）probe=${JSON.stringify(r.modalProbe)} modal=${JSON.stringify(r.modal)}`);
+                if (!r.zIndexTop) console.error(`       z-index 不对：载体=${r.layerZ} 内层=${r.innerZ}（都应为 2147483647）`);
+                if (!r.notBehindHost) console.error(`       命中测试落在宿主元素上：${r.hostHitIds}`);
                 if (!r.tlNoContain) console.error('       载体带了 contain 属性（paint 包含会裁剪溢出，弹窗正文会滚不动）');
                 if (r.fwOk && !r.fwAnchored) console.error(`       悬浮药丸没贴在右下角（跑到别处去了）：${JSON.stringify(r.fw)}`);
                 if (!forcedOk) console.error('       药丸虽在屏内，但没走 ensureFloatingWindowVisible 兜底 —— 场景失去意义');

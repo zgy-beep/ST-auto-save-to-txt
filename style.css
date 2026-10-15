@@ -2510,3 +2510,45 @@ dialog.novel-tl {
 dialog.novel-tl {
     overflow: hidden;
 }
+
+/* ==========================================================================
+ * v1.17.4 修复：浮层被酒馆 UI 盖住（弹窗「显示在界面后面」）
+ *
+ * 症状：设置弹窗 / 预览弹窗 / 悬浮药丸全部**看不见**，
+ *      肉眼看它们在酒馆界面的「后面」—— 底栏、顶栏、遮罩都压在它们上面。
+ *
+ * 根因（v1.17.3 的认知错误，实测推翻）：
+ * 宿主 html 上的 `-webkit-transform: translateZ(0)` 影响的**不只是 fixed 的包含块**，
+ * 它同时让 **html 成为一个层叠上下文**。而 v1.17.3 的载体是 `<dialog>`，
+ * `show()` 之后**并没有真正脱离这个层叠上下文**去参与「top layer 绘制顺序」——
+ * 实测 open=true，但绘制仍在 html 层叠上下文里参与比较，
+ * 载体自己 `z-index: auto`（等价 0），于是输给酒馆 UI 的 29999。
+ *
+ * 实测证据（temp/diag-zorder*.js，像素采样不是推理）：
+ *   宿主环境 = html transform + 顶栏 29999 / 遮罩 100 / 底栏 29998
+ *   弹窗中心像素：
+ *     dialog show()，载体 z-index auto   → 被绿色遮罩盖住 ❌
+ *     dialog show()，内层 z-index MAX     → 仍被盖住 ❌（哈希与 auto 完全相同）
+ *     dialog show()，载体 z-index MAX     → 盖住了 ✅
+ *     dialog show()，两层都 MAX           → 盖住且药丸纯色（无半透明叠加）✅
+ *   ⚠️ 内层 z-index 完全无效（载体是它的父级，父级输了子级赢不了）。
+ *   ⚠️ 只加载体时药丸仍被宿主底栏的半透明背景**透过并叠加**（截图里黄变暗黄），
+ *      所以内层那条 z-index 也必须留着。
+ *
+ * 修法：载体与内层都写死 z-index 顶层值。两处都要，不是一个。
+ *
+ * ⚠️ 内层这条必须用 `dialog.novel-tl > #novel_settings_modal` 这种带 id 的写法：
+ * 前面已存在的 `#novel_settings_modal { z-index: 1000015 }` 特异性是 (1,0,0)，
+ * 而 `dialog.novel-tl > .novel-modal-overlay` 只有 (0,1,2) —— 直接被压过去，
+ * 实测 computed 仍读回 1000015。**只加类选择器是不够的，必须压过 id 选择器。**
+ * ========================================================================== */
+dialog.novel-tl {
+    z-index: 2147483647;
+}
+dialog.novel-tl > #novel_settings_modal,
+dialog.novel-tl > #novel_preview_modal,
+dialog.novel-tl > #novel-floating-window,
+dialog.novel-tl > .novel-floating-window,
+dialog.novel-tl > .novel-modal-overlay {
+    z-index: 2147483647;
+}
