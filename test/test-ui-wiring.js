@@ -30,6 +30,17 @@ function check(name, actual, expected) {
     }
 }
 
+/** 布尔版断言：额外带一段 detail 便于定位（check() 是严格三参数比较，别拿它接布尔 + 说明） */
+function checkOk(name, cond, detail = '') {
+    if (cond) {
+        pass++;
+        console.log(`[PASS] ${name}`);
+    } else {
+        fail++;
+        console.error(`[FAIL] ${name}${detail ? '  →  ' + detail : ''}`);
+    }
+}
+
 function extractFn(name) {
     const m = src.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`));
     return m ? m[0] : null;
@@ -683,6 +694,102 @@ check('部署指引行内排布改为类',
     /\.novel-guide-row \{/.test(css) && src.includes('class="novel-guide-title"'), true);
 check('最后一张指引卡也扁平化（左侧竖线，不再是独立盒子）',
     /#auto-save-to-txt-settings \.novel-plan-c-card \{[\s\S]*?background: none !important;[\s\S]*?border-left: 2px solid var\(--nv-ok\) !important;/.test(css), true);
+
+console.log('\n=== ⑬ v1.17.6 开关上的「蓝色尖角」= 宿主 checkbox 对勾泄漏 ===');
+
+// 酒馆全局样式给**每一个** input[type='checkbox'] 挂了 ::before 对勾
+// （clip-path 六边形 + inset box-shadow 用 --SmartThemeCheckboxTickColor），
+// 我们的胶囊开关只重置了元素本身和 ::after（滑钮），漏了 ::before。
+// 宿主还有 display:grid + place-content:center 把对勾当 grid item 摆进来，
+// 21px 高 + overflow:hidden 裁掉大半，右下那截尖角从滑钮左侧探出来 = 用户看到的蓝三角。
+// 实测宿主样式坐标见 temp/st-style.css:4054-4093。
+//
+// ⚠️ 这里必须**逐块定位**、不能用 `[\s\S]*?` 一路跨到文件尾——
+// 覆盖块后面还有别的规则，`[\s\S]*?` 会匹配到不相干的那份，断言空转（实测过）。
+// 做法：先切出「最后一个 input[type=checkbox]::before 块的原文」，再在块内做断言。
+const tickBlocks = [];
+{
+    // 抓「以 ::before 结尾/含 ::before 且块内含 content:none」的所有规则块原文
+    const re = /([^{}]*input\[type="checkbox"\][^{}]*(?:::before|::after|:checked::before|:checked::after)[^{}]*)\{([^}]*)\}/g;
+    let m;
+    while ((m = re.exec(css))) {
+        if (/content:\s*none\s*!important/.test(m[2])) tickBlocks.push({ sel: m[1], body: m[2], at: m.index });
+    }
+}
+checkOk('已清掉宿主 checkbox 的 ::before 对勾（content:none，2 处：分档规则 + 总闸兜底）',
+    tickBlocks.length === 2, `命中 ${tickBlocks.length} 处`);
+checkOk('对勾伪元素连 display 一起关掉（宿主的 scale(1) 动画也就无从生效）',
+    tickBlocks.length === 2 && tickBlocks.every(b => /display:\s*none\s*!important/.test(b.body)),
+    JSON.stringify(tickBlocks.map(b => b.body.match(/display:[^;]*/)?.[0] || '(无)')));
+// 兜底总闸 = 最后一条 ::before 规则块（v1.17.6 追加在文件末尾）
+// ⚠️ 必须用「最后一条」而不是「任一条」：分档规则里也有 :checked::before，
+// 只查全局有没有 → 把总闸的选择器改废了测试照样绿（实测踩过）。
+const gateBlock = tickBlocks.length ? tickBlocks[tickBlocks.length - 1] : null;
+checkOk('兜底总闸是最后一条对勾规则块（追加在文件末尾）',
+    gateBlock !== null && /#auto-save-to-txt-settings input\[type="checkbox"\]::before/.test(gateBlock.sel),
+    gateBlock ? JSON.stringify(gateBlock.sel.replace(/\s+/g, ' ').trim().slice(-120)) : '(null)');
+checkOk('总闸自身同时覆盖 ::before 与 :checked::before（改废任一条都要红）',
+    gateBlock !== null
+    && /#auto-save-to-txt-settings input\[type="checkbox"\]::before/.test(gateBlock.sel)
+    && /#auto-save-to-txt-settings input\[type="checkbox"\]:checked::before/.test(gateBlock.sel),
+    gateBlock ? JSON.stringify(gateBlock.sel.replace(/\s+/g, ' ').trim().slice(-200)) : '(null)');
+checkOk('总闸挂在设置面板作用域下（不会污染酒馆其它 checkbox）',
+    tickBlocks.some(b => /#auto-save-to-txt-settings/.test(b.sel)));
+
+// 元素级副作用隔离：必须在同一条规则里、且四条声明齐全
+// ⚠️ 这条规则的开括号在「关掉宿主对勾」注释的**上方**（注释写在规则体内部），
+// 所以只能从**选择器**（`.novel-toggle-card .checkbox_label input[type="checkbox"] {`）
+// 往后切块，不能从注释位置往后找 '{'（会命中下一条 ::before 规则 → 断言静默空转）。
+const isoBlock = (() => {
+    const SEL = '.novel-toggle-card .checkbox_label input[type="checkbox"] {';
+    const i = css.lastIndexOf(SEL);           // 取最后一次出现 = v1.17.6 的隔离块
+    if (i < 0) return null;
+    const open = i + SEL.length - 1;
+    const close = css.indexOf('}', open);
+    if (close < 0) return null;
+    return css.slice(open + 1, close);
+})();
+checkOk('已找到宿主副作用隔离规则块', isoBlock !== null);
+checkOk('隔离 filter:brightness(1.2)（否则紫罗兰轨道整体被提亮）',
+    isoBlock !== null && /filter:\s*none;/.test(isoBlock));
+checkOk('隔离 transform:translateY(-0.075em)（否则开关整体上浮）',
+    isoBlock !== null && /transform:\s*none;/.test(isoBlock));
+checkOk('清掉宿主 outline:1px solid var(--grey5020a)（与胶囊圆角打架）',
+    isoBlock !== null && /outline:\s*none;/.test(isoBlock));
+
+// 焦点环：定位到 **checkbox 那条** focus-visible 规则块内部断言
+// ⚠️ 两处坑都踩过：
+//   ① `outline: 2px solid var(--nv-accent)` 在文件里有 4 处（icon-btn/tab/acc-head/checkbox），
+//      用 indexOf/lastIndexOf 搜声明文本会落到别的规则上 → 断言空转；
+//   ② 正确做法是锚定**选择器**（含 `[type="checkbox"]`）再切块，与 isoBlock 同理。
+const focusBlock = (() => {
+    const SEL = 'input[type="checkbox"]:focus-visible {';
+    const i = css.lastIndexOf(SEL);
+    if (i < 0) return null;
+    const open = i + SEL.length - 1;
+    const close = css.indexOf('}', open);
+    if (close < 0) return null;
+    return { sel: css.slice(Math.max(0, i - 160), i + SEL.length), body: css.slice(open + 1, close) };
+})();
+checkOk('已找到 focus-visible 焦点环规则', focusBlock !== null);
+checkOk('焦点环选择器带 :focus-visible（不是无条件描边）',
+    focusBlock !== null && /:focus-visible/.test(focusBlock.sel));
+checkOk('焦点环是紫罗兰（宿主 focus-visible 是青色 --interactable-outline-color）',
+    focusBlock !== null && /outline:\s*2px solid var\(--nv-accent\);/.test(focusBlock.body));
+
+// 胶囊开关本体 + 滑钮仍要在位（不能为了修对勾把开关改没了）
+const pillBlock = (() => {
+    const i = css.indexOf('.novel-acc-body > .checkbox_label input[type="checkbox"],');
+    if (i < 0) return null;
+    const open = css.indexOf('{', i);
+    const close = css.indexOf('}', open);
+    return css.slice(open + 1, close);
+})();
+checkOk('胶囊开关本体规则仍在（36×21 + 999px 圆角）',
+    pillBlock !== null && /width:\s*36px;/.test(pillBlock) && /height:\s*21px;/.test(pillBlock)
+    && /border-radius:\s*999px;/.test(pillBlock));
+checkOk('滑钮 ::after 仍在（白色圆钮 + translateX(15px)）',
+    /input\[type="checkbox"\]:checked::after,[\s\S]{0,200}?transform:\s*translateX\(15px\);[\s\S]{0,120}?background:\s*#fff;/.test(css));
 
 console.log(`\nUI 接线测试结果: 通过: ${pass}, 失败: ${fail}`);
 if (fail > 0) process.exit(1);

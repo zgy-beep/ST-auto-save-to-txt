@@ -2713,3 +2713,61 @@ dialog.novel-tl > #novel_preview_modal {
         gap: 5px;
     }
 }
+
+/* ============================================================
+   v1.17.6 修复：开关上的「蓝色尖角」= 宿主 checkbox 的对勾伪元素泄漏
+   ------------------------------------------------------------
+   酒馆全局样式（public/css/style.css，实测抓在 temp/st-style.css:4054-4093）给
+   **每一个** input[type='checkbox'] 都挂了：
+       ::before { content:''; 0.65em 方块;
+                  box-shadow: inset 1em 1em var(--SmartThemeCheckboxTickColor);
+                  clip-path: <对勾六边形>;
+                  transform-origin: bottom left; }
+       :checked::before { transform: scale(1); }
+   我们的胶囊开关只重置了元素本身（appearance/尺寸/底色/圆角）与 ::after（滑钮），
+   **没有清掉 ::before**。于是：
+     - 宿主给元素还加了 `display:grid` + `place-content:center`，
+       把这个 0.65em 的对勾当成 grid item 摆在开关里；
+     - 元素只有 21px 高、overflow:hidden，对勾被裁掉大半，
+     - 剩下右下那一小截尖角从滑钮左侧探出来 —— 就是截图里那块青蓝色三角。
+   （`--SmartThemeCheckboxTickColor` 是宿主按主题底色算出的高对比色，
+     浅色主题下算出来就是青蓝色，所以「蓝色」会随主题变。）
+
+   修法：显式 `content: none` 干掉宿主对勾，同时把宿主元素级副作用一并隔离
+   （transform/translateY 会让开关整体上浮 0.075em，filter: brightness(1.2)
+     会把紫色轨道整体提亮，outline/border-radius 也会跟胶囊圆角打架）。
+   ============================================================ */
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label input[type="checkbox"],
+#auto-save-to-txt-settings .novel-toggle-card .checkbox_label input[type="checkbox"] {
+    /* 关掉宿主对勾（两条路径都要写：基础态 + :checked 态的 scale(1)） */
+    overflow: hidden;
+    filter: none;
+    transform: none;
+    outline: none;
+}
+/* 宿主对勾伪元素：两个选择器都写，保证 :checked 时那条 scale(1) 也被压掉 */
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label input[type="checkbox"]::before,
+#auto-save-to-txt-settings .novel-toggle-card .checkbox_label input[type="checkbox"]::before,
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label input[type="checkbox"]:checked::before,
+#auto-save-to-txt-settings .novel-toggle-card .checkbox_label input[type="checkbox"]:checked::before {
+    content: none !important;
+    display: none !important;
+}
+/* 顺便把宿主 :focus-visible 的青色描边换成我们自己的紫罗兰焦点环 */
+#auto-save-to-txt-settings .novel-acc-body > .checkbox_label input[type="checkbox"]:focus-visible,
+#auto-save-to-txt-settings .novel-toggle-card .checkbox_label input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--nv-accent);
+    outline-offset: 2px;
+}
+
+/* 兜底：面板里凡是 checkbox 一律不许带宿主对勾。
+   （v1.17.6 起这条是「防止以后新增开关又漏一次」的总闸；
+   上面两条分档选择器保留，是为了带上 overflow/filter/transform/outline 的隔离。） */
+#auto-save-to-txt-settings input[type="checkbox"]::before,
+#auto-save-to-txt-settings input[type="checkbox"]:checked::before,
+#auto-save-to-txt-settings input[type="checkbox"]:focus-visible::before {
+    content: none !important;
+    display: none !important;
+}
+
+
