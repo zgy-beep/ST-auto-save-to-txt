@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-1.19.1-brightgreen.svg?style=flat-square)
+![Version](https://img.shields.io/badge/Version-1.20.0-brightgreen.svg?style=flat-square)
 ![SillyTavern](https://img.shields.io/badge/SillyTavern-%3E%3D1.12.0-blue.svg?style=flat-square)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20Docker%20%7C%20NAS%20%7C%20Termux-orange.svg?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-purple.svg?style=flat-square)
@@ -303,6 +303,17 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zgy-beep/novel-stream@main/install.sh | b
 
 **Q：微信读书里目录出不来？**
 保持默认章节样式「第 X 章 · 角色名 (原楼层: Y)」即可；文件已带 UTF-8 BOM，不会乱码。
+
+---
+
+## 给开发者：UI 规范与组件复用
+
+本扩展的浮动 UI（弹窗 / 悬浮入口 / 折叠分组 / 胶囊开关 / 提示层等）已整理成一套可复用的 **UI Kit 规范**，放在 [`ui-kit/`](ui-kit/README.md)：
+
+- [ui-kit/README.md](ui-kit/README.md)：配色语义、设计令牌、组件 DOM 与状态、SillyTavern 宿主兼容红线（top-layer 载体、checkbox 样式隔离等）、命名约定与迁移对照；
+- [ui-kit/tokens.css](ui-kit/tokens.css) / [ui-kit/components.css](ui-kit/components.css)：零依赖、可直接复制到下一个插件；`@import` 两个文件即可使用，支持深/浅主题；
+- [ui-kit/preview.html](ui-kit/preview.html)：离线组件预览页，双击即可看全部组件与配色；
+- 守护测试 [test/test-ui-kit.js](test/test-ui-kit.js)：自动检查 token 完整、组件三方覆盖、无硬编码颜色、WCAG 对比度、宿主兼容红线，以及与 `style.css` 参考实现的取值漂移。
 
 ---
 

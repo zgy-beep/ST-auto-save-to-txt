@@ -672,10 +672,10 @@ async function runTests() {
             && /\.novel-switch-row\s*\{/.test(styleSrc),
             'D4.4 style.css 保留按 ID 的兜底胶囊开关 + 旧类 .novel-switch-row 布局规则（缓存旧 index.js 时仍可勾选且可见）');
 
-        assert(api.DEFAULT_SETTINGS.version === '1.19.1', `D5.1 DEFAULT_SETTINGS.version === 1.19.1（实际 ${api.DEFAULT_SETTINGS.version}）`);
+        assert(api.DEFAULT_SETTINGS.version === '1.20.0', `D5.1 DEFAULT_SETTINGS.version === 1.20.0（实际 ${api.DEFAULT_SETTINGS.version}）`);
         let manifest = null;
         try { manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8')); } catch (e) { manifest = null; }
-        assert(!!manifest && manifest.version === '1.19.1', 'D5.2 manifest.json version === 1.19.1');
+        assert(!!manifest && manifest.version === '1.20.0', 'D5.2 manifest.json version === 1.20.0');
         const payloadSrcRange = findFunctionRange(indexLines, 'buildEbookPayload');
         assert(!!payloadSrcRange && indexLines.slice(payloadSrcRange.start - 1, payloadSrcRange.end)
             .join('\n').includes("delivery === 'download' ? 'download' : 'server'"),
@@ -910,8 +910,8 @@ async function runTests() {
         assert(fillFnSrc.includes('estimateEbookPayload(') && fillFnSrc.includes('overTotalLimit')
             && fillFnSrc.includes('EBOOK_LARGE_WARN_BYTES'),
             'G9.10 预览预估：调用 estimate、展示 overTotalLimit 与 ≥100MB 提示');
-        assert(api.DEFAULT_SETTINGS.version === '1.19.1' && !!manifest && manifest.version === '1.19.1',
-            'G9.11 前端版本双向一致（DEFAULT_SETTINGS 与 manifest 均 1.19.1）');
+        assert(api.DEFAULT_SETTINGS.version === '1.20.0' && !!manifest && manifest.version === '1.20.0',
+            'G9.11 前端版本双向一致（DEFAULT_SETTINGS 与 manifest 均 1.20.0）');
         let pluginPkg = null;
         try { pluginPkg = JSON.parse(fs.readFileSync(PLUGIN_PACKAGE_PATH, 'utf8')); } catch (e) { pluginPkg = null; }
         assert(!!pluginPkg && pluginPkg.version === '1.16.0' && statusResp.data.version === '1.16.0',

@@ -1,0 +1,230 @@
+/**
+ * SillyTavern 插件通用 UI Kit · 设计令牌（Design Tokens）
+ * ------------------------------------------------------------------
+ * 版本：ui-kit v1.0.0（语义化版本；破坏性改名/删 token 升大版本）
+ * 许可：MIT（与 novel-stream 项目一致）
+ *
+ * 定位：
+ *   这套令牌是从 novel-stream 扩展的浮动 UI（弹窗 / 悬浮入口 / 提示层）中
+ *   提炼出的**自包含深色主题**。只服务「扩展自有的 body 级浮层」，
+ *   不接管酒馆聊天区/原生抽屉的配色（那些区域必须沿用宿主主题变量）。
+ *
+ * 使用方式（两种任选）：
+ *   1) 在新插件 style.css 顶部：
+ *        @import url('./ui-kit/tokens.css');
+ *        @import url('./ui-kit/components.css');
+ *      （@import 必须写在所有其它规则之前；路径相对 style.css 所在目录）
+ *   2) 或把 tokens.css + components.css 直接拼进你的样式文件。
+ *
+ * 作用域约定：
+ *   - 令牌默认挂在 :root 上（自定义属性本身不产生任何视觉效果，无副作用）；
+ *     也可以挂到 .nvui-scope 容器上做局部覆盖。
+ *   - 使用组件时给浮层根节点加 class="nvui-scope"，
+ *     需要浅色主题时再叠加 .nvui-theme-light（见文件末尾）。
+ *
+ * 颜色使用红线（详见 ui-kit/README.md）：
+ *   - 组件样式**禁止硬编码颜色**，一律引用这里的 token；
+ *   - 正文用 --nvui-text，次要说明用 --nvui-text-2，提示性/装饰性小字用 --nvui-text-3；
+ *   - 主色 --nvui-accent 用于轨道/边框/强调；填充按钮底用 --nvui-accent-strong（白字对比度达标）；
+ *   - 语义色只表达语义：ok=成功、warn=需要注意、danger=错误/危险操作、info=进行中/信息，
+ *     不要拿 accent 表达错误，也不要用 danger 做装饰。
+ *
+ * 对比度（WCAG 2.1，深色主题 / 背景 #161a24）：
+ *   text 14.71:1 · text-2 6.70:1 · text-3 4.81:1 · accent 4.75:1 · accent-2 7.09:1
+ *   ok 9.98:1 · warn 10.42:1 · danger 6.29:1 · info 5.52:1 · 白字/accent-strong 5.26:1
+ * 浅色主题（背景 #f7f8fc）：
+ *   text 14.62:1 · text-2 7.28:1 · text-3 5.29:1 · accent 4.95:1 · accent-2 6.33:1
+ *   ok 4.73:1 · warn 4.73:1 · danger 4.55:1 · info 6.31:1
+ *   （token 数值由 test/test-ui-kit.js 自动守护，改动需同步更新规范文档。）
+ */
+
+:root,
+.nvui-scope {
+    /* ==================== 表面 / 背景 ====================
+       浮层用三层递进的深色表面表达层级：
+       bg = 弹窗本体；bg-2 = 次级面板；bg-3 = 再深一档的分组底 */
+    --nvui-bg: #161a24;
+    --nvui-bg-2: #1c2130;
+    --nvui-bg-3: #232939;
+
+    /* 半透明白色叠加层：用于「可点区块」的底与悬停/展开态，不写死具体颜色 */
+    --nvui-block-bg: rgba(255, 255, 255, 0.05);
+    --nvui-block-bg-2: rgba(255, 255, 255, 0.078);
+
+    /* 输入控件底 / 行内代码底 / 遮罩底 / 开关关闭态轨道 */
+    --nvui-input-bg: rgba(0, 0, 0, 0.22);
+    --nvui-code-bg: rgba(0, 0, 0, 0.3);
+    --nvui-overlay-bg: rgba(6, 8, 14, 0.72);
+    --nvui-switch-off-bg: rgba(255, 255, 255, 0.12);
+    /* 开关滑钮（关闭态为灰、开启态为白，组件样式里分别引用） */
+    --nvui-knob: #ffffff;
+    --nvui-knob-off: var(--nvui-text-2);
+
+    /* ==================== 分隔线 ====================
+       三档对比度：常规分隔 / 强调边界 / 虚线空态 */
+    --nvui-line: rgba(255, 255, 255, 0.07);
+    --nvui-line-2: rgba(255, 255, 255, 0.12);
+    --nvui-dash: rgba(255, 255, 255, 0.17);
+
+    /* 块级（可点区域）专用分隔/描边，比通用 line 更淡，避免“层层盒子” */
+    --nvui-block-line: rgba(255, 255, 255, 0.06);
+    --nvui-block-line-2: rgba(255, 255, 255, 0.1);
+
+    /* ==================== 文字层级 ====================
+       只用这三档 + 语义色，不要再引入第四种灰。 */
+    --nvui-text: #e9ecf3;      /* 正文/标题，14.71:1 */
+    --nvui-text-2: #98a1b3;    /* 次要说明，6.70:1 */
+    --nvui-text-3: #7d879b;    /* 提示性小字/装饰，4.81:1（AA 达标）
+                                  注：v1.17.x 实现用的是 #6c7487（3.72:1，未达 AA），
+                                  规范统一提亮一档；旧插件若想完全还原可覆盖该 token。 */
+
+    /* ==================== 主色（唯一强调色） ==================== */
+    --nvui-accent: #8b6dff;            /* 轨道/边框/强调，4.75:1 */
+    --nvui-accent-2: #a997ff;          /* 图标/强调文字，7.09:1 */
+    --nvui-accent-strong: #6d4df2;     /* 填充按钮底，白字 5.26:1（AA） */
+    --nvui-accent-strong-hover: #5b3fd6; /* 填充按钮悬停，白字 6.72:1 */
+    --nvui-accent-bg: rgba(139, 109, 255, 0.14);      /* 主色淡底（选中标签页等） */
+    --nvui-accent-bg-hover: rgba(139, 109, 255, 0.24);
+    --nvui-accent-line: rgba(139, 109, 255, 0.4);     /* 主色描边 */
+
+    /* ==================== 语义色 ====================
+       每个语义色配套 bg（淡底）/line（描边）两个派生，组件不得自行调透明度。 */
+    --nvui-ok: #4ade80;
+    --nvui-ok-bg: rgba(74, 222, 128, 0.12);
+    --nvui-ok-line: rgba(74, 222, 128, 0.35);
+
+    --nvui-warn: #fbbf24;
+    --nvui-warn-bg: rgba(251, 191, 36, 0.12);
+    --nvui-warn-line: rgba(251, 191, 36, 0.35);
+
+    --nvui-danger: #f87171;
+    --nvui-danger-bg: rgba(248, 113, 113, 0.12);
+    --nvui-danger-line: rgba(248, 113, 113, 0.35);
+
+    --nvui-info: #3498db;
+    --nvui-info-bg: rgba(52, 152, 219, 0.12);
+    --nvui-info-line: rgba(52, 152, 219, 0.35);
+
+    /* ==================== 圆角 ==================== */
+    --nvui-radius-xs: 6px;   /* 行内代码、小提示条 */
+    --nvui-radius-sm: 8px;   /* 输入框、小按钮 */
+    --nvui-radius: 12px;     /* 折叠分组、卡片 */
+    --nvui-radius-lg: 16px;  /* 弹窗 */
+    --nvui-radius-pill: 999px; /* 胶囊：开关、徽标、标签页 */
+
+    /* ==================== 间距刻度（4px 基准） ==================== */
+    --nvui-space-05: 2px;
+    --nvui-space-1: 4px;
+    --nvui-space-15: 6px;
+    --nvui-space-2: 8px;
+    --nvui-space-25: 10px;
+    --nvui-space-3: 12px;
+    --nvui-space-4: 16px;
+    --nvui-space-5: 20px;
+    --nvui-space-6: 24px;
+
+    /* ==================== 字号 / 字重 / 行高 ==================== */
+    --nvui-fs-2xs: 10px;  /* 计数角标 */
+    --nvui-fs-xs: 11px;   /* 版本号、次要元信息 */
+    --nvui-fs-sm: 12px;   /* 说明、提示、状态行 */
+    --nvui-fs-md: 13px;   /* 默认正文（设置面板） */
+    --nvui-fs-lg: 14px;   /* 弹窗正文（桌面） */
+    --nvui-fs-xl: 15px;   /* 弹窗正文（手机） */
+    --nvui-fs-2xl: 16px;  /* 大标题（少用） */
+
+    --nvui-fw-regular: 400;
+    --nvui-fw-medium: 500;
+    --nvui-fw-semibold: 600;
+    --nvui-fw-bold: 700;
+
+    --nvui-lh-tight: 1.4;
+    --nvui-lh-normal: 1.5;
+    --nvui-lh-relaxed: 1.6;
+    --nvui-lh-loose: 1.8;
+
+    /* ==================== 阴影（层级越高阴影越深） ==================== */
+    --nvui-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.55);
+    --nvui-shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+    --nvui-shadow-accent: 0 6px 18px rgba(139, 109, 255, 0.32);
+
+    /* ==================== 动效 ==================== */
+    --nvui-transition: 0.16s ease;
+    --nvui-transition-slow: 0.25s ease;
+    --nvui-spin-duration: 0.8s;
+
+    /* ==================== 组件尺寸（改这里即可整体缩放） ==================== */
+    --nvui-control-h: 32px;      /* 按钮/输入框统一高度 */
+    --nvui-switch-w: 36px;       /* 胶囊开关：轨道 */
+    --nvui-switch-h: 21px;
+    --nvui-switch-knob: 15px;    /* 滑钮直径 */
+    --nvui-switch-knob-offset: 2px;
+    --nvui-switch-knob-on: 15px; /* 勾选态右移距离 = w - knob - offset*2 - border*2 */
+    --nvui-modal-width: 680px;
+    --nvui-modal-max-h: 80vh;
+
+    /* ==================== 层级（top-layer 载体内部仍留 z-index 兜底） ==================== */
+    --nvui-z-floating: 1000010;
+    --nvui-z-overlay: 1000020;
+    --nvui-z-tooltip: 1000030;
+}
+
+/* ==========================================================================
+ * 浅色主题（可选）
+ * --------------------------------------------------------------------------
+ * 所有组件只消费 token，因此在容器上叠加 .nvui-theme-light 即可整体切色。
+ * 这是经过对比度校验的起始值；如需品牌化，请整体替换同名 token，不要逐个组件改色。
+ * 用法：<div class="nvui-scope nvui-theme-light"> ... </div>
+ * ========================================================================== */
+.nvui-theme-light {
+    --nvui-bg: #f7f8fc;
+    --nvui-bg-2: #eef1f8;
+    --nvui-bg-3: #e5e9f3;
+
+    --nvui-block-bg: rgba(15, 23, 42, 0.035);
+    --nvui-block-bg-2: rgba(15, 23, 42, 0.06);
+
+    --nvui-input-bg: rgba(255, 255, 255, 0.9);
+    --nvui-code-bg: rgba(15, 23, 42, 0.06);
+    --nvui-overlay-bg: rgba(15, 23, 42, 0.38);
+    --nvui-switch-off-bg: rgba(15, 23, 42, 0.18);
+    --nvui-knob: #ffffff;
+    --nvui-knob-off: #ffffff;
+
+    --nvui-line: rgba(15, 23, 42, 0.08);
+    --nvui-line-2: rgba(15, 23, 42, 0.14);
+    --nvui-dash: rgba(15, 23, 42, 0.22);
+    --nvui-block-line: rgba(15, 23, 42, 0.06);
+    --nvui-block-line-2: rgba(15, 23, 42, 0.1);
+
+    --nvui-text: #1f2430;    /* 14.62:1 */
+    --nvui-text-2: #4a5365;  /* 7.28:1 */
+    --nvui-text-3: #5f6879;  /* 5.29:1 */
+
+    --nvui-accent: #6d4df2;
+    --nvui-accent-2: #5b3fd6;
+    --nvui-accent-strong: #6d4df2;
+    --nvui-accent-strong-hover: #5b3fd6;
+    --nvui-accent-bg: rgba(109, 77, 242, 0.12);
+    --nvui-accent-bg-hover: rgba(109, 77, 242, 0.2);
+    --nvui-accent-line: rgba(109, 77, 242, 0.4);
+
+    --nvui-ok: #15803d;
+    --nvui-ok-bg: rgba(21, 128, 61, 0.1);
+    --nvui-ok-line: rgba(21, 128, 61, 0.32);
+
+    --nvui-warn: #b45309;
+    --nvui-warn-bg: rgba(180, 83, 9, 0.1);
+    --nvui-warn-line: rgba(180, 83, 9, 0.32);
+
+    --nvui-danger: #dc2626;
+    --nvui-danger-bg: rgba(220, 38, 38, 0.09);
+    --nvui-danger-line: rgba(220, 38, 38, 0.3);
+
+    --nvui-info: #1d4ed8;
+    --nvui-info-bg: rgba(29, 78, 216, 0.09);
+    --nvui-info-line: rgba(29, 78, 216, 0.3);
+
+    --nvui-shadow-modal: 0 24px 60px rgba(15, 23, 42, 0.22);
+    --nvui-shadow-pop: 0 8px 24px rgba(15, 23, 42, 0.16);
+    --nvui-shadow-accent: 0 6px 18px rgba(109, 77, 242, 0.22);
+}

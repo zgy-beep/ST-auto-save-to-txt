@@ -1,0 +1,1085 @@
+/**
+ * SillyTavern 插件通用 UI Kit · 组件样式
+ * ------------------------------------------------------------------
+ * 版本：ui-kit v1.0.0；依赖：tokens.css（必须先引入或先拼进来）
+ *
+ * 红线（本文件由 test/test-ui-kit.js 自动守护）：
+ *   1. 所有选择器都必须以 .nvui- / dialog.nvui-tl 开头，禁止裸元素选择器，
+ *      避免污染酒馆宿主与同页其它扩展；
+ *   2. 颜色一律走 token（禁止硬编码 #hex / rgb()），换主题只改 tokens.css；
+ *   3. !important 只允许出现在「对抗宿主全局 checkbox 样式」的隔离规则里。
+ *
+ * 组件清单（预览：ui-kit/preview.html；规范：ui-kit/README.md）：
+ *   作用域 / top-layer 载体 / 浮层与弹窗 / 图标按钮 / 按钮与按钮组 /
+ *   胶囊开关行 / 输入行 / 标签页 / 折叠面板 / 区块标题 / 提示与告警 /
+ *   状态行 / 徽标与标签块 / 空态与加载 / 悬浮面板 / 工具提示 / 布局工具。
+ */
+
+/* ==========================================================================
+ * 1. 作用域与基础
+ * ========================================================================== */
+.nvui-scope {
+    box-sizing: border-box;
+    color: var(--nvui-text);
+    font-size: var(--nvui-fs-md);
+    line-height: var(--nvui-lh-normal);
+    /* 字体沿用宿主（酒馆主题字体），kit 不自带字体，避免风格割裂 */
+    font-family: inherit;
+    -webkit-font-smoothing: antialiased;
+}
+
+.nvui-scope *,
+.nvui-scope *::before,
+.nvui-scope *::after {
+    box-sizing: border-box;
+}
+
+/* 供读屏器的隐藏文本（不要用 display:none，否则辅助技术也读不到） */
+.nvui-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* ==========================================================================
+ * 2. top-layer 载体（SillyTavern 兼容关键）
+ * --------------------------------------------------------------------------
+ * 酒馆 html 上存在 transform，使 position:fixed 的包含块变成文档盒子，手机端
+ * 会把浮层推出可视区。解法：把浮层放进 <dialog class="nvui-tl"> 并调用
+ * dialog.show()（非模态，避免给文档加 inert），由 dialog 提升渲染层级；
+ * 载体本身不吃指针事件，只把指针放行给子浮层。
+ *
+ * DOM：
+ *   <dialog class="nvui-tl"><div class="nvui-overlay"> ... </div></dialog>
+ * 注意：非模态 show() 后要自己管理「关闭 = dialog.close() 或 display:none」。
+ * ========================================================================== */
+dialog.nvui-tl {
+    position: fixed;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    max-width: none;
+    max-height: none;
+    overflow: visible;
+    background: transparent;
+    color: inherit;
+    pointer-events: none; /* 载体透明放行；子浮层各自恢复 auto */
+}
+
+dialog.nvui-tl:not([open]) {
+    display: none;
+}
+
+dialog.nvui-tl > .nvui-overlay,
+dialog.nvui-tl > .nvui-floating {
+    position: absolute;
+    pointer-events: auto;
+}
+
+/* ==========================================================================
+ * 3. 遮罩与弹窗
+ * ========================================================================== */
+.nvui-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--nvui-space-4);
+    background: var(--nvui-overlay-bg);
+    z-index: var(--nvui-z-overlay);
+}
+
+.nvui-overlay[hidden] {
+    display: none;
+}
+
+.nvui-modal {
+    display: flex;
+    flex-direction: column;
+    width: min(var(--nvui-modal-width), 100%);
+    max-height: var(--nvui-modal-max-h);
+    min-height: 0;
+    overflow: hidden;
+    background: var(--nvui-bg);
+    border: 1px solid var(--nvui-line-2);
+    border-radius: var(--nvui-radius-lg);
+    box-shadow: var(--nvui-shadow-modal);
+    color: var(--nvui-text);
+}
+
+.nvui-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--nvui-space-2);
+    flex-shrink: 0;
+    padding: var(--nvui-space-3) var(--nvui-space-4);
+    border-bottom: 1px solid var(--nvui-line);
+}
+
+.nvui-modal-title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--nvui-space-15);
+    min-width: 0;
+    font-size: var(--nvui-fs-md);
+    font-weight: var(--nvui-fw-bold);
+    color: var(--nvui-text);
+}
+
+/* 大标题变体（例如欢迎页/结果页） */
+.nvui-modal-title.is-lg {
+    font-size: var(--nvui-fs-2xl);
+}
+
+.nvui-modal-title > i {
+    color: var(--nvui-accent-2);
+}
+
+.nvui-modal-ver {
+    flex-shrink: 0;
+    padding: 1px var(--nvui-space-15);
+    border: 1px solid var(--nvui-block-line);
+    border-radius: var(--nvui-radius-pill);
+    background: var(--nvui-block-bg);
+    color: var(--nvui-text-3);
+    font-size: var(--nvui-fs-xs);
+    font-weight: var(--nvui-fw-medium);
+}
+
+.nvui-modal-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--nvui-space-1);
+    flex-shrink: 0;
+}
+
+.nvui-modal-body {
+    padding: var(--nvui-space-4);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    color: var(--nvui-text);
+    font-size: var(--nvui-fs-lg);
+    line-height: var(--nvui-lh-loose);
+    word-break: break-word;
+}
+
+.nvui-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--nvui-space-2);
+    flex-shrink: 0;
+    padding: var(--nvui-space-3) var(--nvui-space-4);
+    border-top: 1px solid var(--nvui-line);
+}
+
+/* ==========================================================================
+ * 4. 图标按钮（方形、无底色、悬停浮起）
+ * ========================================================================== */
+.nvui-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--nvui-radius-sm);
+    background: transparent;
+    color: var(--nvui-text-2);
+    font-size: var(--nvui-fs-lg);
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color var(--nvui-transition), color var(--nvui-transition),
+        border-color var(--nvui-transition);
+}
+
+.nvui-icon-btn:hover {
+    background: var(--nvui-block-bg-2);
+    border-color: var(--nvui-block-line-2);
+    color: var(--nvui-text);
+}
+
+.nvui-icon-btn:focus-visible {
+    outline: 2px solid var(--nvui-accent);
+    outline-offset: 2px;
+}
+
+.nvui-icon-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ==========================================================================
+ * 5. 按钮
+ * --------------------------------------------------------------------------
+ * 默认（中性）：半透明白底 + 发丝线，用于常规操作；
+ * .is-primary  ：紫罗兰实心，页面主操作（每屏最多 1 个）；
+ * .is-secondary：主色淡底，次级操作；
+ * .is-ghost    ：透明描边，弱操作（取消/更多）；
+ * .is-danger   ：语义红，仅用于破坏性操作。
+ * ========================================================================== */
+.nvui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--nvui-space-15);
+    min-height: var(--nvui-control-h);
+    padding: var(--nvui-space-15) var(--nvui-space-3);
+    border: 1px solid var(--nvui-block-line-2);
+    border-radius: var(--nvui-radius-sm);
+    background: var(--nvui-block-bg);
+    color: var(--nvui-text);
+    font-family: inherit;
+    font-size: var(--nvui-fs-sm);
+    font-weight: var(--nvui-fw-medium);
+    line-height: var(--nvui-lh-tight);
+    white-space: nowrap;
+    text-align: center;
+    cursor: pointer;
+    transition: background-color var(--nvui-transition), border-color var(--nvui-transition),
+        color var(--nvui-transition), box-shadow var(--nvui-transition);
+}
+
+.nvui-btn:hover {
+    background: var(--nvui-block-bg-2);
+    border-color: var(--nvui-line-2);
+    color: var(--nvui-text);
+}
+
+.nvui-btn:focus-visible {
+    outline: 2px solid var(--nvui-accent);
+    outline-offset: 2px;
+}
+
+.nvui-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.nvui-btn > i {
+    font-size: 0.95em;
+    opacity: 0.92;
+}
+
+.nvui-btn.is-primary {
+    background: var(--nvui-accent-strong);
+    border-color: var(--nvui-accent-strong);
+    color: var(--nvui-knob);
+}
+
+.nvui-btn.is-primary:hover {
+    background: var(--nvui-accent-strong-hover);
+    border-color: var(--nvui-accent-strong-hover);
+    box-shadow: var(--nvui-shadow-accent);
+}
+
+.nvui-btn.is-secondary {
+    background: var(--nvui-accent-bg);
+    border-color: var(--nvui-accent-line);
+    color: var(--nvui-accent-2);
+}
+
+.nvui-btn.is-secondary:hover {
+    background: var(--nvui-accent-bg-hover);
+    border-color: var(--nvui-accent);
+    color: var(--nvui-text);
+}
+
+.nvui-btn.is-ghost {
+    background: transparent;
+    border-color: var(--nvui-line-2);
+    color: var(--nvui-text-2);
+}
+
+.nvui-btn.is-ghost:hover {
+    background: var(--nvui-block-bg);
+    color: var(--nvui-text);
+}
+
+.nvui-btn.is-danger {
+    background: var(--nvui-danger-bg);
+    border-color: var(--nvui-danger-line);
+    color: var(--nvui-danger);
+}
+
+.nvui-btn.is-danger:hover {
+    background: var(--nvui-danger-line);
+    color: var(--nvui-text);
+}
+
+.nvui-btn.is-sm {
+    min-height: 26px;
+    padding: var(--nvui-space-1) var(--nvui-space-25);
+    font-size: var(--nvui-fs-xs);
+}
+
+.nvui-btn.is-block {
+    width: 100%;
+}
+
+/* 按钮组：等宽换行（桌面并排、窄屏自动换行） */
+.nvui-btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--nvui-space-2);
+}
+
+.nvui-btn-row > .nvui-btn {
+    flex: 1 1 140px;
+}
+
+/* ==========================================================================
+ * 6. 胶囊开关行（含酒馆宿主 checkbox 样式隔离）
+ * --------------------------------------------------------------------------
+ * DOM：
+ *   <label class="nvui-switch-row">
+ *       <input type="checkbox" checked>
+ *       <span>开启某功能</span>
+ *   </label>
+ * 说明：DOM 中 input 在前、文字在后，配合 row-reverse 实现「左标题、右开关」。
+ *
+ * 宿主兼容红线：酒馆全局样式给**每个** input[type=checkbox] 挂了
+ *   appearance:none + display:grid + ::before 对勾（clip-path + inset box-shadow）,
+ * 自定义开关必须同时压掉 ::before，否则会出现「蓝色尖角/状态不可见」。
+ * ========================================================================== */
+.nvui-switch-row {
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--nvui-space-3);
+    margin: 0;
+    padding: var(--nvui-space-25) 0;
+    border-bottom: 1px solid var(--nvui-block-line);
+    cursor: pointer;
+    user-select: none;
+}
+
+.nvui-switch-row:last-child {
+    border-bottom: none;
+}
+
+.nvui-switch-row > span {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--nvui-text-2);
+    font-size: var(--nvui-fs-md);
+}
+
+.nvui-switch-row input[type="checkbox"] {
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    flex: 0 0 auto;
+    width: var(--nvui-switch-w);
+    height: var(--nvui-switch-h);
+    margin: 0;
+    border: 1px solid var(--nvui-block-line-2);
+    border-radius: var(--nvui-radius-pill);
+    background: var(--nvui-switch-off-bg);
+    cursor: pointer;
+    overflow: hidden;
+    outline: none;
+    filter: none;
+    transform: none;
+    transition: background-color var(--nvui-transition), border-color var(--nvui-transition);
+}
+
+/* 压掉宿主的 ::before 对勾（元素级隔离见组件说明；这是唯一允许 !important 的地方） */
+.nvui-switch-row input[type="checkbox"]::before,
+.nvui-switch-row input[type="checkbox"]:checked::before,
+.nvui-switch-row input[type="checkbox"]:focus-visible::before {
+    content: none !important;
+    display: none !important;
+}
+
+/* 滑钮 */
+.nvui-switch-row input[type="checkbox"]::after {
+    content: '';
+    position: absolute;
+    top: var(--nvui-switch-knob-offset);
+    left: var(--nvui-switch-knob-offset);
+    width: var(--nvui-switch-knob);
+    height: var(--nvui-switch-knob);
+    border-radius: 50%;
+    background: var(--nvui-knob-off);
+    transition: transform var(--nvui-transition), background-color var(--nvui-transition);
+}
+
+.nvui-switch-row input[type="checkbox"]:checked {
+    background: var(--nvui-accent);
+    border-color: var(--nvui-accent);
+}
+
+.nvui-switch-row input[type="checkbox"]:checked::after {
+    transform: translateX(var(--nvui-switch-knob-on));
+    background: var(--nvui-knob);
+}
+
+.nvui-switch-row input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--nvui-accent);
+    outline-offset: 2px;
+}
+
+.nvui-switch-row input[type="checkbox"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ==========================================================================
+ * 7. 输入行（左标题 + 右控件）
+ * --------------------------------------------------------------------------
+ * DOM：
+ *   <label class="nvui-input-row">
+ *       <input class="nvui-input is-number" type="number" value="5">
+ *       <span>单图上限 (MB)</span>
+ *   </label>
+ * ========================================================================== */
+.nvui-input-row {
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--nvui-space-3);
+    margin: 0;
+    padding: var(--nvui-space-25) 0;
+    border-bottom: 1px solid var(--nvui-block-line);
+}
+
+.nvui-input-row:last-child {
+    border-bottom: none;
+}
+
+.nvui-input-row > span {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--nvui-text-2);
+    font-size: var(--nvui-fs-md);
+}
+
+.nvui-input {
+    flex: 0 0 auto;
+    min-height: var(--nvui-control-h);
+    padding: var(--nvui-space-15) var(--nvui-space-25);
+    border: 1px solid var(--nvui-block-line-2);
+    border-radius: var(--nvui-radius-sm);
+    background: var(--nvui-input-bg);
+    color: var(--nvui-text);
+    font-family: inherit;
+    font-size: var(--nvui-fs-md);
+    line-height: var(--nvui-lh-tight);
+    transition: border-color var(--nvui-transition), background-color var(--nvui-transition);
+}
+
+.nvui-input::placeholder {
+    color: var(--nvui-text-3);
+}
+
+.nvui-input:focus-visible {
+    outline: 2px solid var(--nvui-accent);
+    outline-offset: 1px;
+    border-color: var(--nvui-accent-line);
+}
+
+.nvui-input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* 数值框：定宽右对齐，数字不跳动 */
+.nvui-input.is-number {
+    width: 96px;
+    text-align: right;
+}
+
+/* 路径/文件名：定宽稍宽，窄屏不超过行宽 60% */
+.nvui-input.is-path {
+    width: 200px;
+    max-width: 60%;
+}
+
+/* ==========================================================================
+ * 8. 标签页（nav[role=tablist] + button[role=tab]）
+ * --------------------------------------------------------------------------
+ * 只负责视觉与「仅当前标签可 Tab 聚焦」的样式；键盘左右切换由业务 JS 处理。
+ * 无障碍要求：nav[role="tablist"]、button[role="tab"][aria-selected]、
+ * 面板 [role="tabpanel"] + aria-labelledby。
+ * ========================================================================== */
+.nvui-tabs {
+    display: flex;
+    align-items: center;
+    gap: var(--nvui-space-1);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 0 0 var(--nvui-space-25);
+    border-bottom: 1px solid var(--nvui-line);
+    scrollbar-width: none;
+}
+
+.nvui-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.nvui-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    flex: 0 0 auto;
+    padding: var(--nvui-space-2) var(--nvui-space-3);
+    border: 1px solid transparent;
+    border-radius: var(--nvui-radius-pill);
+    background: transparent;
+    color: var(--nvui-text-2);
+    font-family: inherit;
+    font-size: var(--nvui-fs-md);
+    line-height: var(--nvui-lh-tight);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color var(--nvui-transition), color var(--nvui-transition),
+        border-color var(--nvui-transition);
+}
+
+.nvui-tab:hover {
+    background: var(--nvui-block-bg);
+    color: var(--nvui-text);
+}
+
+.nvui-tab.is-active {
+    background: var(--nvui-accent-bg);
+    border-color: var(--nvui-accent-line);
+    color: var(--nvui-text);
+    font-weight: var(--nvui-fw-semibold);
+}
+
+.nvui-tab.is-active > i {
+    color: var(--nvui-accent-2);
+}
+
+.nvui-tab:focus-visible {
+    outline: 2px solid var(--nvui-accent);
+    outline-offset: 2px;
+}
+
+/* 面板：默认全部挂载、只切 display（避免重建 DOM 丢输入态） */
+.nvui-tabpane {
+    display: none;
+}
+
+.nvui-tabpane.is-active {
+    display: block;
+}
+
+/* ==========================================================================
+ * 9. 折叠面板（accordion）
+ * --------------------------------------------------------------------------
+ * DOM：
+ *   <div class="nvui-acc is-open">
+ *     <button class="nvui-acc-head" aria-expanded="true">
+ *       <span class="nvui-acc-title"><i class="fa-solid fa-folder"></i>标题</span>
+ *       <span class="nvui-acc-summary">当前值摘要</span>
+ *       <i class="nvui-acc-chev"></i>
+ *     </button>
+ *     <div class="nvui-acc-body"> ... </div>
+ *   </div>
+ * 收起态右侧 summary 是用户唯一线索：每个分组都必须给当前值。
+ * ========================================================================== */
+.nvui-acc {
+    overflow: hidden;
+    margin: 0 0 var(--nvui-space-2);
+    border: 1px solid var(--nvui-block-line);
+    border-radius: var(--nvui-radius);
+    background: var(--nvui-block-bg);
+    transition: background-color var(--nvui-transition-slow), border-color var(--nvui-transition-slow);
+}
+
+.nvui-acc:last-child {
+    margin-bottom: 0;
+}
+
+.nvui-acc-head {
+    display: flex;
+    align-items: center;
+    gap: var(--nvui-space-25);
+    width: 100%;
+    padding: var(--nvui-space-25) var(--nvui-space-3);
+    border: none;
+    border-radius: 0;
+    background: none;
+    color: var(--nvui-text);
+    font-family: inherit;
+    font-size: var(--nvui-fs-md);
+    font-weight: var(--nvui-fw-semibold);
+    line-height: var(--nvui-lh-tight);
+    text-align: left;
+    cursor: pointer;
+}
+
+.nvui-acc-head:hover {
+    background: var(--nvui-block-bg-2);
+}
+
+.nvui-acc-head:focus-visible {
+    outline: 2px solid var(--nvui-accent);
+    outline-offset: -2px;
+}
+
+.nvui-acc-title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--nvui-space-15);
+    flex: 0 0 auto;
+}
+
+.nvui-acc-title > i {
+    color: var(--nvui-accent-2);
+}
+
+.nvui-acc-summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--nvui-text-3);
+    font-size: var(--nvui-fs-sm);
+    font-weight: var(--nvui-fw-regular);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    text-align: right;
+}
+
+/* 纯 CSS 箭头：不依赖图标字体，消费者也可以换成 <i class="fa-solid fa-chevron-down"> */
+.nvui-acc-chev {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    margin-left: var(--nvui-space-05, 2px);
+    border-right: 2px solid var(--nvui-text-3);
+    border-bottom: 2px solid var(--nvui-text-3);
+    transform: rotate(45deg);
+    transition: transform var(--nvui-transition);
+}
+
+.nvui-acc.is-open .nvui-acc-chev {
+    transform: rotate(225deg);
+}
+
+.nvui-acc-body {
+    display: none;
+    padding: var(--nvui-space-05, 2px) var(--nvui-space-3) var(--nvui-space-3);
+}
+
+.nvui-acc.is-open .nvui-acc-body {
+    display: block;
+}
+
+/* ==========================================================================
+ * 10. 区块标题 / 提示 / 告警 / 状态行
+ * ========================================================================== */
+.nvui-section-title {
+    display: flex;
+    align-items: center;
+    gap: var(--nvui-space-15);
+    color: var(--nvui-text);
+    font-size: var(--nvui-fs-md);
+    font-weight: var(--nvui-fw-bold);
+    letter-spacing: 0.5px;
+}
+
+.nvui-section-title > i {
+    color: var(--nvui-accent-2);
+}
+
+/* 说明小字：比正文小一档、更灰，只用于解释，不承载关键信息 */
+.nvui-hint {
+    color: var(--nvui-text-3);
+    font-size: var(--nvui-fs-sm);
+    line-height: var(--nvui-lh-relaxed);
+}
+
+.nvui-hint.is-warn {
+    color: var(--nvui-warn);
+}
+
+.nvui-hint code {
+    color: var(--nvui-text-2);
+}
+
+/* 告警条：左侧竖线表达语义，不用满框底色（与酒馆原生提示区分） */
+.nvui-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--nvui-space-2);
+    padding: var(--nvui-space-2) var(--nvui-space-3);
+    border-left: 2px solid var(--nvui-line-2);
+    border-radius: 0 var(--nvui-radius-xs) var(--nvui-radius-xs) 0;
+    background: var(--nvui-block-bg);
+    color: var(--nvui-text-2);
+    font-size: var(--nvui-fs-sm);
+    line-height: var(--nvui-lh-relaxed);
+    word-break: break-word;
+}
+
+.nvui-alert > i {
+    flex-shrink: 0;
+    margin-top: 3px;
+}
+
+.nvui-alert.is-checking {
+    border-left-color: var(--nvui-dash);
+}
+
+.nvui-alert.is-success {
+    border-left-color: var(--nvui-ok);
+    background: var(--nvui-ok-bg);
+}
+
+.nvui-alert.is-success > i {
+    color: var(--nvui-ok);
+}
+
+.nvui-alert.is-warning {
+    border-left-color: var(--nvui-warn);
+    background: var(--nvui-warn-bg);
+}
+
+.nvui-alert.is-warning > i {
+    color: var(--nvui-warn);
+}
+
+.nvui-alert.is-error {
+    border-left-color: var(--nvui-danger);
+    background: var(--nvui-danger-bg);
+}
+
+.nvui-alert.is-error > i {
+    color: var(--nvui-danger);
+}
+
+.nvui-alert.is-info {
+    border-left-color: var(--nvui-info);
+    background: var(--nvui-info-bg);
+}
+
+.nvui-alert.is-info > i {
+    color: var(--nvui-info);
+}
+
+/* 状态行：颜色即状态；时间戳贴右，详情另起一行 */
+.nvui-status-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--nvui-space-1) var(--nvui-space-2);
+    padding-top: var(--nvui-space-15);
+    border-top: 1px dashed var(--nvui-line);
+    color: var(--nvui-text-2);
+    font-size: var(--nvui-fs-sm);
+    line-height: var(--nvui-lh-normal);
+    word-break: break-all;
+}
+
+.nvui-status-line.is-updating {
+    color: var(--nvui-info);
+}
+
+.nvui-status-line.is-success {
+    color: var(--nvui-ok);
+}
+
+.nvui-status-line.is-skipped {
+    color: var(--nvui-warn);
+}
+
+.nvui-status-line.is-error {
+    color: var(--nvui-danger);
+}
+
+.nvui-status-time {
+    flex-shrink: 0;
+    margin-left: auto;
+    opacity: 0.6;
+    font-size: var(--nvui-fs-xs);
+}
+
+.nvui-status-file {
+    width: 100%;
+    font-size: var(--nvui-fs-xs);
+    opacity: 0.85;
+}
+
+/* ==========================================================================
+ * 11. 徽标 / 标签块 / 空态 / 加载
+ * ========================================================================== */
+.nvui-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--nvui-space-1);
+    padding: 2px var(--nvui-space-2);
+    border: 1px solid var(--nvui-block-line-2);
+    border-radius: var(--nvui-radius-pill);
+    background: var(--nvui-block-bg);
+    color: var(--nvui-text-2);
+    font-size: var(--nvui-fs-xs);
+    line-height: var(--nvui-lh-tight);
+}
+
+.nvui-badge.is-accent {
+    border-color: var(--nvui-accent-line);
+    background: var(--nvui-accent-bg);
+    color: var(--nvui-accent-2);
+}
+
+.nvui-badge.is-success {
+    border-color: var(--nvui-ok-line);
+    background: var(--nvui-ok-bg);
+    color: var(--nvui-ok);
+}
+
+.nvui-badge.is-warn {
+    border-color: var(--nvui-warn-line);
+    background: var(--nvui-warn-bg);
+    color: var(--nvui-warn);
+}
+
+.nvui-badge.is-danger {
+    border-color: var(--nvui-danger-line);
+    background: var(--nvui-danger-bg);
+    color: var(--nvui-danger);
+}
+
+.nvui-badge.is-info {
+    border-color: var(--nvui-info-line);
+    background: var(--nvui-info-bg);
+    color: var(--nvui-info);
+}
+
+.nvui-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--nvui-space-1);
+    padding: 2px var(--nvui-space-2);
+    border: 1px solid var(--nvui-block-line-2);
+    border-radius: var(--nvui-radius-xs);
+    background: var(--nvui-block-bg);
+    color: var(--nvui-text-2);
+    font-size: var(--nvui-fs-sm);
+    line-height: var(--nvui-lh-tight);
+}
+
+.nvui-chip-count {
+    color: var(--nvui-text-3);
+    font-size: var(--nvui-fs-2xs);
+}
+
+.nvui-empty {
+    padding: var(--nvui-space-6) var(--nvui-space-4);
+    border: 1px dashed var(--nvui-dash);
+    border-radius: var(--nvui-radius);
+    color: var(--nvui-text-3);
+    font-size: var(--nvui-fs-sm);
+    line-height: var(--nvui-lh-relaxed);
+    text-align: center;
+}
+
+.nvui-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--nvui-line-2);
+    border-top-color: var(--nvui-accent);
+    border-radius: 50%;
+    vertical-align: -3px;
+    animation: nvui-spin var(--nvui-spin-duration) linear infinite;
+}
+
+@keyframes nvui-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ==========================================================================
+ * 12. 悬浮面板（常驻入口 / 小工具窗）
+ * --------------------------------------------------------------------------
+ * 只提供外观；拖拽、位置记忆、点击展开等交互由业务 JS 处理
+ * （建议 pointerdown/move/up + 阈值区分点击与拖动，见 novel-stream 实现）。
+ * ========================================================================== */
+.nvui-floating {
+    z-index: var(--nvui-z-floating);
+    padding: var(--nvui-space-25) var(--nvui-space-3);
+    border: 1px solid var(--nvui-line-2);
+    border-radius: var(--nvui-radius-pill);
+    background: var(--nvui-bg-2);
+    box-shadow: var(--nvui-shadow-pop);
+    color: var(--nvui-text);
+    font-size: var(--nvui-fs-sm);
+}
+
+.nvui-floating-handle {
+    cursor: grab;
+    touch-action: none;
+}
+
+.nvui-floating.is-dragging {
+    cursor: grabbing;
+    user-select: none;
+}
+
+/* 竖向堆叠的小工具窗（非胶囊形态） */
+.nvui-floating.is-panel {
+    border-radius: var(--nvui-radius);
+    padding: var(--nvui-space-3);
+}
+
+/* ==========================================================================
+ * 13. 工具提示（hover 时的轻量说明）
+ * ========================================================================== */
+.nvui-tooltip {
+    position: fixed;
+    z-index: var(--nvui-z-tooltip);
+    max-width: 340px;
+    padding: var(--nvui-space-2) var(--nvui-space-3);
+    border: 1px solid var(--nvui-line-2);
+    border-radius: var(--nvui-radius-sm);
+    background: var(--nvui-bg-2);
+    box-shadow: var(--nvui-shadow-pop);
+    color: var(--nvui-text-2);
+    font-size: var(--nvui-fs-sm);
+    line-height: var(--nvui-lh-relaxed);
+    pointer-events: none;
+    word-break: break-word;
+}
+
+/* ==========================================================================
+ * 14. 布局工具
+ * ========================================================================== */
+.nvui-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nvui-space-3);
+}
+
+.nvui-stack.is-loose {
+    gap: var(--nvui-space-5);
+}
+
+.nvui-row {
+    display: flex;
+    align-items: center;
+    gap: var(--nvui-space-2);
+}
+
+.nvui-row.is-between {
+    justify-content: space-between;
+}
+
+.nvui-grow {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.nvui-divider {
+    height: 1px;
+    margin: var(--nvui-space-3) 0;
+    border: none;
+    background: var(--nvui-line);
+}
+
+/* 文字色工具类：只允许用于文字，不要拿来改背景 */
+.nvui-muted {
+    color: var(--nvui-text-2);
+}
+
+.nvui-muted-2 {
+    color: var(--nvui-text-3);
+}
+
+.nvui-accent-text {
+    color: var(--nvui-accent-2);
+}
+
+.nvui-ok-text {
+    color: var(--nvui-ok);
+}
+
+.nvui-warn-text {
+    color: var(--nvui-warn);
+}
+
+.nvui-danger-text {
+    color: var(--nvui-danger);
+}
+
+.nvui-info-text {
+    color: var(--nvui-info);
+}
+
+.nvui-code {
+    padding: 1px var(--nvui-space-1);
+    border-radius: var(--nvui-radius-xs);
+    background: var(--nvui-code-bg);
+    color: var(--nvui-text-2);
+    font-family: Consolas, Monaco, monospace;
+    font-size: 0.92em;
+    word-break: break-all;
+}
+
+/* ==========================================================================
+ * 15. 响应式与无障碍
+ * ========================================================================== */
+@media (max-width: 600px) {
+    .nvui-overlay {
+        padding: var(--nvui-space-2);
+    }
+
+    .nvui-modal {
+        width: 100%;
+        max-height: 92dvh;
+        border-radius: var(--nvui-radius);
+    }
+
+    .nvui-modal-header {
+        padding: var(--nvui-space-3) var(--nvui-space-3);
+    }
+
+    .nvui-modal-body {
+        padding: var(--nvui-space-3);
+        font-size: var(--nvui-fs-xl);
+        line-height: 1.75;
+    }
+
+    .nvui-modal-footer {
+        padding: var(--nvui-space-2) var(--nvui-space-3);
+    }
+
+    .nvui-btn-row > .nvui-btn {
+        flex: 1 1 100%;
+    }
+}
+
+/* 尊重系统「减少动态效果」偏好 */
+@media (prefers-reduced-motion: reduce) {
+    .nvui-scope *,
+    .nvui-scope *::before,
+    .nvui-scope *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

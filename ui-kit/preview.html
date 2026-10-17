@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SillyTavern UI Kit v1.0.0 · 组件预览</title>
+<!-- 只依赖 kit 自身的两个文件，离线可打开；不需要酒馆、不需要网络、无第三方库 -->
+<link rel="stylesheet" href="./tokens.css">
+<link rel="stylesheet" href="./components.css">
+<style>
+    /* 仅本预览页使用的页面骨架样式，前缀 pv-，不进入 kit */
+    html, body { margin: 0; min-height: 100%; }
+    body {
+        background: var(--nvui-bg-2);
+        color: var(--nvui-text);
+        font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    }
+    .pv-page { max-width: 1040px; margin: 0 auto; padding: 32px 20px 96px; }
+    .pv-header {
+        display: flex; align-items: flex-start; justify-content: space-between;
+        gap: 16px; flex-wrap: wrap; margin-bottom: 8px;
+    }
+    .pv-header h1 { margin: 0 0 6px; font-size: 22px; color: var(--nvui-text); display: flex; align-items: center; gap: 10px; }
+    .pv-header .nvui-hint { margin: 0; max-width: 620px; }
+    .pv-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pv-section {
+        margin-top: 24px; padding: 16px; border: 1px solid var(--nvui-block-line);
+        border-radius: var(--nvui-radius); background: var(--nvui-block-bg);
+    }
+    .pv-section > .nvui-section-title { margin-bottom: 4px; }
+    .pv-section > .nvui-hint { margin: 0 0 14px; }
+    .pv-demo {
+        padding: 14px; border: 1px dashed var(--nvui-dash);
+        border-radius: var(--nvui-radius-sm); background: var(--nvui-bg);
+    }
+    .pv-swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+    .pv-swatch {
+        width: 150px; padding: 8px; border: 1px solid var(--nvui-block-line-2);
+        border-radius: var(--nvui-radius-sm); background: var(--nvui-bg);
+    }
+    .pv-swatch-chip {
+        display: block; height: 34px; margin-bottom: 6px;
+        border: 1px solid var(--nvui-line-2); border-radius: var(--nvui-radius-xs);
+    }
+    .pv-swatch code { font-size: 11px; color: var(--nvui-text-2); word-break: break-all; }
+    .pv-row-label { width: 120px; flex: 0 0 auto; font-size: 12px; color: var(--nvui-text-3); }
+    .pv-tooltip-demo .nvui-tooltip { position: static; display: inline-block; }
+    .pv-tabpane-demo { padding: 12px; border: 1px solid var(--nvui-block-line); border-radius: var(--nvui-radius-sm); margin-top: 10px; }
+    .pv-kbd { padding: 1px 6px; border: 1px solid var(--nvui-line-2); border-radius: 4px; font-size: 11px; color: var(--nvui-text-2); }
+    .pv-dialog-note { margin-top: 10px; }
+</style>
+</head>
+<body class="nvui-scope">
+
+<div class="pv-page">
+    <header class="pv-header">
+        <div>
+            <h1>UI Kit <span class="nvui-badge is-accent">v1.0.0</span></h1>
+            <p class="nvui-hint">SillyTavern 插件通用浮动 UI 组件与配色规范。只依赖 <code class="nvui-code">tokens.css</code> 与 <code class="nvui-code">components.css</code>，可整目录复制到下一个插件复用。规范文档见 <code class="nvui-code">README.md</code>。</p>
+        </div>
+        <div class="pv-actions">
+            <button type="button" class="nvui-btn is-ghost" id="pv-theme-btn">切换浅色主题</button>
+            <button type="button" class="nvui-btn is-primary" id="pv-open-modal">打开弹窗示例</button>
+        </div>
+    </header>
+
+    <main class="pv-main">
+
+        <!-- 1. 色板 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">1. 配色令牌</div>
+            <p class="nvui-hint">组件样式禁止硬编码颜色，一律引用右侧 token。语义色只表达语义，不拿主色表达错误。</p>
+            <div class="pv-demo">
+                <div class="nvui-row" style="align-items:flex-start; gap:16px; flex-wrap:wrap;">
+                    <span class="pv-row-label">表面 / 背景</span>
+                    <div class="pv-swatches">
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-bg)"></span><code>--nvui-bg</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-bg-2)"></span><code>--nvui-bg-2</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-bg-3)"></span><code>--nvui-bg-3</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-block-bg)"></span><code>--nvui-block-bg</code></div>
+                    </div>
+                </div>
+                <div class="nvui-row" style="align-items:flex-start; gap:16px; flex-wrap:wrap; margin-top:14px;">
+                    <span class="pv-row-label">文字层级</span>
+                    <div class="pv-swatches">
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-text)"></span><code>--nvui-text</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-text-2)"></span><code>--nvui-text-2</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-text-3)"></span><code>--nvui-text-3</code></div>
+                    </div>
+                </div>
+                <div class="nvui-row" style="align-items:flex-start; gap:16px; flex-wrap:wrap; margin-top:14px;">
+                    <span class="pv-row-label">主色</span>
+                    <div class="pv-swatches">
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-accent)"></span><code>--nvui-accent</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-accent-2)"></span><code>--nvui-accent-2</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-accent-strong)"></span><code>--nvui-accent-strong</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-accent-bg)"></span><code>--nvui-accent-bg</code></div>
+                    </div>
+                </div>
+                <div class="nvui-row" style="align-items:flex-start; gap:16px; flex-wrap:wrap; margin-top:14px;">
+                    <span class="pv-row-label">语义色</span>
+                    <div class="pv-swatches">
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-ok)"></span><code>--nvui-ok</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-warn)"></span><code>--nvui-warn</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-danger)"></span><code>--nvui-danger</code></div>
+                        <div class="pv-swatch"><span class="pv-swatch-chip" style="background: var(--nvui-info)"></span><code>--nvui-info</code></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. 文字层级 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">2. 文字层级</div>
+            <p class="nvui-hint">正文/次要/提示三档灰 + 字号刻度；正文层级不要超过两级混用。</p>
+            <div class="pv-demo nvui-stack">
+                <div class="nvui-modal-title is-lg">标题级：--nvui-fs-2xl + 粗体</div>
+                <div class="nvui-row"><span class="nvui-muted-2">正文：</span><span>这是正文文字 --nvui-text / --nvui-fs-md</span></div>
+                <div class="nvui-row"><span class="nvui-muted-2">次要：</span><span class="nvui-muted">这是次要说明 --nvui-text-2，用于解释与补充</span></div>
+                <div class="nvui-row"><span class="nvui-muted-2">提示：</span><span class="nvui-muted-2">这是提示性小字 --nvui-text-3，仅装饰与非关键信息</span></div>
+                <div class="nvui-hint">说明小字：.nvui-hint，用于设置项解释。</div>
+            </div>
+        </section>
+
+        <!-- 3. 按钮 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">3. 按钮</div>
+            <p class="nvui-hint">默认中性、主操作用 <code class="nvui-code">is-primary</code>（每屏建议最多 1 个）、次级 <code class="nvui-code">is-secondary</code>、弱操作 <code class="nvui-code">is-ghost</code>、破坏性 <code class="nvui-code">is-danger</code>。</p>
+            <div class="pv-demo nvui-stack">
+                <div class="nvui-row" style="flex-wrap:wrap;">
+                    <button type="button" class="nvui-btn">默认按钮</button>
+                    <button type="button" class="nvui-btn is-primary">主操作</button>
+                    <button type="button" class="nvui-btn is-secondary">次级操作</button>
+                    <button type="button" class="nvui-btn is-ghost">弱操作</button>
+                    <button type="button" class="nvui-btn is-danger">删除</button>
+                    <button type="button" class="nvui-btn is-primary" disabled>禁用态</button>
+                    <button type="button" class="nvui-btn is-sm">小尺寸</button>
+                </div>
+                <div class="nvui-btn-row">
+                    <button type="button" class="nvui-btn is-secondary">并排按钮 A</button>
+                    <button type="button" class="nvui-btn is-secondary">并排按钮 B</button>
+                    <button type="button" class="nvui-btn">并排按钮 C</button>
+                </div>
+                <button type="button" class="nvui-btn is-primary is-block">通栏按钮 is-block</button>
+            </div>
+        </section>
+
+        <!-- 4. 胶囊开关 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">4. 胶囊开关行</div>
+            <p class="nvui-hint">含酒馆宿主 checkbox 样式隔离：清掉宿主的 ::before 对勾，开关状态由轨道颜色 + 滑钮位移表达。整行 label 可点。</p>
+            <div class="pv-demo nvui-stack">
+                <label class="nvui-switch-row">
+                    <input type="checkbox" id="pv-switch-a">
+                    <span>未开启的开关</span>
+                </label>
+                <label class="nvui-switch-row">
+                    <input type="checkbox" checked>
+                    <span>已开启的开关（紫罗兰轨道 + 白色滑钮）</span>
+                </label>
+                <label class="nvui-switch-row">
+                    <input type="checkbox" disabled>
+                    <span>禁用态</span>
+                </label>
+                <div class="nvui-hint" id="pv-switch-hint">开关状态会同步到这条说明文字（业务里一般同步到设置摘要）。</div>
+            </div>
+        </section>
+
+        <!-- 5. 输入行 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">5. 输入行</div>
+            <p class="nvui-hint">左标题 + 右控件；数值框定宽右对齐，路径框定宽且窄屏不超过 60%。</p>
+            <div class="pv-demo">
+                <label class="nvui-input-row">
+                    <input class="nvui-input is-number" type="number" value="5" min="1" max="50">
+                    <span>单图上限 (MB)</span>
+                </label>
+                <label class="nvui-input-row">
+                    <input class="nvui-input is-number" type="number" value="80" min="1" max="500">
+                    <span>图片总量上限 (MB)</span>
+                </label>
+                <label class="nvui-input-row">
+                    <input class="nvui-input is-path" type="text" placeholder="留空自动推导" value="/home/node/app">
+                    <span>酒馆根目录（可选）</span>
+                </label>
+                <label class="nvui-input-row">
+                    <input class="nvui-input" type="text" placeholder="全宽输入框（无 is-path 时自适应）">
+                    <span>普通文本</span>
+                </label>
+            </div>
+        </section>
+
+        <!-- 6. 标签页 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">6. 标签页</div>
+            <p class="nvui-hint">nav[role=tablist] + button[role=tab] + 面板 [role=tabpanel]；键盘左右切换与 Esc 由业务 JS 处理。</p>
+            <div class="pv-demo">
+                <nav class="nvui-tabs" role="tablist" aria-label="预览标签页">
+                    <button type="button" class="nvui-tab is-active" role="tab" id="pv-tab-1" aria-selected="true" aria-controls="pv-pane-1" data-pv-tab="pv-pane-1">连载</button>
+                    <button type="button" class="nvui-tab" role="tab" id="pv-tab-2" aria-selected="false" aria-controls="pv-pane-2" data-pv-tab="pv-pane-2">过滤</button>
+                    <button type="button" class="nvui-tab" role="tab" id="pv-tab-3" aria-selected="false" aria-controls="pv-pane-3" data-pv-tab="pv-pane-3">文件</button>
+                </nav>
+                <div class="pv-tabpane-demo">
+                    <div class="nvui-tabpane is-active" id="pv-pane-1" role="tabpanel" aria-labelledby="pv-tab-1">面板一：只切 display，不重建 DOM（避免丢输入焦点与异步结果）。</div>
+                    <div class="nvui-tabpane" id="pv-pane-2" role="tabpanel" aria-labelledby="pv-tab-2">面板二：切换标签时建议把滚动位置复位。</div>
+                    <div class="nvui-tabpane" id="pv-pane-3" role="tabpanel" aria-labelledby="pv-tab-3">面板三：内容可以继续嵌套折叠分组。</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 7. 折叠面板 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">7. 折叠面板</div>
+            <p class="nvui-hint">收起态右侧摘要必须给「当前值」，否则折叠等于把设置藏起来；展开动画只改 class，不重建 DOM。</p>
+            <div class="pv-demo">
+                <div class="nvui-acc is-open">
+                    <button type="button" class="nvui-acc-head" aria-expanded="true">
+                        <span class="nvui-acc-title">已展开的分组</span>
+                        <span class="nvui-acc-summary">摘要：当前值 5MB/张</span>
+                        <i class="nvui-acc-chev"></i>
+                    </button>
+                    <div class="nvui-acc-body">
+                        <div class="nvui-hint">展开体里可以放说明、开关行、输入行与按钮组。</div>
+                        <label class="nvui-switch-row">
+                            <input type="checkbox" checked>
+                            <span>分组内开关</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="nvui-acc">
+                    <button type="button" class="nvui-acc-head" aria-expanded="false">
+                        <span class="nvui-acc-title">已收起的分组（点我展开）</span>
+                        <span class="nvui-acc-summary">摘要：纯文字（不嵌入图片）</span>
+                        <i class="nvui-acc-chev"></i>
+                    </button>
+                    <div class="nvui-acc-body">
+                        <div class="nvui-hint">收起时用户只能看到右侧摘要，因此每个分组都必须维护摘要。</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 8. 提示 / 告警 / 状态行 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">8. 提示、告警与状态行</div>
+            <p class="nvui-hint">告警用左侧竖线表达语义（不铺满底色）；状态行颜色即状态，时间戳贴右。</p>
+            <div class="pv-demo nvui-stack">
+                <div class="nvui-hint">普通说明小字 .nvui-hint。</div>
+                <div class="nvui-hint is-warn">警示说明 .nvui-hint.is-warn：图片总量可能超过上限。</div>
+                <div class="nvui-alert is-checking"><span class="nvui-spinner"></span><span>正在检查服务状态...</span></div>
+                <div class="nvui-alert is-success"><span class="nvui-ok-text">OK</span><span>已成功写入 12 章。</span></div>
+                <div class="nvui-alert is-warning"><span class="nvui-warn-text">注意</span><span>有 2 张图片缺失，已跳过。</span></div>
+                <div class="nvui-alert is-error"><span class="nvui-danger-text">错误</span><span>服务端插件未就绪（HTTP 404）。</span></div>
+                <div class="nvui-alert is-info"><span class="nvui-info-text">提示</span><span>正在生成 EPUB，请稍候。</span></div>
+                <div class="nvui-status-line is-success">
+                    <span>更新完成：第 12 章已写入</span>
+                    <span class="nvui-status-time">21:33:40</span>
+                    <span class="nvui-status-file">文件路径：plugins/auto-save/logs/艾莉丝 - 2026-10-17.txt</span>
+                </div>
+                <div class="nvui-status-line is-updating"><span>更新中：正在编排章节...</span><span class="nvui-status-time">21:33:41</span></div>
+                <div class="nvui-status-line is-skipped"><span>已跳过：内容与前文重复</span><span class="nvui-status-time">21:33:42</span></div>
+                <div class="nvui-status-line is-error"><span>写入失败：目标目录不可写</span><span class="nvui-status-time">21:33:43</span></div>
+            </div>
+        </section>
+
+        <!-- 9. 徽标 / 标签块 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">9. 徽标与标签块</div>
+            <p class="nvui-hint">徽标用于状态/元信息；标签块用于内容分类。计数角标用 .nvui-chip-count 弱化。</p>
+            <div class="pv-demo nvui-stack">
+                <div class="nvui-row" style="flex-wrap:wrap;">
+                    <span class="nvui-badge">默认徽标</span>
+                    <span class="nvui-badge is-accent">主色徽标</span>
+                    <span class="nvui-badge is-success">成功</span>
+                    <span class="nvui-badge is-warn">注意</span>
+                    <span class="nvui-badge is-danger">危险</span>
+                    <span class="nvui-badge is-info">进行中</span>
+                </div>
+                <div class="nvui-row" style="flex-wrap:wrap;">
+                    <span class="nvui-chip">正文标签</span>
+                    <span class="nvui-chip">思考链 <span class="nvui-chip-count">12</span></span>
+                    <span class="nvui-chip">OOC <span class="nvui-chip-count">3</span></span>
+                </div>
+            </div>
+        </section>
+
+        <!-- 10. 空态 / 加载 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">10. 空态与加载</div>
+            <p class="nvui-hint">空态用虚线框 + 居中提示；加载用 .nvui-spinner，也可用 Font Awesome 的 fa-spin 图标。</p>
+            <div class="pv-demo nvui-stack">
+                <div class="nvui-empty">当前没有可预览的内容。完成一次对话后再回来看看。</div>
+                <div class="nvui-row"><span class="nvui-spinner"></span><span class="nvui-muted">正在载入设置...</span></div>
+            </div>
+        </section>
+
+        <!-- 11. 悬浮面板 / 工具提示 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">11. 悬浮面板与工具提示</div>
+            <p class="nvui-hint">悬浮面板只提供外观；拖拽与位置记忆由业务 JS 实现（建议 pointer 事件 + 阈值区分点击/拖动）。工具提示默认 position:fixed，由 JS 定位。</p>
+            <div class="pv-demo nvui-stack">
+                <div class="nvui-row" style="flex-wrap:wrap;">
+                    <div class="nvui-floating nvui-floating-handle">连载中 · 第 12 章（可拖动把手）</div>
+                    <div class="nvui-floating is-panel" style="width:240px;">
+                        <div class="nvui-section-title" style="font-size:12px;">小工具窗</div>
+                        <div class="nvui-hint" style="margin:6px 0 0;">竖向面板形态（.nvui-floating.is-panel）。</div>
+                    </div>
+                </div>
+                <div class="nvui-row pv-tooltip-demo">
+                    <span class="nvui-muted-2">悬浮提示示例：</span>
+                    <div class="nvui-tooltip">这是一条轻量说明，长文本会自动换行，最多 340px 宽。</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 12. 布局工具 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">12. 布局工具</div>
+            <p class="nvui-hint">优先用 .nvui-stack / .nvui-row / .nvui-divider 组织间距，避免在模板里写内联 flex（便于主题与响应式统一）。</p>
+            <div class="pv-demo nvui-stack">
+                <div class="nvui-stack">
+                    <div class="nvui-row"><span class="nvui-muted-2">竖向堆叠</span><span class="nvui-grow">.nvui-stack（gap = space-3）</span><span class="nvui-badge is-accent">示例</span></div>
+                    <div class="nvui-row is-between"><span class="nvui-muted-2">两端对齐</span><span class="nvui-muted">.nvui-row.is-between</span></div>
+                </div>
+                <hr class="nvui-divider">
+                <div class="nvui-row" style="flex-wrap:wrap;">
+                    <code class="nvui-code">--nvui-accent</code>
+                    <span class="nvui-muted">行内代码 .nvui-code；文字色工具类：</span>
+                    <span class="nvui-muted-2">muted-2</span>
+                    <span class="nvui-accent-text">accent-text</span>
+                    <span class="nvui-ok-text">ok-text</span>
+                    <span class="nvui-warn-text">warn-text</span>
+                    <span class="nvui-danger-text">danger-text</span>
+                    <span class="nvui-info-text">info-text</span>
+                </div>
+                <div class="nvui-row">
+                    <span class="nvui-muted-2">读屏专用隐藏文本：</span>
+                    <span>视觉上不可见<span class="nvui-sr-only">（这段文字只会被读屏器朗读）</span>，但可被辅助技术读取。</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- 13. 弹窗 -->
+        <section class="pv-section">
+            <div class="nvui-section-title">13. 弹窗与 top-layer 载体</div>
+            <p class="nvui-hint">真实插件中必须把弹窗挂进 <code class="nvui-code">dialog.nvui-tl</code> 并用非模态 <code class="nvui-code">show()</code> 提升层级（避免酒馆 html transform 把 fixed 浮层顶出屏幕，也避免 showModal 的 inert 让其它入口点不到）。</p>
+            <div class="pv-demo">
+                <button type="button" class="nvui-btn is-primary" id="pv-open-modal-2">打开弹窗示例</button>
+                <p class="nvui-hint pv-dialog-note">弹窗内含：头部（标题 + 版本 + 关闭按钮）、正文、底部操作区；点遮罩或按 Esc 关闭。</p>
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<!-- top-layer 载体 + 弹窗示例（真实用法同构） -->
+<dialog class="nvui-tl" id="pv-tl">
+    <div class="nvui-overlay" id="pv-overlay" hidden>
+        <div class="nvui-modal" role="dialog" aria-modal="true" aria-labelledby="pv-modal-title">
+            <div class="nvui-modal-header">
+                <b class="nvui-modal-title" id="pv-modal-title">图片电子书（EPUB）<span class="nvui-modal-ver">v1.0.0</span></b>
+                <span class="nvui-modal-actions">
+                    <button type="button" class="nvui-icon-btn" id="pv-close-x" aria-label="关闭">×</button>
+                </span>
+            </div>
+            <div class="nvui-modal-body">
+                <div class="nvui-hint">这是一个用 kit 组件拼出来的弹窗示例。弹窗本体使用 --nvui-bg 表面 + 大圆角 + 深阴影，与页面内容分层。</div>
+                <label class="nvui-switch-row">
+                    <input type="checkbox" checked>
+                    <span>导出时嵌入图片</span>
+                </label>
+                <label class="nvui-input-row">
+                    <input class="nvui-input is-number" type="number" value="80">
+                    <span>图片总量上限 (MB)</span>
+                </label>
+                <div class="nvui-alert is-warning" style="margin-top:12px;"><span class="nvui-warn-text">注意</span><span>预计图片约 130.4 MB，体积较大，部分阅读器导入可能失败或很慢。</span></div>
+            </div>
+            <div class="nvui-modal-footer">
+                <button type="button" class="nvui-btn is-ghost" id="pv-close-cancel">取消</button>
+                <button type="button" class="nvui-btn is-primary" id="pv-close-ok">开始导出</button>
+            </div>
+        </div>
+    </div>
+</dialog>
+
+<script>
+(function () {
+    'use strict';
+
+    // ---- 主题切换 ----
+    var themeBtn = document.getElementById('pv-theme-btn');
+    themeBtn.addEventListener('click', function () {
+        var light = document.body.classList.toggle('nvui-theme-light');
+        themeBtn.textContent = light ? '切换深色主题' : '切换浅色主题';
+    });
+
+    // ---- 标签页 ----
+    document.querySelectorAll('[data-pv-tab]').forEach(function (tab) {
+        tab.addEventListener('click', function () {
+            var list = tab.closest('.nvui-tabs');
+            list.querySelectorAll('.nvui-tab').forEach(function (t) {
+                var on = t === tab;
+                t.classList.toggle('is-active', on);
+                t.setAttribute('aria-selected', on ? 'true' : 'false');
+                var pane = document.getElementById(t.dataset.pvTab);
+                if (pane) pane.classList.toggle('is-active', on);
+            });
+        });
+    });
+
+    // ---- 折叠面板 ----
+    document.querySelectorAll('.nvui-acc-head').forEach(function (head) {
+        head.addEventListener('click', function () {
+            var acc = head.closest('.nvui-acc');
+            var open = acc.classList.toggle('is-open');
+            head.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+    });
+
+    // ---- 开关示例反馈 ----
+    var switchA = document.getElementById('pv-switch-a');
+    var switchHint = document.getElementById('pv-switch-hint');
+    if (switchA && switchHint) {
+        switchA.addEventListener('change', function () {
+            switchHint.textContent = switchA.checked
+                ? '开关已开启：导出 EPUB 时会读取插画。（业务里同步保存设置 + 刷新摘要）'
+                : '开关已关闭：导出纯文字 EPUB。（业务里同步保存设置 + 刷新摘要）';
+        });
+    }
+
+    // ---- 弹窗示例（非模态 dialog.show() + 遮罩开关） ----
+    var tl = document.getElementById('pv-tl');
+    var overlay = document.getElementById('pv-overlay');
+    function openModal() {
+        try { tl.show(); } catch (e) { tl.setAttribute('open', ''); }
+        overlay.hidden = false;
+    }
+    function closeModal() {
+        overlay.hidden = true;
+        try { tl.close(); } catch (e) { tl.removeAttribute('open'); }
+    }
+    document.getElementById('pv-open-modal').addEventListener('click', openModal);
+    document.getElementById('pv-open-modal-2').addEventListener('click', openModal);
+    document.getElementById('pv-close-x').addEventListener('click', closeModal);
+    document.getElementById('pv-close-cancel').addEventListener('click', closeModal);
+    document.getElementById('pv-close-ok').addEventListener('click', closeModal);
+    overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) closeModal();
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !overlay.hidden) closeModal();
+    });
+})();
+</script>
+</body>
+</html>

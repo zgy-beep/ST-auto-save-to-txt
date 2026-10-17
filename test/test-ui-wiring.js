@@ -947,7 +947,7 @@ check('formatBytesMb 已定义（字节 → 一位小数 MB 文本）',
     /function formatBytesMb\(bytes\) \{/.test(src), true);
 check('estimateEbookPayload 已定义（async）',
     /async function estimateEbookPayload\(payload\) \{/.test(src), true);
-check('版本号升到 1.19.1', /version: '1\.19\.1'/.test(src), true);
+check('版本号升到 1.20.0', /version: '1\.20\.0'/.test(src), true);
 
 // —— estimateEbookPayload：能力门控 + 失败静默降级 + 测试专用导出 ——
 const estFn = extractFn('estimateEbookPayload') || '';
