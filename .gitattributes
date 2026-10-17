@@ -1,0 +1,8 @@
+# 统一换行符：仓库既有文件均为 CRLF（Windows 开发环境）
+# 加分号是为了显式声明，避免 core.autocrlf 在不同机器上产生整文件级 diff 噪音
+* text=auto eol=crlf
+
+# 明确二进制，防止被当文本转换
+*.png binary
+*.jpg binary
+*.ico binary
