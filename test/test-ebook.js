@@ -8,6 +8,11 @@
  *  3) resolveImagePath：四级解析顺序（账号 / default-user / data/* 通配 / missing）、越界拒绝
  *  4) sniffImageType / readImageAsset：四种魔数、未知格式、大小限制、缺失文件
  *  5) POST /ebook：400 / 413 / 成功落盘 / 跳过清单 / .bak 备份 / 纯文字也允许
+ *  6) POST /ebook delivery=download：二进制 EPUB 交付（响应头契约 / ZIP 合法 / 零落盘 /
+ *     save_dir 忽略 / 413 与 400 仍为 JSON / 纯文字）与服务端模式回归
+ *  7) POST /ebook/estimate：体积预估字段口径（totalReferences/resolvable/embeddable/
+ *     missing/oversize/unsupported/estimatedBytes）、limits 归一化、overTotalLimit、
+ *     maxImageBytes/maxTotalBytes 生效、重复引用、零图、400 校验、绝不读整图与零落盘
  *
  * 所有临时落盘都在 os.tmpdir() 下，try/finally 清理，不在仓库内留文件。
  */
@@ -36,19 +41,47 @@ class MockRouter {
         }
         let statusCode = 200;
         let responseData = null;
+        let responseBuffer = null;
+        const headers = {};
         const req = { body };
         const res = {
             status: function (code) {
                 statusCode = code;
                 return this;
             },
+            // 二进制下载交付会写响应头：收集起来供断言（Node/Express 的 res.setHeader）
+            setHeader: function (name, value) {
+                headers[String(name).toLowerCase()] = String(value);
+                return this;
+            },
+            getHeader: function (name) {
+                return headers[String(name).toLowerCase()];
+            },
             json: function (data) {
                 responseData = data;
+                return this;
+            },
+            // Express 的 res.send：Buffer → 二进制体；非 Buffer/字符串对象仍按 JSON 数据收集
+            send: function (data) {
+                if (Buffer.isBuffer(data)) {
+                    responseBuffer = data;
+                } else if (typeof data === 'string') {
+                    responseBuffer = Buffer.from(data, 'utf8');
+                } else {
+                    responseData = data;
+                }
+                return this;
+            },
+            // 原生 res.end(Buffer)：实现选择用它发送二进制时同样要能收集
+            end: function (data) {
+                if (data !== undefined && data !== null) {
+                    responseBuffer = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
+                }
                 return this;
             }
         };
         await handler(req, res);
-        return { status: statusCode, data: responseData };
+        return { status: statusCode, data: responseData, buffer: responseBuffer, headers };
     }
 }
 
@@ -680,6 +713,359 @@ async function runTests() {
             .filter((e) => e.name.startsWith('OEBPS/images/') && !referenced.has(e.name.slice('OEBPS/'.length)));
         assert(orphanImgs.length === 0,
             `多章图片: 无未被任何章节引用的孤儿图片条目（孤儿: ${orphanImgs.map((e) => e.name).join(',') || '无'}）`);
+
+        // ================= 8. POST /ebook delivery=download 二进制下载交付 =================
+        console.log('\n--- 8. POST /ebook delivery=download 二进制下载交付 ---');
+        const DL_OUT = path.join(TMP, 'download-out');
+        // 下载模式全程零落盘：先记录临时根目录快照，全部下载请求结束后必须完全未变
+        const tmpSnapshotBeforeDownload = fs.readdirSync(TMP).sort();
+        const dlBody = {
+            bookTitle: '中文书名·下载测试',
+            author: '下载作者',
+            account: 'acc1',
+            delivery: 'download',
+            save_dir: DL_OUT, // download 模式必须完全忽略该值（目录不存在也不能报错）
+            options: { stRoot: ST_ROOT },
+            chapters: [
+                {
+                    title: '第 1 章 · 甲',
+                    floor: 1,
+                    blocks: [
+                        { type: 'p', text: '下载模式正文。' },
+                        { type: 'img', path: '/user/images/chatE/ok.png', alt: '下载图一' },
+                        { type: 'img', path: '/user/images/chatE/missing.jpg', alt: '缺失图' },
+                        { type: 'img', path: '/user/images/chatE/junk.png', alt: '格式不支持图' }
+                    ]
+                },
+                {
+                    title: '第 2 章 · 乙',
+                    floor: 2,
+                    blocks: [{ type: 'image', path: '/user/images/chatE/ok2.jpg', alt: '下载图二' }]
+                }
+            ]
+        };
+
+        const dl1 = await router.dispatch('POST', '/ebook', dlBody);
+        const dlHeaders = dl1.headers || {};
+        assert(dl1.status === 200, 'download: 校验/打包成功返回 200');
+        assert(Buffer.isBuffer(dl1.buffer) && dl1.buffer.length > 0 && dl1.data === null,
+            'download: 响应体是二进制 Buffer（不是 JSON 对象）');
+        assert(dlHeaders['content-type'] === 'application/epub+zip', 'download: Content-Type=application/epub+zip');
+        const downloadCd = dlHeaders['content-disposition'] || '';
+        assert(/^attachment; filename="novel\.epub"; filename\*=UTF-8''/.test(downloadCd),
+            'download: Content-Disposition 为 attachment + ASCII 兜底名 + RFC 5987 filename*');
+        const encodedDownloadName = downloadCd.split("filename*=UTF-8''")[1];
+        assert(encodedDownloadName === encodeURIComponent('中文书名·下载测试.epub'),
+            'download: filename* 等于 encodeURIComponent(安全书名 + .epub)');
+        assert(decodeURIComponent(encodedDownloadName) === '中文书名·下载测试.epub',
+            'download: filename* 解码后中文书名可读');
+        assert(Number(dlHeaders['content-length']) === dl1.buffer.length,
+            'download: Content-Length 等于实际 Buffer 字节数');
+        assert(Object.values(dlHeaders).every((v) => /^[\x20-\x7E]*$/.test(String(v))),
+            'download: 全部响应头均为纯 ASCII（禁止裸非 ASCII 头值）');
+        const statsRaw = decodeURIComponent(dlHeaders['x-novel-epub-stats']);
+        assert(statsRaw === JSON.stringify({ success: true, epubBytes: dl1.buffer.length, images: { embedded: 2, skipped: 2 } }),
+            'download: X-Novel-Epub-Stats 解码后等于契约 JSON（embedded=2 / skipped=2 与图片场景一致）');
+
+        const dlZip = readZip(dl1.buffer);
+        assert(dlZip.byName['mimetype'] && dlZip.byName['mimetype'].data.toString('ascii') === 'application/epub+zip'
+            && dlZip.byName['mimetype'].method === 0,
+            'download: 响应体是合法 ZIP（EOCD/中央目录可解析）且 mimetype 首条目 STORED');
+        const dlImgEntries = dlZip.entries.filter((e) => e.name.startsWith('OEBPS/images/'));
+        assert(dlImgEntries.length === 2 && !!dlZip.byName['OEBPS/images/img-0001.png'] && !!dlZip.byName['OEBPS/images/img-0002.jpg'],
+            'download: EPUB 内含 2 个按序编号的嵌入图片条目（img-0001.png / img-0002.jpg）');
+        assert(dlZip.entries.filter((e) => /^OEBPS\/chapter-\d{4}\.xhtml$/.test(e.name)).length === 2,
+            'download: EPUB 内含 2 个章节 XHTML');
+        const dlCh1 = dlZip.byName['OEBPS/chapter-0001.xhtml'].data.toString('utf8');
+        assert(dlCh1.includes('<img src="images/img-0001.png"') && !dlCh1.includes('missing.jpg'),
+            'download: 章节图片原位引用成功嵌入的图，缺失图不产生引用');
+        assert(Buffer.compare(dlZip.byName['OEBPS/images/img-0001.png'].data, PNG_1PX) === 0,
+            'download: 嵌入图片字节与磁盘原图一致');
+        assert(!fs.existsSync(DL_OUT), 'download: save_dir 指向的全新目录未被创建（零落盘）');
+        assert(!fs.existsSync(`${DL_OUT}.bak`), 'download: 未产生 .bak 备份文件');
+
+        // 穿越书名：filename* 解码后必须是干净文件名，且仍零落盘
+        const dlTrav = await router.dispatch('POST', '/ebook', {
+            bookTitle: '../../evil', delivery: 'download', save_dir: DL_OUT,
+            options: { stRoot: ST_ROOT },
+            chapters: [{ title: '第 1 章', blocks: [{ type: 'p', text: '穿越书名下载。' }] }]
+        });
+        assert(dlTrav.status === 200 && Buffer.isBuffer(dlTrav.buffer),
+            'download: 穿越书名 "../../evil" 仍 200 返回二进制（清洗而非报错）');
+        const travCd = dlTrav.headers['content-disposition'] || '';
+        const travDownloadName = decodeURIComponent(travCd.split("filename*=UTF-8''")[1]);
+        assert(!travDownloadName.includes('..') && !/[\\/]/.test(travDownloadName) && travDownloadName.endsWith('.epub'),
+            'download: filename* 解码后无 .. 与路径分隔符');
+        assert(!fs.existsSync(DL_OUT)
+            && !fs.existsSync(path.join(os.tmpdir(), 'evil.epub'))
+            && !fs.existsSync(path.join(path.dirname(TMP), 'evil.epub')),
+            'download: 穿越书名未越界写盘（各上级目录均无 evil.epub）');
+
+        // save_dir 为非法值也完全忽略：download 分支不做目录解析，更不做 mkdir
+        const dlBadDir = await router.dispatch('POST', '/ebook', {
+            bookTitle: '非法目录下载书', delivery: 'download',
+            save_dir: '\0invalid-dir', // 若被 mkdir 会直接抛 ERR_INVALID_ARG_VALUE
+            options: { stRoot: ST_ROOT },
+            chapters: [{ title: '第 1 章', blocks: [{ type: 'p', text: '目录非法也照样下载。' }] }]
+        });
+        assert(dlBadDir.status === 200 && Buffer.isBuffer(dlBadDir.buffer)
+            && !!readZip(dlBadDir.buffer).byName['mimetype'],
+            'download: save_dir 为非法值（含 NUL）仍 200 返回 EPUB（完全忽略 save_dir）');
+        const dlTravDir = await router.dispatch('POST', '/ebook', {
+            bookTitle: '穿越目录下载书', delivery: 'download', save_dir: '../evil',
+            options: { stRoot: ST_ROOT },
+            chapters: [{ title: '第 1 章', blocks: [{ type: 'p', text: '目录穿越也照样下载。' }] }]
+        });
+        assert(dlTravDir.status === 200 && Buffer.isBuffer(dlTravDir.buffer),
+            'download: save_dir 为 "../evil" 也仍 200（下载模式不校验/不使用路径）');
+
+        // 错误语义：413 / 400 仍是 JSON，且不带二进制头、不写盘
+        const dl413 = await router.dispatch('POST', '/ebook', {
+            bookTitle: '下载413书', delivery: 'download', save_dir: DL_OUT,
+            options: { stRoot: ST_ROOT, maxTotalBytes: 1024 * 1024 },
+            chapters: [{ title: '第 1 章', blocks: [{ type: 'img', path: '/user/images/chatE/big.png', alt: 'big' }] }]
+        });
+        assert(dl413.status === 413 && dl413.buffer === null && dl413.data
+            && typeof dl413.data.error === 'string' && dl413.data.error.includes('图片总量超出'),
+            'download: 图片总量超限返回 JSON 413（文案保持「图片总量超出 …MB 限制」）');
+        assert(!dl413.headers['content-type'] && !dl413.headers['content-disposition'] && !dl413.headers['x-novel-epub-stats'],
+            'download: 413 不带任何 EPUB 下载二进制响应头');
+        assert(!fs.existsSync(DL_OUT), 'download: 413 时依然零落盘');
+
+        const dl400 = await router.dispatch('POST', '/ebook', { bookTitle: 'x', chapters: 'not-array', delivery: 'download' });
+        assert(dl400.status === 400 && dl400.buffer === null && dl400.data.error === '无效请求',
+            'download: chapters 非数组 → JSON 400 无效请求（无二进制体）');
+        const dlNoTitle = await router.dispatch('POST', '/ebook', { bookTitle: '  ', chapters: [], delivery: 'download' });
+        assert(dlNoTitle.status === 400 && dlNoTitle.buffer === null, 'download: bookTitle/chapters 非法同样返回 JSON 400');
+
+        // 零图纯文字下载：embedded=0 / skipped=0，EPUB 内无 images 条目
+        const dlTextOnly = await router.dispatch('POST', '/ebook', {
+            bookTitle: '纯文字下载书', delivery: 'download', save_dir: DL_OUT,
+            options: { stRoot: ST_ROOT },
+            chapters: [{ title: '第 1 章', blocks: [{ type: 'p', text: '没有图片的下载正文。' }] }]
+        });
+        const dlTextStats = JSON.parse(decodeURIComponent(dlTextOnly.headers['x-novel-epub-stats']));
+        assert(dlTextOnly.status === 200 && Buffer.isBuffer(dlTextOnly.buffer)
+            && dlTextStats.success === true && dlTextStats.images.embedded === 0 && dlTextStats.images.skipped === 0,
+            'download: 零图纯文字下载 embedded=0 / skipped=0');
+        assert(!readZip(dlTextOnly.buffer).entries.some((e) => e.name.startsWith('OEBPS/images/')),
+            'download: 零图下载 EPUB 内没有图片条目');
+
+        // 全部下载请求结束后：临时根目录必须零新增（download 分支绝不落盘）
+        assert(JSON.stringify(fs.readdirSync(TMP).sort()) === JSON.stringify(tmpSnapshotBeforeDownload),
+            'download: 全部下载请求后临时根目录无任何新增文件/目录（彻底零落盘）');
+
+        // 回归：缺省 delivery 与其它 delivery 值仍走服务端「落盘 + JSON」模式
+        const REG_OUT = path.join(TMP, 'regression-out');
+        const regDefault = await router.dispatch('POST', '/ebook', {
+            bookTitle: '回归服务端模式书', save_dir: REG_OUT, options: { stRoot: ST_ROOT },
+            chapters: [{ title: '第 1 章', blocks: [{ type: 'p', text: '服务端模式仍落盘。' }] }]
+        });
+        assert(regDefault.status === 200 && regDefault.data.success === true && regDefault.data.epubBytes > 0
+            && regDefault.buffer === null,
+            '回归: 缺省 delivery 仍走服务端模式 JSON（success / epubBytes，无二进制体）');
+        assert(typeof regDefault.data.file === 'string' && regDefault.data.file.endsWith('.epub')
+            && fs.existsSync(path.resolve(regDefault.data.file))
+            && fs.statSync(path.resolve(regDefault.data.file)).size === regDefault.data.epubBytes,
+            '回归: 缺省 delivery 仍落盘且 file 指向真实文件、落盘字节数=epubBytes');
+        const regOther = await router.dispatch('POST', '/ebook', {
+            bookTitle: '其它交付值书', delivery: 'server', save_dir: REG_OUT, options: { stRoot: ST_ROOT },
+            chapters: [{ title: '第 1 章', blocks: [{ type: 'p', text: 'delivery 为其它值仍落盘。' }] }]
+        });
+        assert(regOther.status === 200 && regOther.data.success === true && regOther.buffer === null
+            && fs.existsSync(path.resolve(regOther.data.file)),
+            '回归: delivery 为其它值（非 download）仍走服务端落盘 + JSON 模式');
+
+        // ================= 9. POST /ebook/estimate 体积预估（轻量、零落盘） =================
+        console.log('\n--- 9. POST /ebook/estimate 体积预估 ---');
+        const EST_OUT = path.join(TMP, 'estimate-out'); // 全新目录：估算绝不能创建它
+        const tmpSnapshotBeforeEstimate = fs.readdirSync(TMP).sort();
+        const estDefaultLimits = {
+            maxImageBytes: 5 * 1024 * 1024,
+            maxTotalBytes: 80 * 1024 * 1024
+        };
+
+        // 9.1 正常混合场景：2 可嵌入 + 1 缺失 + 1 超单图上限 + 1 格式不支持
+        const est1 = await router.dispatch('POST', '/ebook/estimate', {
+            bookTitle: '体积预估书',
+            account: 'acc1',
+            save_dir: EST_OUT, // 估算接口绝不能创建/读取该目录
+            options: { stRoot: ST_ROOT, maxImageBytes: 1024 * 1024, maxTotalBytes: 80 * 1024 * 1024 },
+            chapters: [
+                {
+                    title: '第 1 章',
+                    floor: 1,
+                    blocks: [
+                        { type: 'p', text: '预估正文。' },
+                        { type: 'img', path: '/user/images/chatE/ok.png' },
+                        { type: 'img', path: '/user/images/chatE/missing.jpg' },
+                        { type: 'img', path: '/user/images/chatE/junk.png' },
+                        { type: 'img', path: '/user/images/chatE/big.png' }
+                    ]
+                },
+                { title: '第 2 章', floor: 2, blocks: [{ type: 'image', path: '/user/images/chatE/ok2.jpg' }] }
+            ]
+        });
+        assert(est1.status === 200 && est1.data && est1.data.success === true,
+            'estimate: 正常请求返回 200 success:true（JSON 而非二进制）');
+        assert(est1.buffer === null, 'estimate: 不返回二进制体');
+        assert(JSON.stringify(Object.keys(est1.data).sort()) === JSON.stringify(['images', 'limits', 'overTotalLimit', 'success']),
+            'estimate: 顶层字段恰为 success/images/limits/overTotalLimit');
+        assert(JSON.stringify(Object.keys(est1.data.images).sort()) === JSON.stringify(
+            ['embeddable', 'estimatedBytes', 'missing', 'oversize', 'resolvable', 'totalReferences', 'unsupported']),
+            'estimate: images 字段齐全（totalReferences/resolvable/embeddable/missing/oversize/unsupported/estimatedBytes）');
+        assert(est1.data.images.totalReferences === 5, 'estimate: totalReferences=5（5 个图片块引用）');
+        assert(est1.data.images.resolvable === 4, 'estimate: resolvable=4（除缺失外 4 个可解析到文件）');
+        assert(est1.data.images.embeddable === 2, 'estimate: embeddable=2（ok.png + ok2.jpg）');
+        assert(est1.data.images.missing === 1, 'estimate: missing=1（磁盘不存在的 missing.jpg）');
+        assert(est1.data.images.oversize === 1, 'estimate: oversize=1（big.png 超过 maxImageBytes=1MB）');
+        assert(est1.data.images.unsupported === 1, 'estimate: unsupported=1（junk.png 魔数非法）');
+        assert(est1.data.images.estimatedBytes === PNG_1PX.length + JPEG_1PX.length,
+            'estimate: estimatedBytes = 可嵌入图实际字节和（PNG + JPEG）');
+        assert(est1.data.limits.maxImageBytes === 1024 * 1024 && est1.data.limits.maxTotalBytes === 80 * 1024 * 1024,
+            'estimate: limits 回显规范化后的生效上限');
+        assert(est1.data.overTotalLimit === false, 'estimate: 未超总量时 overTotalLimit=false');
+        assert(!fs.existsSync(EST_OUT), 'estimate: save_dir 指向的全新目录未被创建（估算零落盘）');
+
+        // 9.2 maxImageBytes 调小 → 原可嵌入图计入 oversize；maxTotalBytes 调小 → overTotalLimit=true
+        const est2 = await router.dispatch('POST', '/ebook/estimate', {
+            bookTitle: '单图上限预估书',
+            account: 'acc1',
+            options: { stRoot: ST_ROOT, maxImageBytes: PNG_1PX.length, maxTotalBytes: estDefaultLimits.maxTotalBytes },
+            chapters: [{
+                title: '第 1 章',
+                blocks: [
+                    { type: 'img', path: '/user/images/chatE/ok.png' },
+                    { type: 'img', path: '/user/images/chatE/ok2.jpg' },
+                    { type: 'img', path: '/user/images/chatE/junk.png' }
+                ]
+            }]
+        });
+        assert(est2.status === 200 && est2.data.images.totalReferences === 3, 'estimate: maxImageBytes 调小场景 totalReferences=3');
+        assert(est2.data.images.embeddable === 1 && est2.data.images.oversize === 1 && est2.data.images.unsupported === 1,
+            'estimate: maxImageBytes 恰等于 ok.png 时它仍可嵌入、更大的 ok2.jpg 计入 oversize、junk 计入 unsupported');
+        assert(est2.data.images.resolvable === 3 && est2.data.images.missing === 0, 'estimate: resolvable=3 / missing=0');
+        assert(est2.data.images.estimatedBytes === PNG_1PX.length, 'estimate: estimatedBytes 只累计可嵌入图');
+
+        const estOverTotal = await router.dispatch('POST', '/ebook/estimate', {
+            bookTitle: '总量超限预估书',
+            account: 'acc1',
+            options: { stRoot: ST_ROOT, maxTotalBytes: PNG_1PX.length - 1 },
+            chapters: [{ title: '第 1 章', blocks: [{ type: 'img', path: '/user/images/chatE/ok.png' }] }]
+        });
+        assert(estOverTotal.status === 200 && estOverTotal.data.overTotalLimit === true,
+            'estimate: estimatedBytes > maxTotalBytes 时 overTotalLimit=true');
+        assert(estOverTotal.data.limits.maxTotalBytes === PNG_1PX.length - 1
+            && estOverTotal.data.images.estimatedBytes === PNG_1PX.length,
+            'estimate: overTotalLimit 使用规范化后的 maxTotalBytes 与实际字节数判定');
+
+        // maxImageBytes / maxTotalBytes 非法值 → 回落默认上限（与 /ebook 的 normalizeByteLimit 一致）
+        const estBadLimits = await router.dispatch('POST', '/ebook/estimate', {
+            bookTitle: '非法上限预估书',
+            options: { stRoot: ST_ROOT, maxImageBytes: 0, maxTotalBytes: -5 },
+            chapters: [{ title: '第 1 章', blocks: [{ type: 'p', text: '无图。' }] }]
+        });
+        assert(estBadLimits.status === 200
+            && estBadLimits.data.limits.maxImageBytes === estDefaultLimits.maxImageBytes
+            && estBadLimits.data.limits.maxTotalBytes === estDefaultLimits.maxTotalBytes,
+            'estimate: 非法 maxImageBytes/maxTotalBytes 回落到默认 5MB/80MB');
+
+        // 9.3 同一 path 重复引用：与 /ebook 实际嵌入口径一致，按引用次数重复计
+        const estDup = await router.dispatch('POST', '/ebook/estimate', {
+            bookTitle: '重复引用预估书',
+            account: 'acc1',
+            options: { stRoot: ST_ROOT },
+            chapters: [{
+                title: '第 1 章',
+                blocks: [
+                    { type: 'img', path: '/user/images/chatE/ok.png' },
+                    { type: 'img', path: '/user/images/chatE/ok.png' }
+                ]
+            }]
+        });
+        assert(estDup.status === 200 && estDup.data.images.totalReferences === 2
+            && estDup.data.images.embeddable === 2 && estDup.data.images.resolvable === 2,
+            'estimate: 同一 path 引用 2 次 → totalReferences/embeddable/resolvable 各计 2');
+        assert(estDup.data.images.estimatedBytes === PNG_1PX.length * 2,
+            'estimate: 同一 path 重复引用时 estimatedBytes 按 2 份计（与服务端实际嵌入现状一致）');
+
+        // 9.4 零图纯文字章节：全部计数为 0，overTotalLimit=false，limits 回落默认值
+        const estTextOnly = await router.dispatch('POST', '/ebook/estimate', {
+            bookTitle: '零图预估书',
+            chapters: [{ title: '第 1 章', blocks: [{ type: 'p', text: '纯文字章节。' }] }]
+        });
+        assert(estTextOnly.status === 200
+            && estTextOnly.data.images.totalReferences === 0 && estTextOnly.data.images.resolvable === 0
+            && estTextOnly.data.images.embeddable === 0 && estTextOnly.data.images.missing === 0
+            && estTextOnly.data.images.oversize === 0 && estTextOnly.data.images.unsupported === 0
+            && estTextOnly.data.images.estimatedBytes === 0,
+            'estimate: 零图章节全部计数为 0');
+        assert(estTextOnly.data.overTotalLimit === false, 'estimate: 零图时 overTotalLimit=false');
+        assert(estTextOnly.data.limits.maxImageBytes === estDefaultLimits.maxImageBytes
+            && estTextOnly.data.limits.maxTotalBytes === estDefaultLimits.maxTotalBytes,
+            'estimate: 未传 options 时 limits 回落到默认 5MB/80MB');
+
+        // 9.5 无效请求：与 /ebook 同构的 400 JSON，且不落盘/不建目录
+        const estBadArray = await router.dispatch('POST', '/ebook/estimate', { bookTitle: 'x', chapters: 'not-array', save_dir: EST_OUT });
+        assert(estBadArray.status === 400 && estBadArray.data && estBadArray.data.error === '无效请求',
+            'estimate: chapters 非数组 → 400 无效请求');
+        const estEmptyChapters = await router.dispatch('POST', '/ebook/estimate', { bookTitle: 'x', chapters: [] });
+        assert(estEmptyChapters.status === 400 && estEmptyChapters.data.error === '无效请求', 'estimate: chapters 空数组 → 400');
+        const estNoBody = await router.dispatch('POST', '/ebook/estimate', null);
+        assert(estNoBody.status === 400 && estNoBody.data.error === '无效请求', 'estimate: 空请求体 → 400 无效请求');
+        const estNoTitle = await router.dispatch('POST', '/ebook/estimate', { bookTitle: '   ', chapters: [{ title: 'a', blocks: [] }] });
+        assert(estNoTitle.status === 400, 'estimate: bookTitle 空/仅空白 → 400');
+        assert(!fs.existsSync(EST_OUT), 'estimate: 无效请求同样不创建 save_dir、不落盘');
+
+        // 9.6 绝不读整图：估算只允许 open+read 文件头，禁止走 fs.promises.readFile（整图读取路径）
+        const originalReadFile = fs.promises.readFile;
+        const readFileCalls = [];
+        fs.promises.readFile = function (target, ...rest) {
+            readFileCalls.push(String(target));
+            return originalReadFile.call(fs.promises, target, ...rest);
+        };
+        let estNoFullRead;
+        try {
+            estNoFullRead = await router.dispatch('POST', '/ebook/estimate', {
+                bookTitle: '不读整图预估书',
+                account: 'acc1',
+                options: { stRoot: ST_ROOT },
+                chapters: [{
+                    title: '第 1 章',
+                    blocks: [
+                        { type: 'img', path: '/user/images/chatE/ok.png' },
+                        { type: 'img', path: '/user/images/chatE/ok2.jpg' },
+                        { type: 'img', path: '/user/images/chatE/big.png' }
+                    ]
+                }]
+            });
+        } finally {
+            fs.promises.readFile = originalReadFile;
+        }
+        assert(estNoFullRead.status === 200 && estNoFullRead.data.images.embeddable === 3,
+            'estimate: 默认上限下 3 张合法图片（含 2MB+ 大图）都预估为可嵌入');
+        assert(readFileCalls.length === 0,
+            `estimate: 全程未调用 fs.promises.readFile，绝不读取整张图片（实际调用: ${readFileCalls.length} 次）`);
+
+        // 9.7 导出的内部函数可直接单测（不依赖 HTTP），口径与接口一致
+        assert(typeof plugin.estimateEbookImages === 'function', 'estimate: 内部函数 estimateEbookImages 已加入 module.exports');
+        const estDirect = await plugin.estimateEbookImages({
+            account: '',
+            stRoot: ST_ROOT,
+            maxImageBytes: estDefaultLimits.maxImageBytes,
+            maxTotalBytes: estDefaultLimits.maxTotalBytes,
+            chapters: [{ blocks: [{ type: 'p', text: '无图' }] }]
+        });
+        assert(estDirect.success === true && estDirect.images.totalReferences === 0 && estDirect.overTotalLimit === false,
+            'estimate: 直接调用 estimateEbookImages 可用且口径与 HTTP 一致');
+
+        // 9.8 全部估算请求结束后：临时根目录零新增，仓库 logs 目录只有 .gitkeep
+        assert(JSON.stringify(fs.readdirSync(TMP).sort()) === JSON.stringify(tmpSnapshotBeforeEstimate),
+            'estimate: 全部估算请求后临时根目录无任何新增文件/目录（彻底零落盘）');
+        const logsDirAbs = path.join(__dirname, '..', 'plugins', 'auto-save', 'logs');
+        const logsResidue = fs.readdirSync(logsDirAbs).filter((name) => name !== '.gitkeep');
+        assert(logsResidue.length === 0,
+            `estimate: 仓库 plugins/auto-save/logs 结束仍只有 .gitkeep（残留: ${logsResidue.join(',') || '无'}）`);
     } catch (err) {
         console.error('测试异常:', err);
         failCount++;

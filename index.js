@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.17.9',            // 扩展版本号（D11：前端与服务端单一版本源，勿各自漂移）
+    version: '1.19.1',            // 扩展版本号（D11：前端与服务端单一版本源，勿各自漂移）
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -1379,10 +1379,16 @@ function getCleanedMessageWithImageSlots(msg, settings) {
 
 /**
  * 生成"结构化的书"——供 EPUB 导出使用。
- * 返回 { bookTitle, chapters:[{title, floor, speaker, blocks:[{type:'text'|'image',...}]}], imagesFound, warnings }
+ * 返回 { bookTitle, chapters:[{title, floor, speaker, blocks:[{type:'text'|'image',...}]}],
+ *        embedImages, imagesFound, imagesDeembedded, warnings }
  * 与 buildNovelText 的口径（章节号、说话人、章节标题）完全一致，只是额外携带块结构与图片。
+ *
+ * v1.18 修复：此前无论 settings.ebook_embed_images 真假都读图片槽位（开关完全无效）。
+ * 现在严格 === true 才走图片解析；关闭时用同一份纯文本清洗结果生成 text 块，
+ * 因此纯文字 EPUB 的章节数 / 标题 / 正文与 TXT 路径逐字同口径。
  */
 function buildStructuredNovel(settings, chatLog) {
+    const embedImages = settings.ebook_embed_images === true;
     const bookTitle = getBookTitle(settings);
     const chapters = [];
     const warnings = [];
@@ -1398,7 +1404,8 @@ function buildStructuredNovel(settings, chatLog) {
         const msg = list[i];
         if (!msg) continue;
         if (msg.is_user && !settings.include_user_dialogue) continue;
-        const withImages = getCleanedMessageWithImageSlots(msg, settings);
+        // 纯文字模式完全不做图片解析；嵌图模式才去取带占位符的块结构
+        const withImages = embedImages ? getCleanedMessageWithImageSlots(msg, settings) : null;
         // 以纯文本清洗结果判断"是否为空楼层"——与 buildNovelText 完全同口径
         const plain = getCleanedMessage(msg, i, settings);
         if (!plain) continue;
@@ -1413,26 +1420,34 @@ function buildStructuredNovel(settings, chatLog) {
         else title = `第 ${chapterCount} 章 · ${speaker} (原楼层: ${floor})`;
 
         const blocks = [];
-        const slotImages = withImages.slots.images || [];
-        imagesTotal += slotImages.length;
-        for (const blk of withImages.blocks) {
-            if (blk.type === 'image') {
-                const img = slotImages[blk.slot];
-                if (img && img.path) {
-                    blocks.push({ type: 'image', path: img.path, alt: shortPromptAlt(img.prompt, speaker), slotSeq: img.slotSeq });
+        const slotImages = withImages ? (withImages.slots.images || []) : [];
+        if (withImages) {
+            imagesTotal += slotImages.length;
+            for (const blk of withImages.blocks) {
+                if (blk.type === 'image') {
+                    const img = slotImages[blk.slot];
+                    if (img && img.path) {
+                        blocks.push({ type: 'image', path: img.path, alt: shortPromptAlt(img.prompt, speaker), slotSeq: img.slotSeq });
+                    } else {
+                        imagesDeembedded++;
+                    }
                 } else {
-                    imagesDeembedded++;
+                    blocks.push({ type: 'text', text: blk.text });
                 }
-            } else {
-                blocks.push({ type: 'text', text: blk.text });
             }
-        }
-        // 降级：标记数与图片数不一致时，图片放到章尾（不丢图，但标注）
-        if (withImages.degraded && slotImages.length) {
-            for (const img of slotImages) {
-                if (img && img.path) blocks.push({ type: 'image', path: img.path, alt: shortPromptAlt(img.prompt, speaker), slotSeq: img.slotSeq });
+            // 降级：标记数与图片数不一致时，图片放到章尾（不丢图，但标注）
+            if (withImages.degraded && slotImages.length) {
+                for (const img of slotImages) {
+                    if (img && img.path) blocks.push({ type: 'image', path: img.path, alt: shortPromptAlt(img.prompt, speaker), slotSeq: img.slotSeq });
+                }
+                warnings.push(`第 ${chapterCount} 章：${withImages.reason}，已退化为章尾插图`);
             }
-            warnings.push(`第 ${chapterCount} 章：${withImages.reason}，已退化为章尾插图`);
+        } else {
+            // 纯文字模式：直接用同一份 plain 文本按 TXT 口径切段，块文本/章节标题/章节数与 buildNovelText 一致
+            for (const para of String(plain).split(/\n{2,}/)) {
+                const text = para.trim();
+                if (text) blocks.push({ type: 'text', text });
+            }
         }
         chapters.push({ title, floor, speaker, blocks });
     }
@@ -1441,7 +1456,8 @@ function buildStructuredNovel(settings, chatLog) {
         bookTitle,
         chapters,
         chapterCount,
-        imagesFound: imagesTotal,
+        embedImages,
+        imagesFound: embedImages ? imagesTotal : 0,
         imagesDeembedded,
         warnings
     };
@@ -3157,16 +3173,37 @@ function refreshNovelAccSummaries(panel) {
     set('novel_acc_summary_write', `已开启 ${checkedCount(['novel_include_user', 'novel_indent_paragraphs', 'novel_buffer_latest'])}/3`);
     set('novel_acc_summary_display', `已开启 ${checkedCount(['novel_show_floating_window', 'novel_show_embedded_toolbar', 'novel_show_toast'])}/3`);
     set('novel_acc_summary_book', recentStatus.text || '暂无记录');
-    set('novel_acc_summary_ebook', ebookEmbedEl && ebookEmbedEl.checked
+    // v1.18 修复：这里原先直接引用 renderSettingsUI 内部的局部 const（不同作用域），
+    // 每次 change 必抛 ReferenceError → EPUB 摘要永远刷不出来。改为在 panel 内查询 DOM 现态。
+    const embedEl = panel.querySelector('#novel_ebook_embed_images');
+    set('novel_acc_summary_ebook', embedEl && embedEl.checked
         ? `嵌入图片 ${Number(val('novel_ebook_max_image_mb') || 5)}MB/张`
         : '纯文字（不嵌入图片）');
 }
 
+// EPUB「嵌入图片」开关的即时说明文案（模板初次渲染与 change 时共用，避免两处文案漂移）
+const EBOOK_EMBED_HINT_ON = '会读取每轮回复携带的插画（extra.bbiImage）并按正文原位嵌入；需要服务端插件；只影响 EPUB，不影响 TXT 连载。';
+const EBOOK_EMBED_HINT_OFF = '纯文字 EPUB：不读取、不嵌入任何图片；只影响 EPUB，不影响 TXT 连载。';
+
+/** 按开关现态刷新 EPUB 分组的即时说明（纯 DOM 查询，不依赖任何函数内局部变量） */
+function refreshEbookEmbedHint(panel) {
+    if (!panel) return;
+    const hint = panel.querySelector('#novel_ebook_embed_hint');
+    if (!hint) return;
+    const el = panel.querySelector('#novel_ebook_embed_images');
+    hint.textContent = (el && el.checked) ? EBOOK_EMBED_HINT_ON : EBOOK_EMBED_HINT_OFF;
+}
+
 // ==================== 图片电子书（EPUB）导出与预览 ====================
-/** 把结构化书 + 图片转换成 /ebook 请求体 */
-function buildEbookPayload(settings, chatLog) {
+/**
+ * 把结构化书 + 图片转换成 /ebook 请求体。
+ * delivery：'server'（默认，服务端落盘 + JSON 响应）或 'download'（服务端直接返回 EPUB 二进制）。
+ * 纯函数，供跨层集成测试直接取 payload（测试专用导出块里已导出）。
+ */
+function buildEbookPayload(settings, chatLog, delivery = 'server') {
     const structured = buildStructuredNovel(settings, chatLog);
     return { structured, payload: {
+        delivery: delivery === 'download' ? 'download' : 'server',
         bookTitle: structured.bookTitle,
         author: getBookTitle(settings),
         account: (typeof ctx.currentUser !== 'undefined' && ctx.currentUser && (ctx.currentUser.name || ctx.currentUser.handle)) || '',
@@ -3180,6 +3217,94 @@ function buildEbookPayload(settings, chatLog) {
             stRoot: settings.ebook_st_root || ''
         }
     } };
+}
+
+// ==================== 电子书体积预估（v1.19.0：导出前预检 + 预览展示）====================
+// 100MB 阈值依据：部分手机阅读器（含微信读书）在电子书超过该体量后导入/下载明显变慢甚至失败，
+// 且移动端流量消耗与等待时间陡增 —— 它不是硬限制，只是「体积较大」的强提示分界。
+const EBOOK_LARGE_WARN_BYTES = 100 * 1024 * 1024;
+// 与服务端设置项「图片总量上限」的 UI 上限（模板 input max="500"）保持一致，自动调上限时封顶于此。
+const EBOOK_MAX_TOTAL_LIMIT_MB = 500;
+
+/** 把字节数格式化为 MB 文本（保留一位小数，如 `130.4 MB`）；非法值按 0 处理 */
+function formatBytesMb(bytes) {
+    const n = Number(bytes);
+    const safe = (Number.isFinite(n) && n > 0) ? n : 0;
+    return `${(safe / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * 导出前体积预估：调服务端只读估算接口（只 stat + 头部魔数嗅探，不读整图、不打包、零落盘）。
+ * 能力不可用 / 网络异常 / 响应非法时一律返回 null —— 预估只提供提示，绝不能阻塞导出（静默降级）。
+ */
+async function estimateEbookPayload(payload) {
+    if (serverCapabilities.ebookEstimate !== true) return null;
+    try {
+        const headers = (typeof getRequestHeaders === 'function') ? getRequestHeaders() : { 'Content-Type': 'application/json' };
+        if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+        const resp = await fetch('/api/plugins/auto-save/ebook/estimate', {
+            method: 'POST', headers, body: JSON.stringify(payload)
+        });
+        if (!resp.ok) {
+            console.warn(`[AutoSaveTxt] EPUB 体积预估失败：HTTP ${resp.status}`);
+            return null;
+        }
+        const data = await resp.json().catch(() => null);
+        if (!data || data.success !== true || !data.images || typeof data.images !== 'object') {
+            console.warn('[AutoSaveTxt] EPUB 体积预估响应非法，已跳过预检');
+            return null;
+        }
+        return data;
+    } catch (e) {
+        console.warn('[AutoSaveTxt] EPUB 体积预估异常，已跳过预检:', e && e.message);
+        return null;
+    }
+}
+
+/**
+ * 异步填充「图片清单预览」里的体积预估行。
+ * 预览永远按「开启嵌图」估算（只用于预估，不修改用户设置）——即使用户当前关闭开关，
+ * 也能提前知道打开后会导出多大。能力缺失/预估失败时静默移除占位，不影响清单展示。
+ */
+async function fillEbookEstimateHint(overlay, settings, chatLog) {
+    const estEl = overlay ? overlay.querySelector('#novel_ebook_modal_estimate') : null;
+    if (!estEl) return;
+    try {
+        if (serverCapabilities.ebookEstimate !== true) {
+            estEl.remove();
+            return;
+        }
+        const built = buildEbookPayload({ ...settings, ebook_embed_images: true }, chatLog);
+        const estimate = await estimateEbookPayload(built.payload);
+        // 等待期间弹窗可能被关闭/重新打开：占位节点已不是当前节点就不再写入
+        if (!overlay || overlay.querySelector('#novel_ebook_modal_estimate') !== estEl) return;
+        if (!estimate || !estimate.images) {
+            estEl.remove();
+            return;
+        }
+        const images = estimate.images;
+        const estimatedBytes = Number(images.estimatedBytes) || 0;
+        const embeddable = Number(images.embeddable) || 0;
+        const missing = Number(images.missing) || 0;
+        const oversize = Number(images.oversize) || 0;
+        const estMb = formatBytesMb(estimatedBytes);
+        const parts = [`预计电子书约 ${estMb}（图片可嵌入 ${embeddable} 张 · 缺失 ${missing} · 超限 ${oversize}）`];
+        let warn = false;
+        if (estimate.overTotalLimit === true) {
+            const limitMb = Math.max(1, Number(settings.ebook_max_total_mb) || 80);
+            parts.push(`超过当前图片总量上限 ${limitMb} MB，导出会被拒绝，建议提高上限`);
+            warn = true;
+        }
+        if (estimatedBytes >= EBOOK_LARGE_WARN_BYTES) {
+            parts.push('体积较大，部分阅读器导入可能失败或很慢');
+            warn = true;
+        }
+        estEl.textContent = parts.join('；');
+        if (warn) estEl.classList.add('is-warn');
+    } catch (e) {
+        console.warn('[AutoSaveTxt] 预览体积预估填充失败:', e && e.message);
+        try { estEl.remove(); } catch (err) { /* 占位已不在 DOM 时忽略 */ }
+    }
 }
 
 /** 只读图片清单预览（P0.5）：不改任何文件，先看再导 */
@@ -3214,9 +3339,15 @@ function openEbookPreviewModal() {
     const body = overlay.querySelector('#novel_ebook_modal_body');
     if (!body) return;
     const rows = [];
+    // 开关关着时清单预览仍有排障价值，但必须一眼看清"这些图不会进 EPUB"
+    if (!settings.ebook_embed_images) {
+        rows.push('<div class="novel-mv-hint is-warn">当前未勾选嵌入，以下图片不会进入 EPUB。</div>');
+    }
     rows.push(`<div class="novel-mv-stat">含图消息 <b>${scan.imageMessages}</b> 条 · 图片共 <b>${scan.totalImages}</b> 张`
         + `${scan.degradedCount ? ` · <span class="is-warn">原位校验不一致 ${scan.degradedCount} 条（将退化为章尾插图）</span>` : ' · 原位校验全部一致'}`
         + `${scan.missingList.length ? ` · <span class="is-warn">${scan.missingList.length} 项缺失</span>` : ''}</div>`);
+    // 体积预估占位（异步填充）：能力不可用或失败时会被移除，不阻塞清单
+    rows.push('<div id="novel_ebook_modal_estimate" class="novel-mv-hint">正在估算图片体积…</div>');
     if (!scan.messages.length) {
         rows.push('<div class="novel-mv-hint">当前会话没有识别到图片。若你在用 bbi 等图像生成扩展，请确认消息里带有 <code>extra.bbiImage</code> 数据。</div>');
     }
@@ -3236,11 +3367,19 @@ function openEbookPreviewModal() {
     }
     body.innerHTML = rows.join('');
     overlay.style.display = 'flex';
+    // 能力不可用时立即删除占位；可用时异步填「预计电子书约 X MB」（失败静默移除）
+    fillEbookEstimateHint(overlay, settings, chatLog);
     if (typeof closeEbookModalOnEsc === 'undefined') { /* 占位，保持结构清晰 */ }
 }
 
-/** 导出 EPUB：调服务端 /ebook 打包，成功后提示文件位置 */
-async function exportEbook(btn) {
+/**
+ * 导出 EPUB：调服务端 /ebook 打包。
+ * mode='server'（默认）：服务端写入保存目录后返回 JSON，提示文件位置（原有行为）；
+ * mode='download'：服务端直接返回 EPUB 二进制，由浏览器下载到本机（不写服务器、不需要保存目录）。
+ */
+async function exportEbook(btn, mode = 'server') {
+    const isDownload = mode === 'download';
+    const actionName = isDownload ? '下载' : '导出';
     const settings = getSettings();
     const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
     // 能力门控：老服务端（无 /ebook）直接给可操作提示，不发无效请求
@@ -3251,6 +3390,15 @@ async function exportEbook(btn) {
         }
         return;
     }
+    // download 是服务端 1.15.0 新增能力：老服务端不认识 delivery 会按 server 模式落盘，
+    // 所以能力不满足时必须拦住，不能让它悄悄写服务器文件。
+    if (isDownload && serverCapabilities.ebookDownload !== true) {
+        updateRecentStatus('error', '当前服务端插件版本过旧（不支持直接下载），请重新部署 plugins/auto-save 后重启酒馆');
+        if (window.toastr) {
+            window.toastr.warning('下载到本机需要更新服务端插件（缺少 download 交付能力）。请重新部署 plugins/auto-save 并重启酒馆。', '小说连载', { timeOut: 8000 });
+        }
+        return;
+    }
     if (!chatLog || !chatLog.length) {
         if (window.toastr) window.toastr.info('当前没有任何聊天内容可供导出。', '小说连载');
         return;
@@ -3258,25 +3406,146 @@ async function exportEbook(btn) {
     if (!settings.ebook_embed_images && window.toastr) {
         window.toastr.info('未开启「嵌入图片」，本次将导出纯文字 EPUB。可在设置里打开。', '小说连载');
     }
-    if (!confirm('是否导出 EPUB 电子书？\n' + (settings.ebook_embed_images
-        ? '将把识别到的插画按正文原位嵌入。'
-        : '图片嵌入未开启，本次为纯文字。') + '\n后续可在手机阅读器（微信读书/ReadPad/掌阅）中导入。')) {
-        return;
+
+    // 结构化正文只构建一次：体积预估与正式导出复用同一份 payload，避免两次 build 结果不一致。
+    // 交付方式由调用入口决定：server = 服务端落盘（原有行为）；download = 二进制直接下载。
+    const delivery = mode === 'download' ? 'download' : 'server';
+    const { payload } = buildEbookPayload(settings, chatLog, delivery);
+
+    const embedLine = settings.ebook_embed_images ? '将把识别到的插画按正文原位嵌入。' : '图片嵌入未开启，本次为纯文字。';
+    const deliveryLine = isDownload
+        ? 'EPUB 将直接在浏览器中下载到本机（不写入服务器目录，也不需要保存目录）。'
+        : 'EPUB 将被写入服务器保存目录（不下载到本机）。';
+
+    // ===== 导出前体积预估（v1.19.0）：仅嵌图 + 服务端支持 estimate 时预检，失败静默降级 =====
+    let estimate = null;
+    const canEstimate = settings.ebook_embed_images === true && serverCapabilities.ebookEstimate === true;
+    if (canEstimate) {
+        updateRecentStatus('updating', '正在估算图片体积…');
+        estimate = await estimateEbookPayload(payload);
+        if (estimate && estimate.images) {
+            const estBytes = Number(estimate.images.estimatedBytes) || 0;
+            updateRecentStatus('idle', estBytes > 0
+                ? `体积预估完成：图片约 ${formatBytesMb(estBytes)}（${Number(estimate.images.embeddable) || 0} 张可嵌入）`
+                : '体积预估完成：没有可嵌入的图片');
+        } else {
+            estimate = null; // 预估失败绝不能阻塞导出：按原流程继续
+            updateRecentStatus('idle', '未能获取图片体积预估，按常规流程继续导出');
+        }
+    }
+
+    let estimateLine = '';
+    let confirmed = false;
+    if (estimate && estimate.images) {
+        const estBytes = Number(estimate.images.estimatedBytes) || 0;
+        const estMb = formatBytesMb(estBytes);
+        const embeddable = Number(estimate.images.embeddable) || 0;
+        const missing = Number(estimate.images.missing) || 0;
+        const oversize = Number(estimate.images.oversize) || 0;
+        if (estimate.overTotalLimit === true) {
+            // a. 超过当前「图片总量上限」：先问是否自动提高上限，否则服务端必然 413
+            const needMb = Math.ceil(estBytes / (1024 * 1024)) + 1; // 带 1MB 余量
+            if (needMb > EBOOK_MAX_TOTAL_LIMIT_MB) {
+                updateRecentStatus('error', `EPUB 预检：图片预计约 ${estMb}，已超过单次导出上限 ${EBOOK_MAX_TOTAL_LIMIT_MB} MB`);
+                if (window.toastr) {
+                    window.toastr.error(`图片预计约 ${estMb}，已超过单次导出上限 ${EBOOK_MAX_TOTAL_LIMIT_MB} MB。请减少图片数量或降低「单图上限」后再导出。`, '小说连载', { timeOut: 9000 });
+                }
+                return; // 不发注定被拒绝的请求
+            }
+            const curLimitMb = Math.max(1, Number(settings.ebook_max_total_mb) || 80);
+            if (!confirm(`电子书预计图片约 ${estMb}（${embeddable} 张可嵌入），超过当前「图片总量上限」${curLimitMb} MB，继续导出会被服务端拒绝。\n是否自动把上限提高到 ${needMb} MB 并继续？`)) {
+                updateRecentStatus('idle', '已取消导出（未调整图片总量上限）');
+                if (window.toastr) window.toastr.info('已取消导出。可在设置里手动提高「图片总量上限」后再试。', '小说连载', { timeOut: 5000 });
+                return;
+            }
+            settings.ebook_max_total_mb = needMb;
+            // 复用同一份 payload 时必须同步抬高 options.maxTotalBytes，否则服务端仍按旧上限 413
+            payload.options.maxTotalBytes = needMb * 1024 * 1024;
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            const limitEl = document.querySelector('#novel_ebook_max_total_mb');
+            if (limitEl) limitEl.value = String(needMb);
+            if (window.toastr) window.toastr.success(`已把「图片总量上限」提高到 ${needMb} MB，继续导出`, '小说连载', { timeOut: 4500 });
+            confirmed = true; // 自动调限即视为已确认，不再弹第二次 confirm
+        } else if (estBytes >= EBOOK_LARGE_WARN_BYTES) {
+            // b. 未超限但体积很大：强提示二次确认（含现有交付方式说明）
+            if (!confirm(`电子书预计约 ${estMb}（图片 ${embeddable} 张），体积较大：部分手机阅读器/微信读书导入可能变慢或失败，下载也更耗时。\n${deliveryLine}\n${embedLine}\n仍要继续吗？`)) {
+                updateRecentStatus('idle', '已取消导出（电子书体积较大）');
+                if (window.toastr) window.toastr.info('已取消导出。可减少图片或降低「单图上限」后再试。', '小说连载', { timeOut: 5000 });
+                return;
+            }
+            confirmed = true;
+        } else {
+            // c. 正常体积：作为普通确认框的附加说明行；预估为 null 时不出现（保持旧行为）
+            estimateLine = `预计图片约 ${estMb}（${embeddable} 张可嵌入，缺失 ${missing} 张 / 超限 ${oversize} 张）`;
+        }
+    }
+
+    if (!confirmed) {
+        const confirmLines = [`是否${actionName} EPUB 电子书？`, deliveryLine, embedLine];
+        if (estimateLine) confirmLines.push(estimateLine);
+        confirmLines.push('后续可在手机阅读器（微信读书/ReadPad/掌阅）中导入。');
+        if (!confirm(confirmLines.join('\n'))) {
+            updateRecentStatus('idle', '已取消 EPUB 导出');
+            return;
+        }
     }
 
     const originalHtml = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在打包 EPUB…'; }
-    updateRecentStatus('updating', '正在生成 EPUB 电子书（含图片收集）...');
+    updateRecentStatus('updating', isDownload ? '正在生成 EPUB 电子书并准备下载...' : '正在生成 EPUB 电子书（含图片收集）...');
 
     try {
-        const { structured, payload } = buildEbookPayload(settings, chatLog);
         const headers = (typeof getRequestHeaders === 'function') ? getRequestHeaders() : { 'Content-Type': 'application/json' };
         if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
         const resp = await fetch('/api/plugins/auto-save/ebook', {
             method: 'POST', headers, body: JSON.stringify(payload)
         });
+        // 失败一律是 JSON error（download 模式的错误响应同样不带二进制头）
+        if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            const msg = (data && data.error) || `HTTP ${resp.status}`;
+            updateRecentStatus('error', `EPUB 导出失败：${msg}`);
+            if (window.toastr) window.toastr.error(`EPUB 导出失败：${msg}`, '小说连载');
+            return;
+        }
+        if (isDownload) {
+            // 二进制下载：响应体就是 EPUB；统计走 X-Novel-Epub-Stats 响应头（没有 JSON 体）
+            const blob = await resp.blob();
+            const fileName = `${sanitizeFilename(payload.bookTitle)}.epub`;
+            let stats = null;
+            try {
+                const rawStats = (resp.headers && typeof resp.headers.get === 'function')
+                    ? resp.headers.get('x-novel-epub-stats') : null;
+                if (rawStats) stats = JSON.parse(decodeURIComponent(rawStats));
+            } catch (e) { stats = null; } // 头缺失/损坏绝不能影响下载本身
+            // 临时下载链接：不挂进可见 DOM，点完立即移除；对象 URL 延迟回收（立即回收会取消下载）
+            const url = URL.createObjectURL(blob);
+            try {
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            } finally {
+                setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) { /* 回收失败无影响 */ } }, 60000);
+            }
+            const imgs = (stats && stats.images) || {};
+            const imgMsg = imgs.embedded ? ` 图片 ${imgs.embedded} 张已嵌入` : ' 纯文字';
+            const skipMsg = imgs.skipped ? `（跳过 ${imgs.skipped} 张）` : '';
+            const sizeMsg = (stats && Number(stats.epubBytes) > 0) ? `（${(Number(stats.epubBytes) / 1024).toFixed(1)} KB）` : '';
+            // 本机下载没有服务器文件路径：清掉上一次 server 导出的旧路径，避免状态行挂着过期文件
+            recentStatus.file = '';
+            updateRecentStatus('success', `EPUB 已下载到本机：${fileName}${sizeMsg}${imgMsg}${skipMsg}`);
+            if (window.toastr) {
+                window.toastr.success(`EPUB 电子书已下载到本机：${fileName}${sizeMsg}${imgMsg}${skipMsg}`, '小说连载', { timeOut: 6000 });
+            }
+            return;
+        }
+        // server 模式：服务端落盘后返回 JSON
         const data = await resp.json().catch(() => ({}));
-        if (!resp.ok || !data || data.success !== true) {
+        if (!data || data.success !== true) {
             const msg = (data && data.error) || `HTTP ${resp.status}`;
             updateRecentStatus('error', `EPUB 导出失败：${msg}`);
             if (window.toastr) window.toastr.error(`EPUB 导出失败：${msg}`, '小说连载');
@@ -3644,30 +3913,33 @@ async function renderSettingsUI(cachedStatus = null) {
                         <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
                     </button>
                     <div class="novel-acc-body">
-                        <label class="novel-switch-row">
-                            <span>导出时嵌入图片</span>
+                        <label class="checkbox_label" title="开启后导出 EPUB 时会读取每轮回复携带的插画（extra.bbiImage）并按正文原位嵌入；需要服务端插件，且不影响 TXT 连载">
                             <input type="checkbox" id="novel_ebook_embed_images" ${settings.ebook_embed_images ? 'checked' : ''} />
+                            <span>导出时嵌入图片</span>
                         </label>
-                        <small>关闭时 EPUB 为纯文字；开启后才读取每轮回复携带的插画（<code>extra.bbiImage</code>）并按正文原位嵌入。本功能<b>需要部署服务端插件</b>，且不会影响 TXT 连载。</small>
+                        <small id="novel_ebook_embed_hint">${settings.ebook_embed_images ? EBOOK_EMBED_HINT_ON : EBOOK_EMBED_HINT_OFF}</small>
                         <div class="novel-btn-row">
                             <button type="button" id="novel_ebook_preview_btn" class="novel-btn novel-btn-block" title="只读扫描：列出识别到的图片、原位校验结果与将跳过的项">
                                 <i class="fa-solid fa-images"></i> 图片清单预览
                             </button>
-                            <button type="button" id="novel_ebook_export_btn" class="novel-btn btn-export" title="服务端打包 EPUB 电子书（图片按正文原位嵌入）">
-                                <i class="fa-solid fa-book"></i> 导出 EPUB 电子书
+                            <button type="button" id="novel_ebook_export_btn" class="novel-btn btn-export" title="服务端打包 EPUB 电子书并写入服务器保存目录（不下载到本机）">
+                                <i class="fa-solid fa-book"></i> 导出到服务器
+                            </button>
+                            <button type="button" id="novel_ebook_download_btn" class="novel-btn btn-download" title="在浏览器中直接下载 EPUB 到本机：不写入服务器、不需要保存目录">
+                                <i class="fa-solid fa-download"></i> 下载到本机
                             </button>
                         </div>
                         <label class="novel-row">
-                            <span>单图上限 (MB)</span>
                             <input type="number" id="novel_ebook_max_image_mb" class="text_pole" min="1" max="50" step="1" value="${Number(settings.ebook_max_image_mb) || 5}" />
+                            <span>单图上限 (MB)</span>
                         </label>
                         <label class="novel-row">
-                            <span>图片总量上限 (MB)</span>
                             <input type="number" id="novel_ebook_max_total_mb" class="text_pole" min="1" max="500" step="1" value="${Number(settings.ebook_max_total_mb) || 80}" />
+                            <span>图片总量上限 (MB)</span>
                         </label>
                         <label class="novel-row">
-                            <span>酒馆根目录（可选）</span>
                             <input type="text" id="novel_ebook_st_root" class="text_pole" value="${escapeHtml(settings.ebook_st_root || '')}" placeholder="留空自动推导；容器/NAS 部署时可填，如 /home/node/app" />
+                            <span>酒馆根目录（可选）</span>
                         </label>
                         <small>图片实际路径为 <code>&lt;酒馆根&gt;/data/&lt;账号&gt;/user/images/…</code>。留空时按 ①当前账号 ②default-user ③其它账号 顺序自动查找，找不到的图会在结果里列为 missing（不会静默丢弃）。</small>
                     </div>
@@ -3934,7 +4206,18 @@ async function renderSettingsUI(cachedStatus = null) {
         ebookEmbedEl.addEventListener('change', () => {
             settings.ebook_embed_images = !!ebookEmbedEl.checked;
             if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            // 即时反馈：说明文案随开关切换 + toastr 明确本次改动的效果（toastr 可能不存在，必须判空）
+            refreshEbookEmbedHint(panel);
             refreshNovelAccSummaries(panel);
+            if (window.toastr) {
+                window.toastr.info(
+                    settings.ebook_embed_images
+                        ? '已开启图片嵌入：导出 EPUB 时会读取 bbi 插画并按正文原位嵌入（需要服务端插件）。'
+                        : '已关闭图片嵌入：导出的 EPUB 为纯文字（TXT 连载不受影响）。',
+                    '小说连载',
+                    { timeOut: 3500 }
+                );
+            }
         });
     }
     const ebookMaxImgEl = panel.querySelector('#novel_ebook_max_image_mb');
@@ -3967,13 +4250,26 @@ async function renderSettingsUI(cachedStatus = null) {
     if (ebookPreviewBtn) {
         ebookPreviewBtn.addEventListener('click', () => openEbookPreviewModal());
     }
+    // 两个导出入口：写服务器（原有）/ 浏览器本机下载（v1.18 新增，需服务端 1.15.0+ 的 ebookDownload 能力）
     const ebookExportBtn = panel.querySelector('#novel_ebook_export_btn');
     if (ebookExportBtn) {
-        ebookExportBtn.addEventListener('click', () => exportEbook(ebookExportBtn));
+        ebookExportBtn.addEventListener('click', () => exportEbook(ebookExportBtn, 'server'));
         // 能力门控：老服务端没有 /ebook，导出前就禁用并给出原因（避免点了才报错）
         if (serverCapabilities.ebook !== true) {
             ebookExportBtn.disabled = true;
             ebookExportBtn.title = '需要更新服务端插件（缺少 /ebook 接口）：重新部署 plugins/auto-save 并重启酒馆';
+        }
+    }
+    const ebookDownloadBtn = panel.querySelector('#novel_ebook_download_btn');
+    if (ebookDownloadBtn) {
+        ebookDownloadBtn.addEventListener('click', () => exportEbook(ebookDownloadBtn, 'download'));
+        // 能力门控：缺 /ebook 或缺少 download 交付能力都禁用，并统一提示"需要更新服务端插件"
+        if (serverCapabilities.ebook !== true) {
+            ebookDownloadBtn.disabled = true;
+            ebookDownloadBtn.title = '需要更新服务端插件（缺少 /ebook 接口）：重新部署 plugins/auto-save 并重启酒馆';
+        } else if (serverCapabilities.ebookDownload !== true) {
+            ebookDownloadBtn.disabled = true;
+            ebookDownloadBtn.title = '需要更新服务端插件（不支持直接下载）：重新部署 plugins/auto-save 并重启酒馆';
         }
     }
 
@@ -4228,6 +4524,8 @@ async function renderSettingsUI(cachedStatus = null) {
     renderTagTools();
     // 折叠行摘要在 DOM 就绪后再刷一次（此时 #novel_tag_scan_count 等已在位）
     refreshNovelAccSummaries(panel);
+    // EPUB 开关的即时说明也与设置现态对齐（模板初次渲染之外再兜一次，避免迁移数据后不同步）
+    refreshEbookEmbedHint(panel);
 }
 
 // ==================== 测试专用导出（浏览器环境完全无副作用）====================
@@ -4274,6 +4572,10 @@ if (typeof module !== 'undefined' && module.exports) {
         splitParagraphBlocks,
         getCleanedMessageWithImageSlots,
         buildStructuredNovel,
+        buildEbookPayload,
+        // v1.19.0：导出前体积预估（测试/verifier 直接调用真实实现）
+        formatBytesMb,
+        estimateEbookPayload,
         scanBookImages,
         shortPromptAlt,
         __testState: {
@@ -4289,6 +4591,9 @@ if (typeof module !== 'undefined' && module.exports) {
             getSavedChapterMap: () => savedChapterMap,
             getServerPluginVersion: () => serverPluginVersion,
             setServerPluginVersion: (v) => { serverPluginVersion = v; },
+            // v1.19.0：能力声明读写（测试/verifier 用来模拟服务端是否支持 ebookEstimate 等能力）
+            getServerCapabilities: () => serverCapabilities,
+            setServerCapabilities: (v) => { serverCapabilities = (v && typeof v === 'object') ? v : {}; },
         },
         __internals: {
             INLINE_TAGS,

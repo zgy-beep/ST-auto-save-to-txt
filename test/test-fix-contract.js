@@ -18,6 +18,11 @@
  *      其中"任何 is_regenerate 请求都不得指向文件中不存在的章号"是本组最关键的判据 ——
  *      这正是「问候语入书被误判为替换最后一章 → 409 chapter_not_found → AI 首答被丢弃」型回归的指纹。
  *
+ *   L. v1.18：EPUB「嵌入图片」开关门控（修复前恒嵌图、开关无效）+ buildEbookPayload 跨层入口。
+ *      本组对 J/K 的旧语义做了显式化：需要 image 块的用例统一显式传 ebook_embed_images:true。
+ *   M. v1.19.0：导出前电子书体积预估（130MB+ 用户场景）：formatBytesMb 边界、
+ *      estimateEbookPayload 能力门控/失败静默降级、exportEbook 预检顺序与自动提高总量上限。
+ *
  * 运行：node test/test-fix-contract.js
  * 落盘：全部写进 os.tmpdir() 下的唯一临时目录，finally 里整目录删除。
  *       绝不写 plugins/auto-save/logs 或 custom_novels。
@@ -944,6 +949,12 @@ async function main() {
     // K. EPUB 导出前端契约（P2 配套）：多章结构化 / 无图 / 原位保真严格版 / 乱序数组形态
     //    默认路径逐字节 / 清单映射 / 防御式矩阵（覆盖 J 组未覆盖分支）
     await groupK();
+
+    // L. v1.18：「嵌入图片」开关门控（修复前恒嵌图、开关无效）+ buildEbookPayload 跨层入口
+    await groupL();
+
+    // M. v1.19.0：导出前电子书体积预估（formatBytesMb / estimateEbookPayload / exportEbook 预检门控）
+    await groupM();
 }
 
 // ==================== I. P0：<bbi_image> 标记与 prompt 清理 ====================
@@ -1025,8 +1036,12 @@ async function groupJ() {
         }
         return { '0': bucket };
     };
-    const hApi = (chat) => {
-        const settings = { naming_rule: 'char_chat', chapter_style: 'numbered_floor', include_user_dialogue: false };
+    const hApi = (chat, settingsOverride) => {
+        // v1.18 起「嵌入图片」开关生效：ebook_embed_images 缺省 false = 纯文字 EPUB。
+        // 需要 image 块的用例必须显式传 true，否则测到的是关闭嵌图的新分支（旧断言按新语义拆成 J/L 两组）。
+        const settings = Object.assign({
+            naming_rule: 'char_chat', chapter_style: 'numbered_floor', include_user_dialogue: false
+        }, settingsOverride || {});
         const ctx = {
             chat,
             chatId: '契约测试.jsonl',
@@ -1080,7 +1095,7 @@ async function groupJ() {
                 ])
             }
         }];
-        const { mod, settings } = hApi(chat);
+        const { mod, settings } = hApi(chat, { ebook_embed_images: true });
         const s = mod.buildStructuredNovel(settings, chat);
         eq(s.chapters.length, 1, 'J3.1 生成 1 章');
         const blocks = s.chapters[0].blocks;
@@ -1106,7 +1121,7 @@ async function groupJ() {
             mes: '文字。\n<bbi_image>p0\n<bbi_image>p1\n<bbi_image>p2',
             is_user: false, name: '艾莉丝', extra: { bbiImage: { '0': bucket } }
         }];
-        const { mod, settings } = hApi(chat);
+        const { mod, settings } = hApi(chat, { ebook_embed_images: true });
         const s = mod.buildStructuredNovel(settings, chat);
         const imgs = s.chapters[0].blocks.filter((b) => b.type === 'image');
         eq(imgs.map((x) => x.slotSeq), [0, 1, 2], 'J4.1 图片按 slotSeq 升序（不是存储顺序）');
@@ -1127,7 +1142,7 @@ async function groupJ() {
                 ])
             }
         }];
-        const { mod, settings } = hApi(chat);
+        const { mod, settings } = hApi(chat, { ebook_embed_images: true });
         const s = mod.buildStructuredNovel(settings, chat);
         const blocks = s.chapters[0].blocks;
         eq(blocks.filter((b) => b.type === 'image').length, 2, 'J5.1 降级后两张图都不丢');
@@ -1285,7 +1300,7 @@ async function groupK() {
                 ])
             }
         }];
-        const { mod, settings } = kApi(chat);
+        const { mod, settings } = kApi(chat, { ebook_embed_images: true });
         const blocks = mod.buildStructuredNovel(settings, chat).chapters[0].blocks;
         eq(blocks.map((b) => b.type), ['text', 'image', 'text', 'image', 'text'],
             'K3.1 块序列严格为 text,image,text,image,text');
@@ -1314,7 +1329,7 @@ async function groupK() {
                 }
             } }
         }];
-        const { mod, settings } = kApi(chat);
+        const { mod, settings } = kApi(chat, { ebook_embed_images: true });
         const imgs = mod.buildStructuredNovel(settings, chat).chapters[0].blocks
             .filter((b) => b.type === 'image');
         eq(imgs.map((x) => x.slotSeq), [0, 1, 2], 'K4.1 数组形态 + 乱序存储 → 仍按 slotSeq 升序');
@@ -1330,7 +1345,7 @@ async function groupK() {
             is_user: false, name: '艾莉丝',
             extra: { bbiImage: bbi([{ path: '/user/images/c/a.jpg', slotSeq: 0 }]) }
         }];
-        const { mod, settings } = kApi(chat);
+        const { mod, settings } = kApi(chat, { ebook_embed_images: true });
         const st = mod.buildStructuredNovel(settings, chat);
         eq(st.chapters[0].blocks.filter((b) => b.type === 'image').length, 1,
             'K5.1 标记多于图片时图片不丢（1 张仍在）');
@@ -1400,6 +1415,298 @@ async function groupK() {
     }
 }
 
+// ==================== L. v1.18：EPUB「嵌入图片」开关门控 + buildEbookPayload 跨层入口 ====================
+// 修复前的 bug：buildStructuredNovel 完全不读 settings.ebook_embed_images —— 无论勾选与否都嵌图，
+// README 承诺的「不勾选 = 纯文字 EPUB」实际无效。本组锁定：
+//   ① 缺省（false）/ 显式 false → 纯文字结构化：无 image 块、imagesFound=0、正文块与 TXT 路径同口径
+//   ② 显式 true → 原位 image 块照旧（回归，防止"修开关把功能修没了"）
+//   ③ buildEbookPayload（跨层集成测试入口）关闭时 chapters 无 image 块、开启时有，且 delivery 可透传
+async function groupL() {
+    console.log('\n=== L. v1.18：EPUB「嵌入图片」开关门控 / buildEbookPayload 跨层入口 ===');
+    let api;
+    try {
+        api = loadIndexModule();
+    } catch (e) {
+        ok(false, 'L0 index.js 可加载', String(e && e.message));
+        return;
+    }
+
+    const bbi = (slots) => {
+        const bucket = {};
+        for (const sl of slots) {
+            bucket['h' + sl.slotSeq] = [{
+                generationId: 'g' + sl.slotSeq, path: sl.path,
+                prompt: sl.prompt || ('prompt' + sl.slotSeq), seed: 1,
+                status: sl.status || 'ready', createdAt: 1, slotSeq: sl.slotSeq
+            }];
+        }
+        return { '0': bucket };
+    };
+    const lApi = (chat, settingsOverride) => {
+        const settings = Object.assign({
+            naming_rule: 'char_chat', chapter_style: 'numbered_floor', include_user_dialogue: false
+        }, settingsOverride || {});
+        const ctx = {
+            chat, chatId: '契约测试.jsonl', chatMetadata: {},
+            characters: [{ name: '艾莉丝', chat: '艾莉丝 - 2026-10-17' }], this_chid: 0,
+            extension_settings: { autoSaveTxt: settings }, currentUser: { name: '测试者' },
+            getRequestHeaders: () => ({}), saveSettingsDebounced: () => {},
+            eventSource: null, event_types: null
+        };
+        const mod = loadIndexModule({ deps: { getContext: () => ctx } });
+        return { mod, settings: mod.getSettings() };
+    };
+
+    // 3 条消息：第 1 章 1 张图、第 2 章无图、第 3 章 2 张图（覆盖"有图 / 无图 / 多图"三种章节）
+    const chat = [
+        {
+            mes: '　　第一楼正文。\n<bbi_image>p0\n　　第一楼第二段。', is_user: false, name: '艾莉丝',
+            extra: { bbiImage: bbi([{ path: '/user/images/c/a.jpg', prompt: '<bbi_image>p0', slotSeq: 0 }]) }
+        },
+        { mes: '　　第二楼正文。', is_user: false, name: '艾莉丝' },
+        {
+            mes: '　　第三楼正文。\n<bbi_image>p1\n<bbi_image>p2', is_user: false, name: '艾莉丝',
+            extra: { bbiImage: bbi([
+                { path: '/user/images/c/b.jpg', prompt: '<bbi_image>p1', slotSeq: 0 },
+                { path: '/user/images/c/c.jpg', prompt: '<bbi_image>p2', slotSeq: 1 }
+            ]) }
+        }
+    ];
+
+    // ---- L1：缺省 settings（未勾选 = ebook_embed_images 缺省 false）→ 纯文字，且与 TXT 同口径 ----
+    {
+        const { mod, settings } = lApi(chat);
+        eq(settings.ebook_embed_images, false, 'L1.0 缺省：settings.ebook_embed_images === false（默认关）');
+        const st = mod.buildStructuredNovel(settings, chat);
+        eq(st.embedImages, false, 'L1.1 缺省（未勾选）：embedImages === false');
+        eq(st.chapterCount, 3, 'L1.2 缺省：章节数 = 3（开关不影响章节编排）');
+        eq(st.chapters.length, 3, 'L1.3 缺省：chapters 完整包含 3 章');
+        const allBlocks = st.chapters.reduce((acc, ch) => acc.concat(ch.blocks), []);
+        ok(allBlocks.length > 0 && allBlocks.every((b) => b.type === 'text'),
+            'L1.4 缺省：全部是 text 块，没有任何 image 块（修复前此处必有 image）',
+            JSON.stringify(allBlocks.map((b) => b.type)));
+        eq(st.imagesFound, 0, 'L1.5 缺省：imagesFound === 0');
+        eq(st.imagesDeembedded, 0, 'L1.6 缺省：imagesDeembedded === 0（关闭时不解析图片槽位）');
+        eq(st.warnings.length, 0, 'L1.7 缺省：无降级警告');
+
+        const plain = mod.buildNovelText(settings, chat);
+        eq(st.chapterCount, plain.chapterCount, 'L1.8 缺省：chapterCount 与 buildNovelText 完全一致');
+        eq(st.chapters.map((ch) => ch.title), [
+            '第 1 章 · 艾莉丝 (原楼层: 1)',
+            '第 2 章 · 艾莉丝 (原楼层: 2)',
+            '第 3 章 · 艾莉丝 (原楼层: 3)'
+        ], 'L1.9 缺省：章节标题与 buildNovelText 口径一致（含原楼层）');
+
+        // 正文块逐字等于 TXT 路径同一份清洗结果的段落切分（getCleanedMessage 就是 TXT 的取文函数）
+        const expectedTexts = chat.map((m, i) => mod.getCleanedMessage(m, i, settings)
+            .split(/\n{2,}/).map((p) => p.trim()).filter(Boolean));
+        eq(st.chapters.map((ch) => ch.blocks.map((b) => b.text)), expectedTexts,
+            'L1.10 缺省：正文块与 TXT 清洗口径逐字一致');
+    }
+
+    // ---- L2：显式 false 与缺省等价（防"只认缺省值"的伪修复）----
+    {
+        const { mod, settings } = lApi(chat, { ebook_embed_images: false });
+        const st = mod.buildStructuredNovel(settings, chat);
+        eq(st.embedImages, false, 'L2.1 显式 false：embedImages === false');
+        eq(st.imagesFound, 0, 'L2.2 显式 false：imagesFound === 0');
+        ok(st.chapters.every((ch) => ch.blocks.every((b) => b.type === 'text')),
+            'L2.3 显式 false：所有章节都没有 image 块');
+    }
+
+    // ---- L3：显式 true → 原位 image 块照旧（回归）----
+    {
+        const { mod, settings } = lApi(chat, { ebook_embed_images: true });
+        const st = mod.buildStructuredNovel(settings, chat);
+        eq(st.embedImages, true, 'L3.1 开启：embedImages === true');
+        eq(st.imagesFound, 3, 'L3.2 开启：imagesFound === 3（原行为保留）');
+        eq(st.chapters.map((ch) => ch.blocks.filter((b) => b.type === 'image').length), [1, 0, 2],
+            'L3.3 开启：各章图片数 [1,0,2]（原位，不丢图）');
+        eq(st.chapters[0].blocks.map((b) => b.type), ['text', 'image', 'text'],
+            'L3.4 开启：第 1 章块序列 text,image,text（原位嵌入）');
+        eq(st.chapters[0].blocks.filter((b) => b.type === 'image').map((b) => b.path),
+            ['/user/images/c/a.jpg'], 'L3.5 开启：第 1 章图片 path 正确');
+        eq(st.chapters[2].blocks.filter((b) => b.type === 'image').map((b) => b.slotSeq), [0, 1],
+            'L3.6 开启：第 3 章两张图按 slotSeq 升序');
+        ok(st.chapters[0].blocks.filter((b) => b.type === 'text').every((b) => !b.text.includes('IMGMARK')),
+            'L3.7 开启：正文块不含内部占位符');
+    }
+
+    // ---- L4：buildEbookPayload —— 跨层集成测试入口（前端 payload → 服务端 /ebook）----
+    {
+        const { mod, settings } = lApi(chat, { ebook_embed_images: false });
+        const built = mod.buildEbookPayload(settings, chat);
+        ok(built && built.structured && built.payload, 'L4.1 buildEbookPayload 返回 { structured, payload }');
+        eq(built.payload.delivery, 'server', 'L4.2 默认 delivery === server（原有落盘行为不变）');
+        eq(built.structured.embedImages, false, 'L4.3 payload 关闭嵌图：structured.embedImages === false');
+        ok(built.payload.chapters.every((ch) => ch.blocks.every((b) => b.type === 'text')),
+            'L4.4 payload 关闭嵌图：chapters 无 image 块');
+        eq(built.payload.chapters.length, 3, 'L4.5 payload 关闭嵌图：3 章齐全');
+        ok(built.payload.bookTitle && typeof built.payload.bookTitle === 'string',
+            'L4.6 payload 携带 bookTitle（下载文件名 / 服务端落盘共用）');
+    }
+    {
+        const { mod, settings } = lApi(chat, { ebook_embed_images: true });
+        const built = mod.buildEbookPayload(settings, chat, 'download');
+        eq(built.payload.delivery, 'download', 'L4.7 buildEbookPayload 透传 delivery=download');
+        eq(built.structured.imagesFound, 3, 'L4.8 payload 开启嵌图：imagesFound === 3');
+        ok(built.payload.chapters.some((ch) => ch.blocks.some((b) => b.type === 'image')),
+            'L4.9 payload 开启嵌图：chapters 含原位 image 块');
+    }
+}
+
+// ==================== M. v1.19.0：导出前电子书体积预估 ====================
+// 用户实测图片总量 130MB+：导出前没有任何体积提示，超限时只会被服务端 413 拒绝，
+// 体积过大还可能在手机阅读器导入失败。本组锁定：
+//   ① formatBytesMb 边界（<1MB / 130.4MB / 整数 / 非法值）
+//   ② estimateEbookPayload：能力缺失返回 null 且零请求；能力可用时 URL/方法/请求体正确；
+//      非 2xx / 网络异常 / JSON 非法 / success!==true 一律返回 null 且不向上抛（预估绝不阻塞导出）
+//   ③ exportEbook 源码级：payload 只 build 一次、预估在 confirm 之前、复用同一 payload；
+//      自动提高上限时同步改写 payload.options.maxTotalBytes + settings + 面板输入框
+async function groupM() {
+    console.log('\n=== M. v1.19.0：EPUB 体积预估（formatBytesMb / estimateEbookPayload / 导出预检）===');
+    let api;
+    try {
+        api = loadIndexModule();
+    } catch (e) {
+        ok(false, 'M0 index.js 可加载', String(e && e.message));
+        return;
+    }
+
+    // ---- M1：formatBytesMb 边界 ----
+    eq(api.formatBytesMb(0), '0.0 MB', 'M1.1 0 字节 → 0.0 MB');
+    eq(api.formatBytesMb(512 * 1024), '0.5 MB', 'M1.2 小于 1MB → 0.5 MB（保留一位小数）');
+    eq(api.formatBytesMb(1023 * 1024), '1.0 MB', 'M1.3 1023KB 四舍五入为 1.0 MB');
+    eq(api.formatBytesMb(130.4 * 1024 * 1024), '130.4 MB', 'M1.4 130.4MB → 130.4 MB');
+    eq(api.formatBytesMb(100 * 1024 * 1024), '100.0 MB', 'M1.5 整数 100MB → 100.0 MB');
+    eq(api.formatBytesMb(NaN), '0.0 MB', 'M1.6 NaN → 0.0 MB（绝不输出 NaN MB）');
+    eq(api.formatBytesMb(-1), '0.0 MB', 'M1.7 负数 → 0.0 MB');
+    eq(api.formatBytesMb('abc'), '0.0 MB', 'M1.8 非数字字符串 → 0.0 MB');
+
+    const payload = {
+        bookTitle: '预估测试书',
+        chapters: [{ title: '第 1 章 · 艾莉丝', blocks: [{ type: 'text', text: '正文' }] }],
+        options: { maxImageBytes: 5 * 1024 * 1024, maxTotalBytes: 80 * 1024 * 1024 }
+    };
+    const sampleEstimate = {
+        success: true,
+        images: {
+            totalReferences: 3, resolvable: 3, embeddable: 2, missing: 1,
+            oversize: 0, unsupported: 0, estimatedBytes: 130.4 * 1024 * 1024
+        },
+        limits: { maxImageBytes: 5 * 1024 * 1024, maxTotalBytes: 80 * 1024 * 1024 },
+        overTotalLimit: true
+    };
+
+    // ---- M2：能力缺失 → 返回 null 且不发请求（旧服务端静默降级） ----
+    {
+        let calls = 0;
+        const mod = loadIndexModule({ deps: {
+            getContext: () => ({}),
+            fetch: () => { calls++; return Promise.reject(new Error('能力缺失时不该发请求')); }
+        } });
+        mod.__testState.setServerCapabilities({ ebook: true }); // 有 /ebook，但没有 estimate 能力
+        const r = await mod.estimateEbookPayload(payload);
+        eq(r, null, 'M2.1 能力缺失：返回 null');
+        eq(calls, 0, 'M2.2 能力缺失：零请求');
+        eq(mod.__testState.getServerCapabilities().ebookEstimate, undefined,
+            'M2.3 测试桩状态正确（ebookEstimate 缺省）');
+    }
+
+    // ---- M3：能力可用 → POST /ebook/estimate，请求体即 payload，返回预估数据 ----
+    {
+        const calls = [];
+        const mod = loadIndexModule({ deps: {
+            getContext: () => ({}),
+            fetch: async (url, opts) => {
+                calls.push({ url, opts });
+                return { ok: true, status: 200, json: async () => sampleEstimate };
+            }
+        } });
+        mod.__testState.setServerCapabilities({ ebook: true, ebookDownload: true, ebookEstimate: true });
+        const r = await mod.estimateEbookPayload(payload);
+        eq(calls.length, 1, 'M3.1 能力可用：恰好 1 次请求');
+        eq(calls[0] && calls[0].url, '/api/plugins/auto-save/ebook/estimate', 'M3.2 请求 URL 正确');
+        eq(calls[0] && calls[0].opts && calls[0].opts.method, 'POST', 'M3.3 请求方法 POST');
+        let reqBody = null;
+        try { reqBody = JSON.parse(calls[0].opts.body); } catch (e) { reqBody = null; }
+        eq(reqBody && reqBody.bookTitle, '预估测试书', 'M3.4 请求体是同一份 payload（bookTitle 一致）');
+        ok(calls[0] && calls[0].opts && calls[0].opts.headers
+            && calls[0].opts.headers['Content-Type'] === 'application/json', 'M3.5 带 Content-Type: application/json');
+        eq(r && r.success, true, 'M3.6 返回预估数据本体');
+        eq(r && r.overTotalLimit, true, 'M3.7 overTotalLimit 透传（供导出预检分级）');
+        eq(r && r.images && r.images.estimatedBytes, sampleEstimate.images.estimatedBytes, 'M3.8 estimatedBytes 透传');
+    }
+
+    // ---- M4：失败一律 null 且不抛（预估绝不能阻塞导出） ----
+    const failureCases = [
+        { name: 'HTTP 500', fetch: async () => ({ ok: false, status: 500, json: async () => ({ error: 'boom' }) }) },
+        { name: '网络异常', fetch: async () => { throw new Error('network down'); } },
+        { name: 'JSON 非法', fetch: async () => ({ ok: true, status: 200, json: async () => { throw new Error('bad json'); } }) },
+        { name: 'success!==true', fetch: async () => ({ ok: true, status: 200, json: async () => ({ success: false, error: '拒绝' }) }) },
+        { name: '缺 images', fetch: async () => ({ ok: true, status: 200, json: async () => ({ success: true }) }) }
+    ];
+    let failSeq = 0;
+    for (const c of failureCases) {
+        failSeq++;
+        const mod = loadIndexModule({ deps: { getContext: () => ({}), fetch: c.fetch } });
+        mod.__testState.setServerCapabilities({ ebookEstimate: true });
+        let threw = null;
+        let r = 'not-called';
+        try { r = await mod.estimateEbookPayload(payload); } catch (e) { threw = e; }
+        ok(!threw, `M4.${failSeq}a ${c.name}：不向上抛异常`, threw && threw.message);
+        eq(r, null, `M4.${failSeq}b ${c.name}：返回 null（静默降级）`);
+    }
+
+    // ---- M5：exportEbook 源码级：payload 只 build 一次、预估在 confirm 前、复用同一 payload ----
+    const source = api.__source || '';
+    const exportFnMatch = source.match(/async function exportEbook\([^)]*\) \{[\s\S]*?\n\}/);
+    ok(!!exportFnMatch, 'M5.1 exportEbook 函数已抽取');
+    {
+        const fn = exportFnMatch ? exportFnMatch[0] : '';
+        const buildAt = fn.indexOf('buildEbookPayload(');
+        const estAt = fn.indexOf('estimateEbookPayload(');
+        const confirmAt = fn.indexOf('confirm(');
+        ok(buildAt >= 0, 'M5.2 exportEbook 内构建 payload');
+        ok(buildAt >= 0 && estAt > buildAt, 'M5.3 体积预估发生在 payload 构建之后（复用同一次 build）');
+        ok(estAt >= 0 && confirmAt > estAt, 'M5.4 体积预估发生在 confirm 之前');
+        eq((fn.match(/buildEbookPayload\(/g) || []).length, 1, 'M5.5 exportEbook 内只 build 一次 payload（不重复构建）');
+        ok(/estimateEbookPayload\(payload\)/.test(fn), 'M5.6 预估复用同一个 payload 变量');
+        ok(/settings\.ebook_embed_images === true\s*&&\s*serverCapabilities\.ebookEstimate === true/.test(fn),
+            'M5.7 仅「嵌图 + 服务端具备 estimate 能力」时才预检');
+        ok(/overTotalLimit/.test(fn) && /settings\.ebook_max_total_mb\s*=/.test(fn),
+            'M5.8 超限分支自动提高 ebook_max_total_mb');
+        ok(/payload\.options\.maxTotalBytes\s*=/.test(fn),
+            'M5.9 复用同一 payload 时同步抬高 options.maxTotalBytes（否则服务端仍按旧上限 413）');
+        ok(/#novel_ebook_max_total_mb/.test(fn), 'M5.10 自动调限同步设置面板输入框');
+        ok(/EBOOK_LARGE_WARN_BYTES/.test(fn), 'M5.11 大体积分支使用 100MB 阈值常量');
+        ok(/EBOOK_MAX_TOTAL_LIMIT_MB/.test(fn), 'M5.12 自动调限封顶使用 500MB 常量');
+        ok(/是否自动把上限提高到/.test(fn), 'M5.13 超限分支有「自动提高上限」确认文案');
+        ok(/体积较大/.test(fn) && /手机阅读器/.test(fn), 'M5.14 大体积分支有强提示文案');
+        ok(/预计图片约/.test(fn) && /缺失/.test(fn), 'M5.15 正常分支 confirm 带预估行（含缺失/超限张数）');
+        ok(/let confirmed = false/.test(fn) && /if \(!confirmed\)/.test(fn),
+            'M5.16 自动提限/大体积确认后不再弹第二次 confirm');
+        ok(/updateRecentStatus\('updating', '正在估算图片体积…'\)/.test(fn),
+            'M5.17 预估期间状态为「正在估算图片体积…」');
+    }
+
+    // ---- M6：预览弹窗预估占位与能力门控（源码级） ----
+    ok(source.includes('id="novel_ebook_modal_estimate"'), 'M6.1 预览弹窗有体积预估占位节点');
+    ok(/fillEbookEstimateHint\(overlay, settings, chatLog\)/.test(source), 'M6.2 预览弹窗接线异步预估填充');
+    {
+        const fillFnMatch = source.match(/async function fillEbookEstimateHint\([^)]*\) \{[\s\S]*?\n\}/);
+        ok(!!fillFnMatch, 'M6.3 fillEbookEstimateHint 已定义');
+        const fillFn = fillFnMatch ? fillFnMatch[0] : '';
+        ok(/serverCapabilities\.ebookEstimate !== true/.test(fillFn) && /estEl\.remove\(\)/.test(fillFn),
+            'M6.4 预览：能力不可用时删除占位');
+        ok(/ebook_embed_images:\s*true/.test(fillFn),
+            'M6.5 预览：按「开启嵌图」构造预估 payload（只预估、不改用户设置）');
+        ok(/超过当前图片总量上限/.test(fillFn) && /体积较大，部分阅读器导入可能失败或很慢/.test(fillFn),
+            'M6.6 预览：超限 / 大体积警告文案齐全');
+        ok(/is-warn/.test(fillFn), 'M6.7 预览：警告态用 is-warn');
+    }
+}
+
 // ==================== 执行 + 清理 ====================
 (async () => {
     let fatal = null;
@@ -1428,5 +1735,5 @@ async function groupK() {
         process.exit(1);
     }
     if (fatal) process.exit(1);
-    console.log('本轮修复契约（替换守卫 / 重复追加守卫 / 备份与原子写 / 问候语入书 / 转义 / 长章节防重 / 端到端时序 / 命名同源 / bbi 标记清理）全部符合预期');
+    console.log('本轮修复契约（替换守卫 / 重复追加守卫 / 备份与原子写 / 问候语入书 / 转义 / 长章节防重 / 端到端时序 / 命名同源 / bbi 标记清理 / 嵌图开关门控 / 导出前体积预估）全部符合预期');
 })();

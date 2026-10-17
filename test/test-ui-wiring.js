@@ -811,6 +811,279 @@ checkOk('胶囊开关本体规则仍在（36×21 + 999px 圆角）',
 checkOk('滑钮 ::after 仍在（白色圆钮 + translateX(15px)）',
     /input\[type="checkbox"\]:checked::after,[\s\S]{0,200}?transform:\s*translateX\(15px\);[\s\S]{0,120}?background:\s*#fff;/.test(css));
 
+console.log('\n=== ⑭ v1.18 EPUB「嵌入图片」开关修复 + 本机下载 ===');
+
+// —— 结构：开关行必须是 checkbox_label（复用胶囊样式），旧的无样式类必须清零 ——
+check('EPUB 分组内的开关行已改为 checkbox_label（复用胶囊开关样式）',
+    /<label class="checkbox_label"[^>]*>\s*<input[^>]*id="novel_ebook_embed_images"/.test(EBOOK_ACC), true);
+check('旧的无样式类 novel-switch-row 已从 index.js 移除（新前端不再依赖它）',
+    /novel-switch-row/.test(src), false);
+check('style.css 保留 novel-switch-row 防御布局（缓存旧 index.js 时整行仍可点）',
+    /#auto-save-to-txt-settings \.novel-switch-row \{/.test(css), true);
+check('#novel_ebook_embed_images 处于 .novel-acc-body > .checkbox_label 内（命中胶囊开关 CSS 选择器）',
+    /class="novel-acc-body"[\s\S]*?<label class="checkbox_label"[^>]*>\s*<input[^>]*id="novel_ebook_embed_images"/.test(EBOOK_ACC), true);
+check('数值 / 根目录行改用 .novel-row 类（模板里共 3 行）',
+    (EBOOK_ACC.match(/class="novel-row"/g) || []).length, 3);
+
+// —— CSS：.novel-row 必须真的落地，否则又是「无样式类」 ——
+const novelRowBlock = (() => {
+    const SEL = '#auto-save-to-txt-settings .novel-acc-body > .novel-row {';
+    const i = css.indexOf(SEL);
+    if (i < 0) return null;
+    const open = i + SEL.length - 1;
+    const close = css.indexOf('}', open);
+    return close < 0 ? null : css.slice(open + 1, close);
+})();
+checkOk('.novel-row 样式块已定义', novelRowBlock !== null);
+checkOk('.novel-row 左标题 + 右控件（row-reverse + space-between）',
+    novelRowBlock !== null && /flex-direction:\s*row-reverse;/.test(novelRowBlock)
+    && /justify-content:\s*space-between;/.test(novelRowBlock));
+checkOk('.novel-row 之间用发丝线分隔',
+    novelRowBlock !== null && /border-bottom:\s*1px solid var\(--nv-block-line\);/.test(novelRowBlock));
+checkOk('.novel-row 数值输入框定宽 96px 右对齐',
+    /\.novel-row > input\[type="number"\]\.text_pole \{[\s\S]{0,120}?width:\s*96px;[\s\S]{0,80}?text-align:\s*right;/.test(css));
+checkOk('.novel-row 路径输入框定宽 200px',
+    /\.novel-row > input\[type="text"\]\.text_pole \{[\s\S]{0,160}?width:\s*200px;/.test(css));
+checkOk('.novel-btn.btn-download 样式已落地（新增按钮不能是无样式类）',
+    /\.novel-btn\.btn-download \{[\s\S]{0,160}?background:\s*var\(--nv-accent\);/.test(css));
+
+// —— 即时反馈：动态 hint + toastr（toastr 可能不存在，必须判空）——
+check('EPUB 分组有动态说明位 <small id="novel_ebook_embed_hint">',
+    /<small id="novel_ebook_embed_hint">/.test(EBOOK_ACC), true);
+const hintFn = extractFn('refreshEbookEmbedHint') || '';
+check('refreshEbookEmbedHint 已定义', !!hintFn, true);
+check('refreshEbookEmbedHint 按 panel 内查询刷新（不引用局部变量）',
+    hintFn.includes("panel.querySelector('#novel_ebook_embed_hint')")
+    && hintFn.includes("panel.querySelector('#novel_ebook_embed_images')"), true);
+check('说明文案常量随开关切换（ON / OFF 两套文案均已定义）',
+    /const EBOOK_EMBED_HINT_ON = '/.test(src) && /const EBOOK_EMBED_HINT_OFF = '/.test(src), true);
+const EBOOK_BIND = (() => {
+    const start = src.indexOf('// ===== 图片电子书（EPUB）设置项 =====');
+    const end = src.indexOf('const ebookMaxImgEl');
+    return (start >= 0 && end > start) ? src.slice(start, end) : '';
+})();
+checkOk('EPUB 开关 change 接线区已抽取', EBOOK_BIND.length > 0);
+checkOk('开关 change 时刷新动态说明 + 折叠摘要',
+    EBOOK_BIND.includes('refreshEbookEmbedHint(panel)') && EBOOK_BIND.includes('refreshNovelAccSummaries(panel)'),
+    '未同时刷新 hint 与摘要');
+checkOk('开关 change 时给 toastr 即时提示且先判空',
+    /if \(window\.toastr\) \{[\s\S]{0,500}?window\.toastr\.info/.test(EBOOK_BIND) && /已开启图片嵌入/.test(EBOOK_BIND),
+    '缺少 toastr 判空或提示文案');
+checkOk('清单预览在开关关闭时顶部提示「图片不会进入 EPUB」',
+    src.includes('当前未勾选嵌入，以下图片不会进入 EPUB')
+    && /if \(!settings\.ebook_embed_images\) \{/.test(src));
+
+// —— 折叠摘要作用域修复：不得再引用 renderSettingsUI 内的局部变量 ——
+check('refreshNovelAccSummaries 不再引用局部变量 ebookEmbedEl（作用域 bug 根因）',
+    /ebookEmbedEl/.test(sumFn || ''), false);
+check('refreshNovelAccSummaries 改为 panel 内查询开关 DOM 现态',
+    /panel\.querySelector\('#novel_ebook_embed_images'\)/.test(sumFn || ''), true);
+check('EPUB 折叠摘要随开关切换两种文案',
+    /嵌入图片 \$\{Number\(val\('novel_ebook_max_image_mb'\)/.test(sumFn || '')
+    && /纯文字（不嵌入图片）/.test(sumFn || ''), true);
+
+// —— 三个按钮：预览 / 导出到服务器 / 下载到本机 ——
+check('EPUB 分组三个按钮齐全（预览 / 导出到服务器 / 下载到本机）',
+    ['novel_ebook_preview_btn', 'novel_ebook_export_btn', 'novel_ebook_download_btn']
+        .every((id) => EBOOK_ACC.includes(`id="${id}"`)), true);
+check('原导出按钮文案改为「导出到服务器」',
+    /id="novel_ebook_export_btn"[\s\S]{0,160}?导出到服务器/.test(EBOOK_ACC), true);
+check('新增「下载到本机」按钮（id novel_ebook_download_btn）',
+    /id="novel_ebook_download_btn"[\s\S]{0,160}?下载到本机/.test(EBOOK_ACC), true);
+check('下载按钮 title 说明走浏览器下载',
+    /id="novel_ebook_download_btn"[^>]*title="[^"]*浏览器[^"]*"/.test(EBOOK_ACC), true);
+check('下载按钮 title 说明不写服务器 / 不需要保存目录',
+    /id="novel_ebook_download_btn"[^>]*title="[^"]*不写入服务器[^"]*"/.test(EBOOK_ACC)
+    && /id="novel_ebook_download_btn"[^>]*title="[^"]*不需要保存目录[^"]*"/.test(EBOOK_ACC), true);
+
+// —— 接线与能力门控 ——
+check('服务端导出按钮点击接线 mode=server',
+    /exportEbook\(ebookExportBtn, 'server'\)/.test(src), true);
+check('下载按钮点击接线 mode=download',
+    /exportEbook\(ebookDownloadBtn, 'download'\)/.test(src), true);
+const DOWNLOAD_BIND = (() => {
+    const start = src.indexOf('const ebookDownloadBtn = panel.querySelector');
+    const end = src.indexOf('// 绑定测试按钮');
+    return (start >= 0 && end > start) ? src.slice(start, end) : '';
+})();
+checkOk('下载按钮接线区已抽取', DOWNLOAD_BIND.length > 0);
+checkOk('下载按钮能力门控：serverCapabilities.ebookDownload !== true 时禁用',
+    /serverCapabilities\.ebookDownload !== true/.test(DOWNLOAD_BIND) && /\.disabled = true/.test(DOWNLOAD_BIND));
+checkOk('下载按钮门控文案统一为「需要更新服务端插件」',
+    /需要更新服务端插件/.test(DOWNLOAD_BIND));
+checkOk('下载按钮同时保留原有 /ebook 能力门控',
+    /serverCapabilities\.ebook !== true/.test(DOWNLOAD_BIND));
+
+// —— exportEbook 双层行为（server 落盘 JSON / download 浏览器二进制）——
+const exportFn = extractFn('exportEbook') || '';
+checkOk('exportEbook 已抽取', exportFn.length > 0);
+check('exportEbook 签名带 mode 参数且默认 server',
+    /function exportEbook\(btn, mode = 'server'\)/.test(src), true);
+check('delivery 由 mode 决定（mode === download ? download : server）',
+    /mode === 'download' \? 'download' : 'server'/.test(exportFn), true);
+check('download 模式用 resp.blob() 取二进制',
+    /await resp\.blob\(\)/.test(exportFn), true);
+check('download 文件名 = sanitizeFilename(payload.bookTitle) + .epub',
+    /sanitizeFilename\(payload\.bookTitle\)/.test(exportFn) && /\.epub/.test(exportFn), true);
+check('download 模式解析 X-Novel-Epub-Stats 响应头（统计容错）',
+    /x-novel-epub-stats/i.test(exportFn) && /decodeURIComponent/.test(exportFn)
+    && /JSON\.parse/.test(exportFn), true);
+check('download 模式 createObjectURL / <a download> / revokeObjectURL 三件套',
+    /URL\.createObjectURL\(blob\)/.test(exportFn) && /a\.download = fileName/.test(exportFn)
+    && /URL\.revokeObjectURL\(url\)/.test(exportFn), true);
+check('server 模式仍按 JSON success 处理（原有提示逻辑保留）',
+    /data\.success !== true/.test(exportFn) && /EPUB 已导出：/.test(exportFn), true);
+check('失败响应按 JSON error 解析（两种模式共用）',
+    /EPUB 导出失败：\$\{msg\}/.test(exportFn) && /data\.error/.test(exportFn), true);
+
+console.log('\n=== ⑮ v1.19.0 EPUB 体积预估：导出前分级提示 + 预览体积展示 ===');
+
+// —— 常量与小工具 ——
+check('100MB 大体积阈值常量 EBOOK_LARGE_WARN_BYTES 存在',
+    /const EBOOK_LARGE_WARN_BYTES = 100 \* 1024 \* 1024;/.test(src), true);
+check('单次导出上限常量 EBOOK_MAX_TOTAL_LIMIT_MB = 500 存在',
+    /const EBOOK_MAX_TOTAL_LIMIT_MB = 500;/.test(src), true);
+check('formatBytesMb 已定义（字节 → 一位小数 MB 文本）',
+    /function formatBytesMb\(bytes\) \{/.test(src), true);
+check('estimateEbookPayload 已定义（async）',
+    /async function estimateEbookPayload\(payload\) \{/.test(src), true);
+check('版本号升到 1.19.1', /version: '1\.19\.1'/.test(src), true);
+
+// —— estimateEbookPayload：能力门控 + 失败静默降级 + 测试专用导出 ——
+const estFn = extractFn('estimateEbookPayload') || '';
+checkOk('estimateEbookPayload 已抽取', estFn.length > 0);
+checkOk('能力门控：ebookEstimate !== true 时直接返回 null（旧服务端静默降级）',
+    /serverCapabilities\.ebookEstimate !== true/.test(estFn) && /return null;/.test(estFn));
+checkOk('请求打向 /api/plugins/auto-save/ebook/estimate',
+    estFn.includes('/api/plugins/auto-save/ebook/estimate'));
+checkOk('带 getRequestHeaders 且补齐 Content-Type',
+    /getRequestHeaders/.test(estFn) && /Content-Type/.test(estFn));
+checkOk('非 2xx / JSON 非法 / 异常一律返回 null + console.warn（绝不阻塞导出）',
+    /console\.warn/.test(estFn) && (estFn.match(/return null;/g) || []).length >= 4);
+check('测试专用导出块导出 estimateEbookPayload / formatBytesMb',
+    /\n\s+formatBytesMb,/.test(src) && /\n\s+estimateEbookPayload,/.test(src), true);
+check('测试专用导出块提供服务端能力读写钩子（供测试模拟 ebookEstimate）',
+    /getServerCapabilities:/.test(src) && /setServerCapabilities:/.test(src), true);
+
+// —— exportEbook：预估在 confirm 之前、复用同一 payload、分级提示 ——
+check('exportEbook 顺序红线：build payload → 体积预估 → confirm（且只 build 一次）', (() => {
+    const b = exportFn.indexOf('buildEbookPayload(');
+    const e = exportFn.indexOf('estimateEbookPayload(');
+    const c = exportFn.indexOf('confirm(');
+    return b >= 0 && e > b && c > e && (exportFn.match(/buildEbookPayload\(/g) || []).length === 1;
+})(), true);
+check('预估期间状态为「正在估算图片体积…」',
+    src.includes("updateRecentStatus('updating', '正在估算图片体积…')"), true);
+check('仅嵌图 + 能力可用时才预检',
+    /settings\.ebook_embed_images === true && serverCapabilities\.ebookEstimate === true/.test(exportFn), true);
+check('超限分支：overTotalLimit + 自动提高 ebook_max_total_mb',
+    /overTotalLimit === true/.test(exportFn) && /settings\.ebook_max_total_mb =/.test(exportFn), true);
+check('超限分支：复用同一 payload 时同步抬高 options.maxTotalBytes',
+    /payload\.options\.maxTotalBytes\s*=/.test(exportFn), true);
+check('超限分支：同步设置面板 #novel_ebook_max_total_mb 数值',
+    /#novel_ebook_max_total_mb/.test(exportFn), true);
+check('超限分支：新上限 = ceil(estimatedBytes/MB) + 1（带 1MB 余量）',
+    /Math\.ceil\(estBytes \/ \(1024 \* 1024\)\) \+ 1/.test(exportFn), true);
+check('预估超过单次上限 500MB：toastr.error 说明超限与建议且不发请求',
+    /EBOOK_MAX_TOTAL_LIMIT_MB/.test(exportFn) && /已超过单次导出上限/.test(exportFn)
+    && /return; \/\/ 不发注定被拒绝的请求/.test(exportFn), true);
+check('大体积（≥100MB）强提示二次确认',
+    /EBOOK_LARGE_WARN_BYTES/.test(exportFn) && /体积较大/.test(exportFn) && /仍要继续吗/.test(exportFn), true);
+check('正常体积：普通 confirm 补预估行（可嵌入/缺失/超限张数）',
+    /预计图片约 \$\{estMb\}/.test(exportFn) && /张可嵌入，缺失/.test(exportFn), true);
+check('自动提限 / 大体积确认后不再弹第二次 confirm（confirmed 标记）',
+    /let confirmed = false/.test(exportFn) && /if \(!confirmed\)/.test(exportFn), true);
+check('取消导出：updateRecentStatus 回到可读状态 + toastr 判空提示',
+    /已取消导出（未调整图片总量上限）/.test(exportFn)
+    && /if \(window\.toastr\) window\.toastr\.info\('已取消导出/.test(exportFn), true);
+
+// —— 预览弹窗：预估占位 + 异步填充 + is-warn 警告 ——
+check('预览弹窗有体积预估占位 #novel_ebook_modal_estimate',
+    /<div id="novel_ebook_modal_estimate" class="novel-mv-hint">/.test(src), true);
+check('预览弹窗接线 fillEbookEstimateHint',
+    /fillEbookEstimateHint\(overlay, settings, chatLog\)/.test(src), true);
+const fillFn = extractFn('fillEbookEstimateHint') || '';
+checkOk('fillEbookEstimateHint 已定义', fillFn.length > 0);
+checkOk('预览预估：能力不可用时删除占位（estEl.remove）',
+    /serverCapabilities\.ebookEstimate !== true/.test(fillFn) && /estEl\.remove\(\)/.test(fillFn));
+checkOk('预览预估：按「开启嵌图」构造 payload（只预估、不改用户设置）',
+    /ebook_embed_images:\s*true/.test(fillFn));
+checkOk('预览预估：展示预计体积 + 可嵌入/缺失/超限',
+    /预计电子书约/.test(fillFn) && /缺失/.test(fillFn) && /超限/.test(fillFn));
+checkOk('预览预估：超限时提示提高上限并加 is-warn',
+    /超过当前图片总量上限/.test(fillFn) && /is-warn/.test(fillFn));
+checkOk('预览预估：≥100MB 时 is-warn 提示体积较大',
+    /EBOOK_LARGE_WARN_BYTES/.test(fillFn) && /体积较大，部分阅读器导入可能失败或很慢/.test(fillFn));
+checkOk('预览预估：失败静默移除占位（不阻塞清单）',
+    /console\.warn/.test(fillFn) && (fillFn.match(/estEl\.remove\(\)/g) || []).length >= 2);
+
+console.log('\n=== ⑯ v1.19.1 防御：缓存旧 index.js 时开关也必须可见可点（真实浏览器复现） ===');
+// 事故复现（Chrome 155 + 酒馆 release public/style.css，脚本见 review/_scratch/verify-v118/lead-click-probe）：
+// 旧 index.js（v1.17.9）用 <label class="novel-switch-row">，该类无样式 + 面板总闸清掉宿主对勾
+// → 点击后 checked 已变、设置也存了，但外观完全不变，被用户判定「勾不上」。
+// 修复：style.css 按 input 固定 ID 兜底胶囊开关样式 + 旧类 .novel-switch-row 整行布局。
+const embedPillBlock = (() => {
+    const SEL = '#auto-save-to-txt-settings #novel_ebook_embed_images {';
+    const i = css.indexOf(SEL);
+    if (i < 0) return null;
+    const open = i + SEL.length - 1;
+    const close = css.indexOf('}', open);
+    return close < 0 ? null : css.slice(open + 1, close);
+})();
+const embedKnobBlock = (() => {
+    const SEL = '#auto-save-to-txt-settings #novel_ebook_embed_images::after {';
+    const i = css.indexOf(SEL);
+    if (i < 0) return null;
+    const open = i + SEL.length - 1;
+    const close = css.indexOf('}', open);
+    return close < 0 ? null : css.slice(open + 1, close);
+})();
+const embedCheckedBlock = (() => {
+    const SEL = '#auto-save-to-txt-settings #novel_ebook_embed_images:checked {';
+    const i = css.indexOf(SEL);
+    if (i < 0) return null;
+    const open = i + SEL.length - 1;
+    const close = css.indexOf('}', open);
+    return close < 0 ? null : css.slice(open + 1, close);
+})();
+const embedCheckedKnobBlock = (() => {
+    const SEL = '#auto-save-to-txt-settings #novel_ebook_embed_images:checked::after {';
+    const i = css.indexOf(SEL);
+    if (i < 0) return null;
+    const open = i + SEL.length - 1;
+    const close = css.indexOf('}', open);
+    return close < 0 ? null : css.slice(open + 1, close);
+})();
+const embedBeforeBlock = (() => {
+    const SEL = '#auto-save-to-txt-settings #novel_ebook_embed_images::before,';
+    const i = css.indexOf(SEL);
+    if (i < 0) return null;
+    const open = css.indexOf('{', i);
+    const close = css.indexOf('}', open);
+    return close < 0 ? null : css.slice(i, close + 1);
+})();
+checkOk('按控件 ID 的兜底胶囊开关规则已定义（36×21 + 999px 圆角 + cursor:pointer）',
+    embedPillBlock !== null && /width:\s*36px;/.test(embedPillBlock) && /height:\s*21px;/.test(embedPillBlock)
+    && /border-radius:\s*999px;/.test(embedPillBlock) && /cursor:\s*pointer;/.test(embedPillBlock));
+checkOk('兜底滑钮 ::after 已定义（15px 圆钮 + 绝对定位）',
+    embedKnobBlock !== null && /width:\s*15px;/.test(embedKnobBlock) && /height:\s*15px;/.test(embedKnobBlock)
+    && /position:\s*absolute;/.test(embedKnobBlock));
+checkOk('兜底勾选态：轨道变紫（--nv-accent）',
+    embedCheckedBlock !== null && /background:\s*var\(--nv-accent\);/.test(embedCheckedBlock)
+    && /border-color:\s*var\(--nv-accent\);/.test(embedCheckedBlock));
+checkOk('兜底勾选态：滑钮右移 15px 且变白（状态可见的核心）',
+    embedCheckedKnobBlock !== null && /transform:\s*translateX\(15px\);/.test(embedCheckedKnobBlock)
+    && /background:\s*#fff;/.test(embedCheckedKnobBlock));
+checkOk('兜底规则同时清掉宿主对勾 ::before（基础/勾选/焦点三条路径）',
+    embedBeforeBlock !== null && /content:\s*none\s*!important/.test(embedBeforeBlock)
+    && /display:\s*none\s*!important/.test(embedBeforeBlock)
+    && (embedBeforeBlock.match(/#novel_ebook_embed_images/g) || []).length >= 3);
+checkOk('旧类 .novel-switch-row 的整行布局已兜底（flex + 左右分布 + 整行可点）',
+    /#auto-save-to-txt-settings \.novel-switch-row \{[\s\S]{0,400}?display:\s*flex;[\s\S]{0,200}?justify-content:\s*space-between;/.test(css)
+    && /#auto-save-to-txt-settings \.novel-switch-row \{[\s\S]{0,500}?cursor:\s*pointer;/.test(css));
+checkOk('防御块带事故说明注释（防后人当“死代码”删掉）',
+    /v1\.19\.1 防御/.test(css) && /缓存/.test(css) && /novel-switch-row/.test(css));
+
 console.log(`\nUI 接线测试结果: 通过: ${pass}, 失败: ${fail}`);
 if (fail > 0) process.exit(1);
 console.log('所有 UI 接线与递归守卫测试全部通过！');

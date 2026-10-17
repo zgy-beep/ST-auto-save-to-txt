@@ -1442,6 +1442,19 @@
     filter: none;
     box-shadow: 0 6px 18px rgba(139, 109, 255, 0.32);
 }
+/* 「下载到本机」与「导出到服务器」并列：都用紫罗兰主色实心（两者都是导出动作，靠文案区分去向） */
+#auto-save-to-txt-settings .novel-btn.btn-download {
+    background: var(--nv-accent);
+    border-color: var(--nv-accent);
+    color: #ffffff;
+}
+#auto-save-to-txt-settings .novel-btn.btn-download:hover {
+    background: #7c5cff;
+    border-color: #7c5cff;
+    color: #ffffff;
+    filter: none;
+    box-shadow: 0 6px 18px rgba(139, 109, 255, 0.32);
+}
 #auto-save-to-txt-settings .novel-btn.btn-sync {
     background: var(--nv-accent-bg);
     border-color: var(--nv-accent-line);
@@ -1666,6 +1679,9 @@
 .novel-mv-tag.is-warn { background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.32); color: var(--nv-warn); }
 .novel-mv-tag.is-ok { background: rgba(74, 222, 128, 0.09); border-color: rgba(74, 222, 128, 0.26); color: #86efac; }
 .novel-mv-hint { color: var(--nv-text-3); opacity: 1; }
+/* 提示行需要真的"看得见是警告"：is-warn 在 hint 上必须给警示色（EPUB 未勾选嵌图时的顶部提示） */
+.novel-mv-hint.is-warn { color: var(--nv-warn); }
+.novel-mv-hint.is-warn code { color: var(--nv-warn); }
 .novel-mv-col + .novel-mv-col { border-left: 1px solid var(--nv-line); }
 .novel-mv-col-title {
     background: rgba(255, 255, 255, 0.025);
@@ -2322,6 +2338,42 @@
     background: #fff;
 }
 
+/* ---------- 数值 / 文本设置行：与开关行同一种「左标题 + 右控件」形态 ----------
+   模板里 DOM 顺序是 input 在前、标题 span 在后，靠 row-reverse 把控件甩到右侧，
+   与 .checkbox_label 开关行完全一致；分隔线同样用发丝线，输入框定宽避免被拉成一条长带。 */
+#auto-save-to-txt-settings .novel-acc-body > .novel-row {
+    display: flex;
+    flex-direction: row-reverse;   /* 控件靠右 */
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--nv-block-line);
+}
+#auto-save-to-txt-settings .novel-acc-body > .novel-row:last-child { border-bottom: none; }
+#auto-save-to-txt-settings .novel-acc-body > .novel-row > span {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--nv-text-2);
+    font-size: 13px;
+}
+#auto-save-to-txt-settings .novel-acc-body > .novel-row > input.text_pole {
+    flex: 0 0 auto;
+    margin: 0;
+    box-sizing: border-box;
+}
+/* 数值框：定宽右对齐，读数字不跳 */
+#auto-save-to-txt-settings .novel-acc-body > .novel-row > input[type="number"].text_pole {
+    width: 96px;
+    text-align: right;
+}
+/* 路径文本：定宽稍宽（要看清目录），窄屏不超过行宽 60% */
+#auto-save-to-txt-settings .novel-acc-body > .novel-row > input[type="text"].text_pole {
+    width: 200px;
+    max-width: 60%;
+}
+
 /* 主开关行：跟展开体里的开关行同一种形态（左标题 + 右开关），它在这页是主角所以字大一号 */
 #auto-save-to-txt-settings .novel-toggle-card .checkbox_label {
     display: flex;
@@ -2768,6 +2820,90 @@ dialog.novel-tl > #novel_preview_modal {
 #auto-save-to-txt-settings input[type="checkbox"]:focus-visible::before {
     content: none !important;
     display: none !important;
+}
+
+/* ============================================================
+   v1.19.1 防御：旧版前端（浏览器缓存 / 只替换了 style.css）的
+   「导出时嵌入图片」开关必须仍然可见、可点
+   ------------------------------------------------------------
+   事故（用户实测）：v1.17.9 的旧 index.js 用
+     <label class="novel-switch-row"><span>…</span><input type="checkbox" id="novel_ebook_embed_images"></label>
+   包住开关，而 `.novel-switch-row` 当时没有任何样式；上面那条面板总闸又把
+   宿主复选框的 ::before 对勾清掉了。结果：点击后 checked 确实变了、设置也存了，
+   但外观完全没变化（15px 空方块），被用户判定为「勾不上 / 点了没反应」。
+   v1.18 起新前端已改用 .checkbox_label 胶囊开关（正常路径走上面的既有规则），
+   但「浏览器缓存了旧 index.js / 手动替换时漏了 index.js」仍会复现该症状。
+
+   兜底策略：按 input 的**固定 id**（新旧前端一致）和旧的类名补一套胶囊开关样式。
+   即使实际运行的是旧 JS，开关也一定是 36×21 胶囊：勾选后轨道变紫、白色滑钮右移，
+   状态一眼可见；整行 label 依旧可点（原生 label 行为）。
+   作用域限定在本设置面板内的这一个开关，不碰酒馆其它 checkbox。
+   ============================================================ */
+#auto-save-to-txt-settings #novel_ebook_embed_images {
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 21px;
+    margin: 0;
+    border: 1px solid var(--nv-block-line-2);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    cursor: pointer;
+    overflow: hidden;
+    filter: none;
+    transform: none;
+    outline: none;
+    transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+/* 宿主对勾伪元素：基础态、:checked 态、焦点态三条路径全部压掉（与上面分档规则同理） */
+#auto-save-to-txt-settings #novel_ebook_embed_images::before,
+#auto-save-to-txt-settings #novel_ebook_embed_images:checked::before,
+#auto-save-to-txt-settings #novel_ebook_embed_images:focus-visible::before {
+    content: none !important;
+    display: none !important;
+}
+#auto-save-to-txt-settings #novel_ebook_embed_images::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--nv-text-2);
+    transition: transform 0.16s ease, background-color 0.16s ease;
+}
+#auto-save-to-txt-settings #novel_ebook_embed_images:checked {
+    background: var(--nv-accent);
+    border-color: var(--nv-accent);
+}
+#auto-save-to-txt-settings #novel_ebook_embed_images:checked::after {
+    transform: translateX(15px);
+    background: #fff;
+}
+#auto-save-to-txt-settings #novel_ebook_embed_images:focus-visible {
+    outline: 2px solid var(--nv-accent);
+    outline-offset: 2px;
+}
+/* 旧 JS 的整行命中区：标题在左、开关在右；整行可点、有发丝线，与新版行风格一致 */
+#auto-save-to-txt-settings .novel-switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--nv-block-line);
+    cursor: pointer;
+    user-select: none;
+}
+#auto-save-to-txt-settings .novel-switch-row > span {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--nv-text-2);
+    font-size: 13px;
 }
 
 

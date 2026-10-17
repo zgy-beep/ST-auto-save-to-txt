@@ -65,10 +65,12 @@ async function runTests() {
 
     try {
         // 测试 0: 服务端健康状态探针 (/status)
-        // 版本 1.14.0：新增 /ebook 图片电子书接口 + capabilities 能力声明
+        // 版本 1.16.0：新增 /ebook/estimate 导出前体积预估接口 + capabilities 能力声明
         const res0 = await router.dispatch('GET', '/status', {});
-        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.14.0', '测试 0: 服务端状态探针正常响应且版本为 1.14.0');
+        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.16.0', '测试 0: 服务端状态探针正常响应且版本为 1.16.0');
         assert(res0.data.capabilities && res0.data.capabilities.ebook === true, '测试 0.1: /status 声明 ebook 能力（前端据此 feature-detect）');
+        assert(res0.data.capabilities && res0.data.capabilities.ebookDownload === true, '测试 0.1.1: /status 声明 ebookDownload 能力（delivery=download 二进制下载）');
+        assert(res0.data.capabilities && res0.data.capabilities.ebookEstimate === true, '测试 0.1.2: /status 声明 ebookEstimate 能力（/ebook/estimate 体积预估）');
         assert(res0.data.capabilities && res0.data.capabilities.tailGuard === true, '测试 0.2: /status 声明 tailGuard 能力');
 
         const testChar = '我的仙侠传奇';

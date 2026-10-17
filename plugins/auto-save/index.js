@@ -1,5 +1,5 @@
 /**
- * SillyTavern 聊天小说连载阅读服务端插件 (v1.14.0)
+ * SillyTavern 聊天小说连载阅读服务端插件 (v1.16.0)
  * 
  * 文件路径：plugins/auto-save/index.js
  * 
@@ -12,6 +12,10 @@
  *   （修复“编辑早期楼层 → 从该章截断到文件末尾，静默删除其后所有章节”的数据损坏）。
  * - 写前备份（.bak，仅留最近一份）+ 临时文件 rename 原子写，杜绝半截文件。
  * - 图片电子书导出（EPUB3）：手写 ZIP（零第三方依赖）+ 按正文原位嵌入本地图片。
+ * - 电子书双交付（v1.15.0）：默认落盘 + JSON（服务端模式）；delivery=download 直接返回
+ *   二进制 EPUB 供浏览器下载（同一套校验/打包管线，绝不落盘、save_dir 完全忽略）。
+ * - 电子书体积预估（v1.16.0）：POST /ebook/estimate 与 /ebook 同构请求体，只做路径解析 +
+ *   stat + 文件头魔数嗅探，导出前即可提示图片总量/超限情况（绝不读整图、不打包、零落盘）。
  * - 严格防路径穿越、100KB 单章容量防护与异步并发文件写入锁机制。
  */
 
@@ -511,6 +515,8 @@ function formatNovelChapter({ name, mes, is_user, chapterNumber, chapterStyle, f
 
 const DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024;   // 单图上限 5MB
 const DEFAULT_MAX_TOTAL_BYTES = 80 * 1024 * 1024;  // 全书图片总量上限 80MB
+// 图片魔数嗅探只需文件头 16 字节（PNG 8 / JPEG 3 / GIF 6 / WebP 12），体积预估时绝不读整图
+const IMAGE_MAGIC_HEAD_BYTES = 16;
 const EPUB_XHTML_NS = 'http://www.w3.org/1999/xhtml';
 const EPUB_ID_SEED = 'auto-save-novel-stream';
 
@@ -1037,6 +1043,253 @@ function normalizeByteLimit(value, fallback) {
     return (Number.isFinite(num) && num > 0) ? Math.floor(num) : fallback;
 }
 
+/**
+ * 块是否为图片块：兼容契约 p/img（type:'img'）与前端实际命名 text/image（type:'image'），
+ * 以及无 type 但带 path 的旧数据。
+ */
+function isImageBlock(block) {
+    if (!block || typeof block !== 'object') return false;
+    return (block.type === 'img' || block.type === 'image')
+        || (!block.type && typeof block.path === 'string');
+}
+
+/** 取图片块里的图片路径：优先 path，其次 href（前端两种命名都有） */
+function getBlockImagePath(block) {
+    if (typeof block.path === 'string' && block.path) return block.path;
+    return (typeof block.href === 'string') ? block.href : '';
+}
+
+/**
+ * 规范化并校验 EPUB 相关接口（/ebook 与 /ebook/estimate）共用的请求体。
+ * 两条路径共用同一份校验逻辑，避免「预估能过、导出却 400」之类的规则分叉；
+ * 无效请求的 400 JSON 文案与历史保持一致。
+ *
+ * @param {object} body 原始请求体
+ * @returns {{ok:true, bookTitle:string, author:*, account:*, chapters:Array<object>,
+ *            maxImageBytes:number, maxTotalBytes:number, stRoot:string}
+ *          | {ok:false, status:number, payload:object}}
+ */
+function normalizeEbookRequest(body) {
+    if (!body || typeof body !== 'object') {
+        return { ok: false, status: 400, payload: { error: '无效请求' } };
+    }
+
+    const { bookTitle, author, account, chapters } = body;
+    const rawOptions = (body.options && typeof body.options === 'object') ? body.options : {};
+
+    if (typeof bookTitle !== 'string' || !bookTitle.trim()) {
+        return { ok: false, status: 400, payload: { error: '无效请求', detail: 'bookTitle 必须是非空字符串' } };
+    }
+    if (!Array.isArray(chapters) || chapters.length === 0) {
+        return { ok: false, status: 400, payload: { error: '无效请求', detail: 'chapters 必须是非空数组' } };
+    }
+
+    return {
+        ok: true,
+        bookTitle,
+        author,
+        account,
+        chapters,
+        // 生效上限：与 /ebook 完全一致地规范化（非法值回落默认 5MB 单图 / 80MB 总量）
+        maxImageBytes: normalizeByteLimit(rawOptions.maxImageBytes, DEFAULT_MAX_IMAGE_BYTES),
+        maxTotalBytes: normalizeByteLimit(rawOptions.maxTotalBytes, DEFAULT_MAX_TOTAL_BYTES),
+        stRoot: (typeof rawOptions.stRoot === 'string') ? rawOptions.stRoot : ''
+    };
+}
+
+/**
+ * 组装图片电子书（/ebook 共用管线）：请求校验 → 逐图解析/读盘 → 打包 EPUB Buffer。
+ * 服务端落盘模式与下载模式（delivery=download）共用本函数，保证两条交付路径的
+ * 校验顺序、图片解析规则、413 语义与产出的 EPUB 字节完全一致；本函数绝不落盘。
+ *
+ * @param {object} body POST /ebook 原始请求体
+ * @returns {Promise<{ok:true, epubBuffer:Buffer, chapters:Array<object>, assets:Array<object>, missing:Array<object>}
+ *                  | {ok:false, status:number, payload:object}>}
+ */
+async function buildEbookArtifacts(body) {
+    const request = normalizeEbookRequest(body);
+    if (!request.ok) {
+        return { ok: false, status: request.status, payload: request.payload };
+    }
+    const { bookTitle, author, account, chapters, maxImageBytes, maxTotalBytes, stRoot } = request;
+
+    // 逐图解析 + 读取：成功则编号进 assets 并回填 href；失败只记入 missing（绝不静默跳过）
+    const assets = [];
+    const missing = [];
+    const normalizedChapters = [];
+    let totalImageBytes = 0;
+
+    for (let chapterIndex = 0; chapterIndex < chapters.length; chapterIndex++) {
+        const chapter = (chapters[chapterIndex] && typeof chapters[chapterIndex] === 'object') ? chapters[chapterIndex] : {};
+        const sourceBlocks = Array.isArray(chapter.blocks) ? chapter.blocks : [];
+        const nextBlocks = [];
+
+        for (const block of sourceBlocks) {
+            if (!block || typeof block !== 'object') continue;
+            // 兼容两种块命名：契约 p/img，前端 buildStructuredNovel 实际用 text/image
+            if (!isImageBlock(block)) {
+                nextBlocks.push({ type: 'p', text: (typeof block.text === 'string') ? block.text : '' });
+                continue;
+            }
+
+            const imagePath = getBlockImagePath(block);
+            const resolved = await resolveImagePath(imagePath, { account, stRoot });
+            if (!resolved.ok) {
+                missing.push({ path: imagePath, reason: resolved.reason, chapter: chapterIndex + 1 });
+                continue;
+            }
+            const asset = await readImageAsset(resolved.absPath, { maxImageBytes });
+            if (!asset.ok) {
+                missing.push({
+                    path: imagePath,
+                    reason: asset.reason,
+                    chapter: chapterIndex + 1,
+                    ...(asset.bytes !== undefined ? { bytes: asset.bytes } : {})
+                });
+                continue;
+            }
+            totalImageBytes += asset.bytes;
+            if (totalImageBytes > maxTotalBytes) {
+                return {
+                    ok: false,
+                    status: 413,
+                    payload: {
+                        error: `图片总量超出 ${Math.round(maxTotalBytes / 1024 / 1024)}MB 限制`,
+                        detail: `累计 ${totalImageBytes} 字节 > ${maxTotalBytes} 字节`
+                    }
+                };
+            }
+            const href = `images/img-${String(assets.length + 1).padStart(4, '0')}.${asset.ext}`;
+            assets.push({ href, data: asset.data, mediaType: asset.mediaType });
+            nextBlocks.push({
+                type: 'img',
+                href,
+                alt: (typeof block.alt === 'string' && block.alt) ? block.alt : ''
+            });
+        }
+
+        normalizedChapters.push({
+            title: (typeof chapter.title === 'string') ? chapter.title : '',
+            floor: chapter.floor,
+            blocks: nextBlocks
+        });
+    }
+
+    // 组装 EPUB（即使一张图都没嵌入也允许导出纯文字电子书）
+    const epubBuffer = buildEpubBuffer({
+        bookTitle,
+        author,
+        chapters: normalizedChapters,
+        assets
+    });
+
+    return { ok: true, epubBuffer, chapters: normalizedChapters, assets, missing };
+}
+
+/**
+ * 只读取文件头部若干字节（体积预估只看魔数，绝不把整张图片读进内存）。
+ * 用 open + read 精确读取，而非 readFile：即使目标是大文件也不会有整图内存开销。
+ * 读取失败（权限 / IO / 文件消失）返回 null，由调用方归类处理。
+ * @param {string} absPath
+ * @param {number} [byteLength]
+ * @returns {Promise<Buffer|null>}
+ */
+async function readFileHead(absPath, byteLength = IMAGE_MAGIC_HEAD_BYTES) {
+    let handle = null;
+    try {
+        handle = await fs.promises.open(absPath, 'r');
+        const buffer = Buffer.alloc(byteLength);
+        const { bytesRead } = await handle.read(buffer, 0, byteLength, 0);
+        return buffer.subarray(0, bytesRead);
+    } catch (err) {
+        return null;
+    } finally {
+        if (handle) {
+            await handle.close().catch(() => {});
+        }
+    }
+}
+
+/**
+ * 轻量预估图片体积（POST /ebook/estimate 核心，导出的内部函数仅测试/复用）。
+ * 只做「路径解析 + stat + 文件头魔数嗅探」三件事：绝不读取整张图片、绝不打包 EPUB、
+ * 绝不做任何磁盘写入/目录创建，因此对 130MB+ 的大量图片也能近乎零成本地先给出结论。
+ *
+ * 计数口径（与服务端实际嵌入行为保持一致）：
+ * - 每个图片块引用各计一次（同一 path 重复引用按多次计，与 /ebook 实际嵌入份数一致）
+ * - resolveImagePath 失败或 stat 失败 → missing（打包时同样跳过）
+ * - stat.size > maxImageBytes → oversize（打包时 readImageAsset 会以 too_large 跳过）
+ * - 文件头魔数非 PNG/JPEG/GIF/WebP（含头部读取失败）→ unsupported（打包时同样跳过）
+ * - 其余计入 embeddable，并累加其实际字节数到 estimatedBytes
+ * - resolvable = embeddable + oversize + unsupported（即"路径可解析到文件"的引用数）
+ *
+ * @param {{account?:string, chapters:Array<object>, maxImageBytes:number, maxTotalBytes:number, stRoot?:string}} request
+ *        normalizeEbookRequest() 返回的 ok 结果
+ * @returns {Promise<{success:true, images:{totalReferences:number, resolvable:number, embeddable:number,
+ *           missing:number, oversize:number, unsupported:number, estimatedBytes:number},
+ *           limits:{maxImageBytes:number, maxTotalBytes:number}, overTotalLimit:boolean}>}
+ */
+async function estimateEbookImages(request) {
+    const { account, chapters, maxImageBytes, maxTotalBytes, stRoot } = request;
+    let totalReferences = 0;
+    let embeddable = 0;
+    let missing = 0;
+    let oversize = 0;
+    let unsupported = 0;
+    let estimatedBytes = 0;
+
+    for (const chapter of chapters) {
+        if (!chapter || typeof chapter !== 'object') continue;
+        const sourceBlocks = Array.isArray(chapter.blocks) ? chapter.blocks : [];
+        for (const block of sourceBlocks) {
+            if (!isImageBlock(block)) continue;
+            totalReferences++;
+
+            const imagePath = getBlockImagePath(block);
+            const resolved = await resolveImagePath(imagePath, { account, stRoot });
+            if (!resolved.ok) {
+                missing++;
+                continue;
+            }
+            const stat = await statFileMaybe(resolved.absPath);
+            if (!stat) {
+                // resolve 成功但文件随后消失/不可 stat：按缺失计（与打包路径的跳过口径一致）
+                missing++;
+                continue;
+            }
+            if (stat.size > maxImageBytes) {
+                oversize++;
+                continue;
+            }
+            // 只读文件头 16 字节：魔数合法才可能真正被嵌入
+            const head = await readFileHead(resolved.absPath, IMAGE_MAGIC_HEAD_BYTES);
+            const type = head ? sniffImageType(head) : null;
+            if (!type) {
+                unsupported++;
+                continue;
+            }
+            embeddable++;
+            estimatedBytes += stat.size;
+        }
+    }
+
+    const resolvable = embeddable + oversize + unsupported;
+    return {
+        success: true,
+        images: {
+            totalReferences,
+            resolvable,
+            embeddable,
+            missing,
+            oversize,
+            unsupported,
+            estimatedBytes
+        },
+        limits: { maxImageBytes, maxTotalBytes },
+        overTotalLimit: estimatedBytes > maxTotalBytes
+    };
+}
+
 async function init(router) {
     console.log(`[${pluginName}] 小说连载服务插件正在初始化...`);
     await ensureLogsDir();
@@ -1047,13 +1300,15 @@ async function init(router) {
         res.json({
             ready: true,
             plugin: pluginName,
-            version: '1.14.0',
+            version: '1.16.0',
             // 能力声明：前端据此 feature-detect（比比较版本号更可靠，老服务端没有该字段）
             capabilities: {
                 append: true,
                 syncAll: true,
-                tailGuard: true,   // v1.13.0：末尾章守卫 / 备份 / 原子写
-                ebook: true        // v1.14.0：POST /ebook 图片电子书
+                tailGuard: true,      // v1.13.0：末尾章守卫 / 备份 / 原子写
+                ebook: true,          // v1.14.0：POST /ebook 图片电子书
+                ebookDownload: true,  // v1.15.0：POST /ebook delivery=download 直接返回二进制 EPUB
+                ebookEstimate: true   // v1.16.0：POST /ebook/estimate 导出前体积预估（不读整图/不落盘）
             },
             logsDir: LOGS_DIR
         });
@@ -1297,104 +1552,48 @@ async function init(router) {
 
     // 图片电子书导出接口：把前端组装好的「章节 blocks + 本地图片」按原位嵌入 EPUB3
     // 请求体见 review/图片电子书-设计方案.md §4.3；图片按 §3.5 四级顺序解析，单图失败只跳过不中断
+    // v1.15.0：顶层 delivery='download' → 同一管线打包后直接返回二进制 EPUB（绝不落盘，save_dir 完全忽略）；
+    //          缺省或其它值 → 原「落盘 + JSON」服务端模式，响应字段与行为保持向后兼容
     router.post('/ebook', async (req, res) => {
         try {
             const body = req.body;
-            if (!body || typeof body !== 'object') {
-                return res.status(400).json({ error: '无效请求' });
+            // 校验 / 图片解析 / EPUB 打包三条路径共用同一管线；失败仍返回 JSON（400/413/500），不设二进制头
+            const artifacts = await buildEbookArtifacts(body);
+            if (!artifacts.ok) {
+                return res.status(artifacts.status).json(artifacts.payload);
+            }
+            const { epubBuffer, chapters: normalizedChapters, assets, missing } = artifacts;
+
+            // ---------- 下载交付：只回二进制，全程零磁盘写入 ----------
+            // 本分支绝不调用 resolveTargetDirectory / mkdir / backupFile / atomicWriteFile；
+            // save_dir 即使非法也必须被完全忽略（下载模式不落盘，该路径没有意义）。
+            if (body.delivery === 'download') {
+                const downloadName = `${sanitizeFilename(body.bookTitle)}.epub`;
+                res.status(200);
+                res.setHeader('Content-Type', 'application/epub+zip');
+                // filename 为 ASCII 兜底；filename* 按 RFC 5987 用 UTF-8'' 百分号编码承载中文书名
+                res.setHeader('Content-Disposition',
+                    `attachment; filename="novel.epub"; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
+                res.setHeader('Content-Length', String(epubBuffer.length));
+                // 仅回 ASCII 编码后的 JSON（encodeURIComponent 输出纯 ASCII），避免响应头出现裸非 ASCII
+                res.setHeader('X-Novel-Epub-Stats', encodeURIComponent(JSON.stringify({
+                    success: true,
+                    epubBytes: epubBuffer.length,
+                    images: { embedded: assets.length, skipped: missing.length }
+                })));
+                console.log(`[${pluginName}] 已生成 EPUB 下载响应（${normalizedChapters.length} 章 / 嵌入图片 ${assets.length} 张 / 跳过 ${missing.length} 张）`);
+                return res.end(epubBuffer);
             }
 
-            const { bookTitle, author, account, save_dir, chapters } = body;
-            const rawOptions = (body.options && typeof body.options === 'object') ? body.options : {};
-
-            if (typeof bookTitle !== 'string' || !bookTitle.trim()) {
-                return res.status(400).json({ error: '无效请求', detail: 'bookTitle 必须是非空字符串' });
-            }
-            if (!Array.isArray(chapters) || chapters.length === 0) {
-                return res.status(400).json({ error: '无效请求', detail: 'chapters 必须是非空数组' });
-            }
-
-            const maxImageBytes = normalizeByteLimit(rawOptions.maxImageBytes, DEFAULT_MAX_IMAGE_BYTES);
-            const maxTotalBytes = normalizeByteLimit(rawOptions.maxTotalBytes, DEFAULT_MAX_TOTAL_BYTES);
-            const stRoot = (typeof rawOptions.stRoot === 'string') ? rawOptions.stRoot : '';
-
-            // 逐图解析 + 读取：成功则编号进 assets 并回填 href；失败只记入 missing（绝不静默跳过）
-            const assets = [];
-            const missing = [];
-            const normalizedChapters = [];
-            let totalImageBytes = 0;
-
-            for (let chapterIndex = 0; chapterIndex < chapters.length; chapterIndex++) {
-                const chapter = (chapters[chapterIndex] && typeof chapters[chapterIndex] === 'object') ? chapters[chapterIndex] : {};
-                const sourceBlocks = Array.isArray(chapter.blocks) ? chapter.blocks : [];
-                const nextBlocks = [];
-
-                for (const block of sourceBlocks) {
-                    if (!block || typeof block !== 'object') continue;
-                    // 兼容两种块命名：契约 p/img，前端 buildStructuredNovel 实际用 text/image
-                    const isImageBlock = (block.type === 'img' || block.type === 'image')
-                        || (!block.type && typeof block.path === 'string');
-                    if (!isImageBlock) {
-                        nextBlocks.push({ type: 'p', text: (typeof block.text === 'string') ? block.text : '' });
-                        continue;
-                    }
-
-                    const imagePath = (typeof block.path === 'string' && block.path) ? block.path
-                        : ((typeof block.href === 'string') ? block.href : '');
-                    const resolved = await resolveImagePath(imagePath, { account, stRoot });
-                    if (!resolved.ok) {
-                        missing.push({ path: imagePath, reason: resolved.reason, chapter: chapterIndex + 1 });
-                        continue;
-                    }
-                    const asset = await readImageAsset(resolved.absPath, { maxImageBytes });
-                    if (!asset.ok) {
-                        missing.push({
-                            path: imagePath,
-                            reason: asset.reason,
-                            chapter: chapterIndex + 1,
-                            ...(asset.bytes !== undefined ? { bytes: asset.bytes } : {})
-                        });
-                        continue;
-                    }
-                    totalImageBytes += asset.bytes;
-                    if (totalImageBytes > maxTotalBytes) {
-                        return res.status(413).json({
-                            error: `图片总量超出 ${Math.round(maxTotalBytes / 1024 / 1024)}MB 限制`,
-                            detail: `累计 ${totalImageBytes} 字节 > ${maxTotalBytes} 字节`
-                        });
-                    }
-                    const href = `images/img-${String(assets.length + 1).padStart(4, '0')}.${asset.ext}`;
-                    assets.push({ href, data: asset.data, mediaType: asset.mediaType });
-                    nextBlocks.push({
-                        type: 'img',
-                        href,
-                        alt: (typeof block.alt === 'string' && block.alt) ? block.alt : ''
-                    });
-                }
-
-                normalizedChapters.push({
-                    title: (typeof chapter.title === 'string') ? chapter.title : '',
-                    floor: chapter.floor,
-                    blocks: nextBlocks
-                });
-            }
-
-            // 组装 EPUB（即使一张图都没嵌入也允许导出纯文字电子书）
-            const epubBuffer = buildEpubBuffer({
-                bookTitle,
-                author,
-                chapters: normalizedChapters,
-                assets
-            });
-
+            // ---------- 服务端交付（默认）：落盘 + JSON，行为与 v1.14.0 完全一致 ----------
             // 落盘：与 TXT 同目录策略（save_dir 解析规则一致），写前备份 + 原子写
-            const dirResult = resolveTargetDirectory(save_dir);
+            const dirResult = resolveTargetDirectory(body.save_dir);
             if (!dirResult.success) {
                 return res.status(400).json({ error: dirResult.error });
             }
             const targetDir = dirResult.dir;
             await fs.promises.mkdir(targetDir, { recursive: true });
-            const epubPath = path.join(targetDir, `${sanitizeFilename(bookTitle)}.epub`);
+            const epubPath = path.join(targetDir, `${sanitizeFilename(body.bookTitle)}.epub`);
 
             await runInFileQueue(epubPath, async () => {
                 await backupFile(epubPath); // 覆盖旧电子书前备份（.bak 仅留最近一份，失败不阻断）
@@ -1418,6 +1617,25 @@ async function init(router) {
             console.error(`[${pluginName}] EPUB 导出异常:`, error);
             return res.status(500).json({
                 error: 'EPUB 导出失败',
+                detail: error.message
+            });
+        }
+    });
+
+    // 体积预估接口（v1.16.0）：请求体与 /ebook 同构，但只做「路径解析 + stat + 文件头魔数嗅探」，
+    // 供前端在导出前提示图片总量/超限情况；绝不读取整图、绝不打包、绝不落盘（save_dir 完全不解析）。
+    router.post('/ebook/estimate', async (req, res) => {
+        try {
+            const request = normalizeEbookRequest(req.body);
+            if (!request.ok) {
+                return res.status(request.status).json(request.payload);
+            }
+            const result = await estimateEbookImages(request);
+            return res.json(result);
+        } catch (error) {
+            console.error(`[${pluginName}] EPUB 体积预估异常:`, error);
+            return res.status(500).json({
+                error: 'EPUB 体积预估失败',
                 detail: error.message
             });
         }
@@ -1450,6 +1668,7 @@ module.exports = {
     // 图片电子书（EPUB）服务端能力（前端只走 /ebook HTTP 接口，这里导出便于单测/复用）
     buildZip,
     buildEpubBuffer,
+    estimateEbookImages,
     resolveImagePath,
     resolveStRoot,
     sniffImageType,
