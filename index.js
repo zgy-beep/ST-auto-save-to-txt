@@ -4076,10 +4076,10 @@ async function renderSettingsUI(cachedStatus = null) {
         if (guideEl) {
             guideEl.style.display = 'flex';
             // 一键部署命令：极简一行命令，国内 CDN 高速直连，所有复杂感知与挂载穿透完全封装在 install 脚本中
-            const cmdOnlineLinux = `curl -fsSL https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/install.sh | bash`;
-            const cmdOnlineWindows = `irm https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/install.ps1 | iex`;
+            const cmdOnlineLinux = `curl -fsSL https://cdn.jsdelivr.net/gh/zgy-beep/novel-stream@main/install.sh | bash`;
+            const cmdOnlineWindows = `irm https://cdn.jsdelivr.net/gh/zgy-beep/novel-stream@main/install.ps1 | iex`;
             const cmdDirectScript = `bash install.sh`;
-            const cmdManualDocker = `docker exec sillytavern cp -r /home/node/app/data/default-user/extensions/ST-auto-save-to-txt/plugins/auto-save /home/node/app/plugins/`;
+            const cmdManualDocker = `docker exec sillytavern cp -r /home/node/app/data/default-user/extensions/novel-stream/plugins/auto-save /home/node/app/plugins/`;
 
             // 结构上刻意保持扁平：三块「方案」+ 若干「一行」。行内的左右排布一律交给
             // .novel-guide-row / .novel-info-row，不再往模板里塞内联 flex 样式。
@@ -4122,7 +4122,7 @@ async function renderSettingsUI(cachedStatus = null) {
                     <small class="novel-guide-text">环境特殊或脚本无法自动感知目录时，手动复制一个文件夹即可完全搞定：</small>
                     <div class="novel-info-row">
                         <span class="novel-info-key">复制源</span>
-                        <span class="novel-info-val is-wrap"><code>SillyTavern/data/default-user/extensions/ST-auto-save-to-txt/plugins/auto-save</code></span>
+                        <span class="novel-info-val is-wrap"><code>SillyTavern/data/default-user/extensions/novel-stream/plugins/auto-save</code></span>
                     </div>
                     <div class="novel-info-row">
                         <span class="novel-info-key">粘贴至</span>

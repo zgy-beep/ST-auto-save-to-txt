@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# SillyTavern 小说连载 (ST-auto-save-to-txt) 全环境通用自适应部署程序
+# SillyTavern 小说连载 (novel-stream) 全环境通用自适应部署程序
 # 兼容：
 # 1. 任意名称的 Docker 容器 (智能模糊匹配镜像名与容器名，绝不硬编码)
 # 2. 宿主机挂载卷同步 (自动解析 docker inspect 挂载路径，宿主机挂载卷也能找到)
@@ -26,26 +26,12 @@ if command -v docker >/dev/null 2>&1; then
         echo "[智能感知] 发现运行中的 Docker 酒馆容器: $CNAME ($CID)"
         
         # 容器内执行定向查找与部署
+        # 按 plugins/auto-save 目录结构查找，不依赖扩展文件夹名（仓库改名后仍然有效）
         OUT=$(docker exec "$CID" sh -c '
-            for s in /home/node/app/data/*/extensions/*auto-save*/plugins/auto-save \
-                     /home/node/app/public/scripts/extensions/*/*auto-save*/plugins/auto-save \
-                     /app/data/*/extensions/*auto-save*/plugins/auto-save \
-                     data/*/extensions/*auto-save*/plugins/auto-save; do
-                if [ -d "$s" ]; then
-                    dest="/home/node/app/plugins"
-                    [ ! -d "$dest" ] && dest="plugins"
-                    mkdir -p "$dest"
-                    cp -r "$s" "$dest/"
-                    chmod -R 755 "$dest/auto-save" 2>/dev/null || true
-                    echo "INSTALLED_OK:$dest/auto-save"
-                    exit 0
-                fi
-            done
-            # 限制在应用目录浅层查找 (最大5层，拒绝慢速遍历)
-            src=$(find /home/node/app /app -maxdepth 5 -type d -name "auto-save" -path "*ST-auto-save*" 2>/dev/null | head -n 1)
-            if [ -n "$src" ]; then
+            src=$(find /home/node/app /app data -maxdepth 8 -type d -path "*/plugins/auto-save" 2>/dev/null | head -n 1)
+            if [ -n "$src" ] && [ -f "$src/index.js" ]; then
                 dest="/home/node/app/plugins"
-                [ ! -d "$dest" ] && dest="plugins"
+                [ ! -d "/home/node/app" ] && dest="plugins"
                 mkdir -p "$dest"
                 cp -r "$src" "$dest/"
                 chmod -R 755 "$dest/auto-save" 2>/dev/null || true
@@ -71,8 +57,9 @@ if command -v docker >/dev/null 2>&1; then
                     fi
 
                     if [ -n "$target_plugin_dir" ]; then
-                        host_src=$(find "$hm" -maxdepth 5 -type d -name "auto-save" -path "*ST-auto-save*" 2>/dev/null | head -n 1)
-                        if [ -n "$host_src" ]; then
+                        # 同样按 plugins/auto-save 结构查找，不依赖扩展文件夹名
+                        host_src=$(find "$hm" -maxdepth 8 -type d -path "*/plugins/auto-save" 2>/dev/null | head -n 1)
+                        if [ -n "$host_src" ] && [ -f "$host_src/index.js" ]; then
                             mkdir -p "$target_plugin_dir"
                             cp -r "$host_src" "$target_plugin_dir/"
                             chmod -R 755 "$target_plugin_dir/auto-save" 2>/dev/null || true
@@ -92,17 +79,14 @@ if [ "$SUCCESS" -eq 0 ]; then
     PID_DIR=$(readlink -f /proc/$(pgrep -f "server.js" 2>/dev/null | head -n 1)/cwd 2>/dev/null)
     if [ -n "$PID_DIR" ] && [ -d "$PID_DIR" ]; then
         echo "[智能感知] 发现正在运行的本地酒馆进程: $PID_DIR"
-        for s in "$PID_DIR"/data/*/extensions/*auto-save*/plugins/auto-save \
-                 "$PID_DIR"/public/scripts/extensions/*/*auto-save*/plugins/auto-save; do
-            if [ -d "$s" ]; then
-                mkdir -p "$PID_DIR/plugins"
-                cp -r "$s" "$PID_DIR/plugins/"
-                chmod -R 755 "$PID_DIR/plugins/auto-save" 2>/dev/null || true
-                echo "[部署成功] 已自动部署至: $PID_DIR/plugins/auto-save"
-                SUCCESS=1
-                break
-            fi
-        done
+        src=$(find "$PID_DIR/data" "$PID_DIR/public" -maxdepth 8 -type d -path "*/plugins/auto-save" 2>/dev/null | head -n 1)
+        if [ -n "$src" ] && [ -f "$src/index.js" ]; then
+            mkdir -p "$PID_DIR/plugins"
+            cp -r "$src" "$PID_DIR/plugins/"
+            chmod -R 755 "$PID_DIR/plugins/auto-save" 2>/dev/null || true
+            echo "[部署成功] 已自动部署至: $PID_DIR/plugins/auto-save"
+            SUCCESS=1
+        fi
     fi
 fi
 
@@ -110,23 +94,20 @@ fi
 # 3. 智能探测：容器内部终端 (群晖/1Panel/Portainer) 或当前目录推断
 # ------------------------------------------------------------------------------
 if [ "$SUCCESS" -eq 0 ]; then
-    for s in data/*/extensions/*auto-save*/plugins/auto-save \
-             public/scripts/extensions/*/*auto-save*/plugins/auto-save \
-             /home/node/app/data/*/extensions/*auto-save*/plugins/auto-save \
-             /home/node/app/public/scripts/extensions/*/*auto-save*/plugins/auto-save \
-             "$HOME"/SillyTavern/data/*/extensions/*auto-save*/plugins/auto-save; do
-        if [ -d "$s" ]; then
-            dest="plugins"
-            [ -d "/home/node/app" ] && dest="/home/node/app/plugins"
-            [ -d "$HOME/SillyTavern/plugins" ] && dest="$HOME/SillyTavern/plugins"
-            mkdir -p "$dest"
-            cp -r "$s" "$dest/"
-            chmod -R 755 "$dest/auto-save" 2>/dev/null || true
-            echo "[部署成功] 已部署至: $dest/auto-save"
-            SUCCESS=1
-            break
-        fi
-    done
+    # 按 plugins/auto-save 结构查找，不依赖扩展文件夹名
+    src=$(find data public /home/node/app/data /home/node/app/public \
+                "$HOME/SillyTavern/data" "$HOME/SillyTavern/public" \
+                -maxdepth 8 -type d -path "*/plugins/auto-save" 2>/dev/null | head -n 1)
+    if [ -n "$src" ] && [ -f "$src/index.js" ]; then
+        dest="plugins"
+        [ -d "/home/node/app" ] && dest="/home/node/app/plugins"
+        [ -d "$HOME/SillyTavern/plugins" ] && dest="$HOME/SillyTavern/plugins"
+        mkdir -p "$dest"
+        cp -r "$src" "$dest/"
+        chmod -R 755 "$dest/auto-save" 2>/dev/null || true
+        echo "[部署成功] 已部署至: $dest/auto-save"
+        SUCCESS=1
+    fi
 fi
 
 # ------------------------------------------------------------------------------
@@ -147,9 +128,9 @@ if [ "$SUCCESS" -eq 0 ]; then
         target_dir="$fallback_dest/auto-save"
         mkdir -p "$target_dir"
         cdn_urls=(
-            "https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/plugins/auto-save"
-            "https://fastly.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/plugins/auto-save"
-            "https://ghproxy.net/https://raw.githubusercontent.com/zgy-beep/ST-auto-save-to-txt/main/plugins/auto-save"
+            "https://cdn.jsdelivr.net/gh/zgy-beep/novel-stream@main/plugins/auto-save"
+            "https://fastly.jsdelivr.net/gh/zgy-beep/novel-stream@main/plugins/auto-save"
+            "https://ghproxy.net/https://raw.githubusercontent.com/zgy-beep/novel-stream/main/plugins/auto-save"
         )
         for base in "${cdn_urls[@]}"; do
             curl -fsSL "$base/index.js" -o "$target_dir/index.js" 2>/dev/null
@@ -181,15 +162,15 @@ else
     echo "请使用【100% 成功保底方案：手动复制】"
     echo ""
     echo "核心复制规则："
-    echo "   【源文件夹】：.../data/default-user/extensions/ST-auto-save-to-txt/plugins/auto-save"
+    echo "   【源文件夹】：.../data/default-user/extensions/novel-stream/plugins/auto-save"
     echo "   【目标目录】：.../SillyTavern/plugins/auto-save"
     echo ""
     echo "场景一：Docker 用户（在服务器终端直接执行以下命令）："
-    echo "   docker exec -it <容器名> cp -r /home/node/app/data/default-user/extensions/ST-auto-save-to-txt/plugins/auto-save /home/node/app/plugins/"
+    echo "   docker exec -it <容器名> cp -r /home/node/app/data/default-user/extensions/novel-stream/plugins/auto-save /home/node/app/plugins/"
     echo "   （若有宿主机挂载卷，直接将扩展内的 plugins/auto-save 复制进挂载的 plugins/ 目录亦可）"
     echo ""
     echo "场景二：Linux / Windows 原生运行用户："
-    echo "直接将 ST-auto-save-to-txt/plugins/auto-save 整个文件夹，"
+    echo "直接将 novel-stream/plugins/auto-save 整个文件夹，"
     echo "复制到 SillyTavern 根目录的 plugins/ 目录下即可。"
     echo ""
     echo "复制完成后："

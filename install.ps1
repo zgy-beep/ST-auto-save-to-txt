@@ -1,5 +1,5 @@
 ﻿# ==============================================================================
-# SillyTavern 小说连载阅读 (ST-auto-save-to-txt) Windows 服务端插件安装脚本
+# SillyTavern 小说连载阅读 (novel-stream) Windows 服务端插件安装脚本
 # ==============================================================================
 
 Write-Host "==========================================================" -ForegroundColor Cyan
@@ -30,7 +30,20 @@ if (-not $targetPlugins) {
 }
 
 # 3. 搜索扩展源文件
-$srcItem = Get-ChildItem -Path @("data", "public", ".") -Recurse -Filter "auto-save" -Directory -Depth 5 -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*ST-auto-save*" } | Select-Object -First 1
+# 按 plugins/auto-save 目录结构查找，不依赖扩展文件夹名（仓库改名后仍然有效）
+function Find-AutoSavePlugin([string[]]$roots) {
+    foreach ($root in $roots) {
+        if (-not $root) { continue }
+        if (-not (Test-Path $root)) { continue }
+        $hit = Get-ChildItem -Path $root -Recurse -Filter "index.js" -File -Depth 7 -ErrorAction SilentlyContinue |
+            Where-Object { $_.Directory.Name -eq "auto-save" -and $_.Directory.Parent.Name -eq "plugins" } |
+            Select-Object -First 1
+        if ($hit) { return $hit.Directory }
+    }
+    return $null
+}
+
+$srcItem = Find-AutoSavePlugin @("data", "public", ".")
 
 if (-not $srcItem) {
     # $MyInvocation.MyCommand.Path 在 `irm | iex` 场景下为空，优先使用 $PSCommandPath 并做空值防护
@@ -42,7 +55,7 @@ if (-not $srcItem) {
         $null
     }
     if ($scriptDir) {
-        $srcItem = Get-ChildItem -Path $scriptDir -Recurse -Filter "auto-save" -Directory -Depth 5 -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*ST-auto-save*" } | Select-Object -First 1
+        $srcItem = Find-AutoSavePlugin @($scriptDir)
     }
 }
 
@@ -80,8 +93,8 @@ if ($srcItem) {
         New-Item -ItemType Directory -Path $dest -Force | Out-Null
         Write-Host "[CDN保底] 尝试从国内加速源直接下载插件核心文件..." -ForegroundColor Yellow
         try {
-            Invoke-WebRequest -Uri "https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/plugins/auto-save/index.js" -OutFile (Join-Path $dest "index.js") -UseBasicParsing
-            Invoke-WebRequest -Uri "https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/plugins/auto-save/package.json" -OutFile (Join-Path $dest "package.json") -UseBasicParsing
+            Invoke-WebRequest -Uri "https://cdn.jsdelivr.net/gh/zgy-beep/novel-stream@main/plugins/auto-save/index.js" -OutFile (Join-Path $dest "index.js") -UseBasicParsing
+            Invoke-WebRequest -Uri "https://cdn.jsdelivr.net/gh/zgy-beep/novel-stream@main/plugins/auto-save/package.json" -OutFile (Join-Path $dest "package.json") -UseBasicParsing
             $cdnIndex = Join-Path $dest "index.js"
             $cdnPkg = Join-Path $dest "package.json"
             $cdnIndexFile = Get-Item $cdnIndex -ErrorAction SilentlyContinue
@@ -115,7 +128,7 @@ if ($success) {
     Write-Host "[诊断] 本次尝试写入的绝对路径: $attemptedDir" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "请使用【100% 成功保底方案：手动复制】" -ForegroundColor Yellow
-    Write-Host "   【源文件夹】：SillyTavern\data\default-user\extensions\ST-auto-save-to-txt\plugins\auto-save" -ForegroundColor White
+    Write-Host "   【源文件夹】：SillyTavern\data\default-user\extensions\novel-stream\plugins\auto-save" -ForegroundColor White
     Write-Host "   【目标目录】：SillyTavern\plugins\auto-save" -ForegroundColor Green
     Write-Host ""
     Write-Host "操作步骤：" -ForegroundColor Cyan

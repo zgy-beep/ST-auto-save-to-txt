@@ -55,7 +55,7 @@
 2. 点 **Install Extension**，粘贴本仓库地址：
 
    ```text
-   https://github.com/zgy-beep/ST-auto-save-to-txt
+   https://github.com/zgy-beep/novel-stream
    ```
 
 3. 安装完成后**刷新网页**。
@@ -75,13 +75,13 @@
 **Windows**（PowerShell 中执行）：
 
 ```powershell
-irm https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/install.ps1 | iex
+irm https://cdn.jsdelivr.net/gh/zgy-beep/novel-stream@main/install.ps1 | iex
 ```
 
 **Linux / VPS / 群晖 NAS / Docker 宿主机**（SSH 中执行）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zgy-beep/novel-stream@main/install.sh | bash
 ```
 
 脚本会自动寻找正在运行的酒馆、识别 Docker 容器并完成部署，不需要手动找路径。
@@ -92,9 +92,10 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/install
 <summary><b>手动复制（离线环境）</b></summary>
 
 1. 找到刚安装的扩展目录，通常在：
-   `SillyTavern/data/default-user/extensions/ST-auto-save-to-txt/`
-   （旧版本可能是 `SillyTavern/public/scripts/extensions/third-party/ST-auto-save-to-txt/`）
+   `SillyTavern/data/default-user/extensions/novel-stream/`
+   （旧版本可能是 `SillyTavern/public/scripts/extensions/third-party/novel-stream/`）
 2. 把其中的 `plugins/auto-save` 整个文件夹复制到 **酒馆根目录的 `plugins/`** 下。
+   （扩展文件夹名取决于安装来源，以你实际看到的文件夹名为准，关键是其中的 `plugins/auto-save`。）
 3. 确认最终存在 `SillyTavern/plugins/auto-save/index.js`。
 
 </details>
@@ -291,7 +292,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zgy-beep/ST-auto-save-to-txt@main/install
 
 ## 反馈与支持
 
-遇到问题或有好建议，欢迎到 [Issues](https://github.com/zgy-beep/ST-auto-save-to-txt/issues) 反馈。
+遇到问题或有好建议，欢迎到 [Issues](https://github.com/zgy-beep/novel-stream/issues) 反馈。
 
 反馈时请附上：酒馆版本、插件版本（设置面板标题右侧）、以及酒馆命令行窗口里的报错原文，能大幅加快定位速度。
 
