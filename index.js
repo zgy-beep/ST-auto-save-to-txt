@@ -39,7 +39,7 @@ const saveSettingsDebounced = ctx.saveSettingsDebounced || ssd_raw;
 
 const EXTENSION_NAME = 'autoSaveTxt';
 const DEFAULT_SETTINGS = {
-    version: '1.17.6',            // 扩展版本号
+    version: '1.17.9',            // 扩展版本号（D11：前端与服务端单一版本源，勿各自漂移）
     enabled: true,                // 小说连载总开关
     include_user_dialogue: false, // 是否将主角（你的互动）也以对话形式写入小说
     chapter_style: 'numbered_floor', // 章节标题样式: 'numbered_floor' (默认：第 1 章 · 角色名 (原楼层: 1)), 'numbered' (第 1 节 · 角色名), 'separator' (* * *), 'dialogue' (【角色名】)
@@ -56,6 +56,11 @@ const DEFAULT_SETTINGS = {
     acc_open: [],                 // 设置弹窗里「展开着的折叠分组」key 列表；空数组 = 全部收起（默认）
     ui_v113_migrated: false,      // v1.13 一次性迁移标记（老用户自动补开悬浮窗作为主入口）
     userDisabled: false,          // 用户是否主动手动关闭了连载
+    // ===== 图片电子书（EPUB）=====
+    ebook_embed_images: false,    // 导出 EPUB 时嵌入图片（默认关：不影响任何现有 TXT 流程）
+    ebook_max_image_mb: 5,        // 单张图片大小上限（MB），超限跳过并在结果里报告
+    ebook_max_total_mb: 80,       // 全书图片总量上限（MB），超限返回 413
+    ebook_st_root: '',            // 可选：酒馆根目录覆盖（留空自动推导，容器/NAS 部署时填）
 };
 
 let lastSavedSignature = {
@@ -64,6 +69,16 @@ let lastSavedSignature = {
     mesSnippet: ''
 };
 let lastSettledSavedIndex = -1; // 记录最近已定稿落盘入书的最高楼层序号
+/**
+ * F6：最近一次**成功写入文件**的章节号（文件视角，不是聊天视角）。
+ *
+ * `chapterNumber` 是按聊天实时重算的编号（问候语算第 1 章 → AI 首答是第 2 章），
+ * 而 `is_regenerate` 的意图是「替换文件里最后一个已写入章节」。两者混用会把
+ * 「文件里并不存在的第 2 章」当成替换目标 → 服务端守卫正确返回 409 chapter_not_found
+ * → 用户的第一条 AI 回复被丢弃。替换时定位键必须取本变量。
+ * 0 表示「刷新后状态未知」，此时不得发 is_regenerate（退化为普通追加，宁可重复不丢内容）。
+ */
+let lastWrittenChapterNumber = 0;
 
 let recentStatus = {
     state: 'idle', // 'idle' | 'updating' | 'success' | 'skipped' | 'error'
@@ -84,6 +99,11 @@ function updateRecentStatus(state, text, file = '') {
     recentStatus.text = text;
     recentStatus.time = new Date().toLocaleTimeString();
     if (file) recentStatus.file = file;
+
+    // D3：本函数所有内容都进 innerHTML，插值必须先转义。
+    // 注意 recentStatus.text 保持原文（内部状态只用于逻辑判断），只在插入点转义。
+    const safeText = escapeHtml(text == null ? '' : text);
+    const safeFile = escapeHtml(recentStatus.file == null ? '' : recentStatus.file);
 
     // 顶栏状态灯（折叠抽屉时依然可见）
     const headerStatus = document.getElementById('novel_header_status');
@@ -107,17 +127,17 @@ function updateRecentStatus(state, text, file = '') {
         timeEl.textContent = recentStatus.time;
         const stateClass = { updating: 'is-updating', success: 'is-success', skipped: 'is-skipped', error: 'is-error' }[state] || 'is-idle';
         lineEl.className = 'novel-status-line ' + stateClass;
-        const fileHtml = recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${recentStatus.file}</code></div>` : '';
+        const fileHtml = recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${safeFile}</code></div>` : '';
         if (state === 'updating') {
-            detailEl.innerHTML = `<span><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${text}</span>`;
+            detailEl.innerHTML = `<span><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${safeText}</span>`;
         } else if (state === 'success') {
-            detailEl.innerHTML = `<span><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${text}</span>${fileHtml}`;
+            detailEl.innerHTML = `<span><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${safeText}</span>${fileHtml}`;
         } else if (state === 'skipped') {
-            detailEl.innerHTML = `<span><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${text}</span>${fileHtml}`;
+            detailEl.innerHTML = `<span><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${safeText}</span>${fileHtml}`;
         } else if (state === 'error') {
-            detailEl.innerHTML = `<span><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${text}</span>`;
+            detailEl.innerHTML = `<span><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${safeText}</span>`;
         } else {
-            detailEl.innerHTML = `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${text}`;
+            detailEl.innerHTML = `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${safeText}`;
         }
     }
 }
@@ -915,6 +935,28 @@ function sanitizeFilename(rawName) {
 }
 
 /**
+ * F7：无角色卡上下文下，从聊天记录里取「最近一条非用户消息的说话人」作为角色名候选。
+ * 只读、幂等、不抛异常（拿不到就返回空串，调用方继续走原兜底）。
+ * 目的：让 getBookTitle(settings) 与 getBookTitle(settings, speakerName) 在无角色卡时同源，
+ * 从而 file_name 与 characterName 指向同一本书。
+ */
+function inferSpeakerNameFromChatLog() {
+    try {
+        const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+        if (!Array.isArray(chatLog)) return '';
+        for (let i = chatLog.length - 1; i >= 0; i--) {
+            const m = chatLog[i];
+            if (!m || m.is_user) continue;
+            const name = (typeof m.name === 'string') ? m.name.trim() : '';
+            if (name && name !== '你') return name;
+        }
+    } catch (e) {
+        console.warn('[AutoSaveTxt] 推断角色名失败:', e);
+    }
+    return '';
+}
+
+/**
  * 获取当前连载小说书名
  * 支持根据【文件命名规则】自动区分同一角色卡的不同对话（平行世界、重开等）
  * 支持自动识别多角色群聊 (Group Chat) 并自动聚合为同一部群小说
@@ -968,6 +1010,13 @@ function getBookTitle(settings, speakerName = '') {
         charName = charList[chid].name;
     } else if (speakerName && speakerName !== '你') {
         charName = speakerName;
+    } else {
+        // F7：没有可用角色卡（this_chid 未设置 / characters 未同步）且调用方也没传 speakerName 时，
+        // 从聊天记录里推断说话角色名，而不是退回占位名「我的小说连载」。
+        // 否则同一次保存会出现 characterName='艾莉丝 - 2026-10-14'、file_name='我的小说连载 - 2026-10-14.txt'
+        // 两本不同的书（服务端优先按 file_name 落盘并注册锚点，扉页却用 bookTitle）。
+        const inferred = inferSpeakerNameFromChatLog();
+        if (inferred) charName = inferred;
     }
 
     if (settings && settings.naming_rule === 'char_only') {
@@ -1090,7 +1139,8 @@ function escapeHtml(str) {
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;'); // 单引号同样要转义：属性上下文用单引号包裹时 ' 可闭合属性并注入事件处理器
 }
 
 // 会话标签 chip 悬浮提示：单例 tooltip 元素，随面板存在周期复用
@@ -1183,6 +1233,284 @@ function getCleanedMessage(msg, index, settings) {
 /**
  * 将全部聊天编排为整本小说文本（executeSyncAll 与"导出整本 TXT"共用）
  */
+// ==================== 图片电子书（EPUB）基础设施 ====================
+// 数据来源：msg.extra.bbiImage（结构化字段），位置来源：正文 <bbi_image>…… 原位标记。
+// 契约（实机核对）：
+//   · extra.bbiImage["0"][<promptHash>][i]，外层键恒为字符串 "0"
+//   · 每条消息可多张图，slotSeq 从 0 开始；**存储顺序不保证等于 slotSeq 顺序**（实测 [2,1,0]）
+//   · 正文标记形态：`<bbi_image>` + 该图 prompt 全文（到行末）；标记数 == 图片数（实测 56/56）
+//   · path 形如 /user/images/<聊天目录>/<文件>.jpg（中文未编码）→ 磁盘 /data/<账号>/user/images/…
+
+// 原位图片占位符：用【】包住 base64，避开清洗管线的标签剥离、实体解码与缩进前缀。
+// base64 只含 [A-Za-z0-9+/=]，不会被任何正则破坏。
+const IMG_MARK_PREFIX = '【IMGMARK:';
+const IMG_MARK_SUFFIX = '】';
+
+/**
+ * 从单条消息的 extra.bbiImage 归一化为按 slotSeq 升序的图片清单。
+ * 防御式兼容：extra 缺失 / bbiImage 非对象 / 外层键非 "0" / 值是数组或对象 / 单图对象。
+ */
+function extractBbiImageList(msg) {
+    const raw = msg && msg.extra && msg.extra.bbiImage;
+    if (!raw || typeof raw !== 'object') return [];
+
+    // 外层通常是 { "0": { <promptHash>: [img, ...] } }；也兼容直接给 { <promptHash>: [...] }
+    const buckets = [];
+    const pushBucket = (v) => { if (v && typeof v === 'object') buckets.push(v); };
+    if (raw['0'] && typeof raw['0'] === 'object') pushBucket(raw['0']);
+    // 其它数字键（如 "1"）也收进来，避免未来版本换层级后漏图
+    for (const k of Object.keys(raw)) {
+        if (k !== '0' && /^\d+$/.test(k)) pushBucket(raw[k]);
+    }
+    if (buckets.length === 0) pushBucket(raw); // 兜底：把自身当 bucket
+
+    const out = [];
+    const seen = new Set();
+    for (const bucket of buckets) {
+        for (const key of Object.keys(bucket)) {
+            const val = bucket[key];
+            const arr = Array.isArray(val) ? val : [val];
+            for (const img of arr) {
+                if (!img || typeof img !== 'object') continue;
+                const p = img.path;
+                if (typeof p !== 'string' || !p.trim()) continue;
+                // 同一对象可能被数组与兜底重复扫到，用 path+slotSeq 去重
+                const sig = `${p}#${img.slotSeq}`;
+                if (seen.has(sig)) continue;
+                seen.add(sig);
+                const seq = (typeof img.slotSeq === 'number' && Number.isFinite(img.slotSeq))
+                    ? img.slotSeq : (out.length);
+                out.push({
+                    path: p.trim(),
+                    prompt: typeof img.prompt === 'string' ? img.prompt : '',
+                    slotSeq: seq,
+                    status: typeof img.status === 'string' ? img.status : '',
+                    generationId: typeof img.generationId === 'string' ? img.generationId : '',
+                    seed: img.seed,
+                    createdAt: img.createdAt
+                });
+            }
+        }
+    }
+    // ⚠️ 关键：必须按 slotSeq 升序，不能用存储/遍历顺序（实测消息 #106 存储顺序 [2,1,0]）
+    out.sort((a, b) => a.slotSeq - b.slotSeq);
+    return out;
+}
+
+/** 标记匹配（与 cleanNovelText 的前置清理同一条规则，保证"数出来的"能被"删掉的"对上） */
+function matchBbiImageMarkers(rawText) {
+    if (typeof rawText !== 'string') return [];
+    return rawText.match(/<bbi_image[^\n]*/gi) || [];
+}
+
+/** 把第 n 张图转成可穿越清洗管线的占位符 */
+function makeImageMark(n) {
+    return IMG_MARK_PREFIX + btoaSafe(String(n)) + IMG_MARK_SUFFIX;
+}
+function btoaSafe(s) {
+    try {
+        if (typeof btoa === 'function') return btoa(s);
+    } catch (e) { /* 非浏览器环境走下面 */ }
+    return Buffer.from(s, 'utf8').toString('base64');
+}
+function parseImageMark(mark) {
+    try {
+        const b64 = mark.slice(IMG_MARK_PREFIX.length, -IMG_MARK_SUFFIX.length);
+        let s;
+        if (typeof atob === 'function') s = atob(b64);
+        else s = Buffer.from(b64, 'base64').toString('utf8');
+        const n = parseInt(s, 10);
+        return Number.isFinite(n) ? n : -1;
+    } catch (e) { return -1; }
+}
+
+/**
+ * 把正文里的 <bbi_image> 标记替换为占位符，并返回该消息的图片槽位信息。
+ * 只有"标记数 == 图片数（且图片可嵌入）"时才启用原位；否则返回 degraded=true，
+ * 由调用方退化为"章尾插图"并在预览里标注——绝不猜测位置。
+ */
+function buildImageSlots(msg, text) {
+    const images = extractBbiImageList(msg).filter((im) => im.status === '' || im.status === 'ready');
+    const markers = matchBbiImageMarkers(text);
+    if (images.length === 0) return { images: [], markers, degraded: false, outText: text, hasImages: false };
+    if (images.length !== markers.length) {
+        return { images, markers, degraded: true, outText: text, hasImages: true, reason: `标记数(${markers.length})≠图片数(${images.length})` };
+    }
+    let k = 0;
+    const outText = text.replace(/<bbi_image[^\n]*/gi, () => makeImageMark(k++));
+    return { images, markers, degraded: false, outText, hasImages: true };
+}
+
+/** 把一个清洗后的段落按占位符切分为 text / image 块序列 */
+function splitParagraphBlocks(paragraph) {
+    const blocks = [];
+    const re = /【IMGMARK:([A-Za-z0-9+/=]+)】/g;
+    let last = 0;
+    let m;
+    const pushText = (t) => {
+        const s = String(t || '').replace(/^　+/, '').trimEnd();
+        if (s && s.trim()) blocks.push({ type: 'text', text: s.trim() });
+    };
+    while ((m = re.exec(paragraph)) !== null) {
+        pushText(paragraph.slice(last, m.index));
+        const n = parseImageMark(m[0]);
+        if (n >= 0) blocks.push({ type: 'image', slot: n });
+        last = m.index + m[0].length;
+    }
+    pushText(paragraph.slice(last));
+    return blocks;
+}
+
+/**
+ * 取某条消息"带图片占位"的清洗正文。
+ * 不污染 cleanTextCache（缓存只存纯文本），图片相关调用量小，直接重算。
+ */
+function getCleanedMessageWithImageSlots(msg, settings) {
+    if (!msg || typeof msg.mes !== 'string') return { blocks: [], degraded: false, slots: { images: [], hasImages: false } };
+    const slots = buildImageSlots(msg, msg.mes);
+    const cleaned = cleanNovelText(slots.outText, { ...settings, preserve_image_marks: true });
+    const paragraphs = String(cleaned || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    const blocks = [];
+    for (const para of paragraphs) {
+        for (const blk of splitParagraphBlocks(para)) blocks.push(blk);
+    }
+    return { blocks, degraded: !!slots.degraded, reason: slots.reason || '', slots };
+}
+
+/**
+ * 生成"结构化的书"——供 EPUB 导出使用。
+ * 返回 { bookTitle, chapters:[{title, floor, speaker, blocks:[{type:'text'|'image',...}]}], imagesFound, warnings }
+ * 与 buildNovelText 的口径（章节号、说话人、章节标题）完全一致，只是额外携带块结构与图片。
+ */
+function buildStructuredNovel(settings, chatLog) {
+    const bookTitle = getBookTitle(settings);
+    const chapters = [];
+    const warnings = [];
+    let chapterCount = 0;
+    let imagesDeembedded = 0;
+    let imagesTotal = 0;
+
+    // 注意：必须用括号把三元表达式括起来。写成 `i < Array.isArray(chatLog) ? ... : 0`
+    // 会因为运算符优先级被解析成 `(i < Array.isArray(chatLog)) ? ... : 0`，
+    // 导致 i=1 起就退出循环 → EPUB 只导出第 1 章（K1 契约测试守护此行为）。
+    const list = Array.isArray(chatLog) ? chatLog : [];
+    for (let i = 0; i < list.length; i++) {
+        const msg = list[i];
+        if (!msg) continue;
+        if (msg.is_user && !settings.include_user_dialogue) continue;
+        const withImages = getCleanedMessageWithImageSlots(msg, settings);
+        // 以纯文本清洗结果判断"是否为空楼层"——与 buildNovelText 完全同口径
+        const plain = getCleanedMessage(msg, i, settings);
+        if (!plain) continue;
+
+        chapterCount++;
+        const speaker = msg.name || (msg.is_user ? '你' : '旁白');
+        const floor = i + 1;
+        let title;
+        if (settings.chapter_style === 'separator') title = '* * *';
+        else if (settings.chapter_style === 'dialogue') title = `【${speaker}】`;
+        else if (settings.chapter_style === 'numbered') title = `第 ${chapterCount} 节 · ${speaker}`;
+        else title = `第 ${chapterCount} 章 · ${speaker} (原楼层: ${floor})`;
+
+        const blocks = [];
+        const slotImages = withImages.slots.images || [];
+        imagesTotal += slotImages.length;
+        for (const blk of withImages.blocks) {
+            if (blk.type === 'image') {
+                const img = slotImages[blk.slot];
+                if (img && img.path) {
+                    blocks.push({ type: 'image', path: img.path, alt: shortPromptAlt(img.prompt, speaker), slotSeq: img.slotSeq });
+                } else {
+                    imagesDeembedded++;
+                }
+            } else {
+                blocks.push({ type: 'text', text: blk.text });
+            }
+        }
+        // 降级：标记数与图片数不一致时，图片放到章尾（不丢图，但标注）
+        if (withImages.degraded && slotImages.length) {
+            for (const img of slotImages) {
+                if (img && img.path) blocks.push({ type: 'image', path: img.path, alt: shortPromptAlt(img.prompt, speaker), slotSeq: img.slotSeq });
+            }
+            warnings.push(`第 ${chapterCount} 章：${withImages.reason}，已退化为章尾插图`);
+        }
+        chapters.push({ title, floor, speaker, blocks });
+    }
+
+    return {
+        bookTitle,
+        chapters,
+        chapterCount,
+        imagesFound: imagesTotal,
+        imagesDeembedded,
+        warnings
+    };
+}
+
+/** 用 prompt 摘要作为图片 alt（阅读器无障碍/加载失败时可见） */
+function shortPromptAlt(prompt, fallback) {
+    const s = String(prompt || '').replace(/<bbi_image>/i, '').replace(/\s+/g, ' ').trim();
+    if (!s) return fallback || '';
+    return s.length > 80 ? s.slice(0, 80) + '…' : s;
+}
+
+/**
+ * 图片清单扫描（P0.5 探针）：只读，用于预览弹窗展示"识别到几张图 / 校验是否一致"。
+ * 返回 { messages:[{index, chapterNumber, images, markerCount, degraded, reason}],
+ *        totalImages, imageMessages, degradedCount, missingList }
+ */
+function scanBookImages(settings, chatLog) {
+    const result = {
+        messages: [],
+        totalImages: 0,
+        imageMessages: 0,
+        degradedCount: 0,
+        missingList: []
+    };
+    const list = Array.isArray(chatLog) ? chatLog : [];
+    let chapter = 0;
+    for (let i = 0; i < list.length; i++) {
+        const msg = list[i];
+        if (!msg) continue;
+        if (msg.is_user && !settings.include_user_dialogue) continue;
+        const plain = getCleanedMessage(msg, i, settings);
+        if (!plain) continue;
+        chapter++;
+        const images = extractBbiImageList(msg);
+        if (!images.length) continue;
+        const markers = matchBbiImageMarkers(msg.mes || '');
+        const embeddable = images.filter((im) => im.status === '' || im.status === 'ready');
+        const notReady = images.filter((im) => im.status && im.status !== 'ready');
+        // 降级判定只看"可嵌入数 vs 标记数"：非 ready 的图本来就不会去占位，
+        // 单独记到 missingList 里（否则会误报"标记数≠图片数"）。
+        const degraded = embeddable.length !== markers.length;
+        if (degraded) result.degradedCount++;
+        for (const im of notReady) {
+            result.missingList.push(`楼层 ${i + 1}：图片状态 ${im.status || '未知'}`);
+        }
+        result.totalImages += images.length;
+        result.imageMessages++;
+        result.messages.push({
+            index: i,
+            chapter,
+            floor: i + 1,
+            speaker: msg.name || '旁白',
+            markerCount: markers.length,
+            imageCount: images.length,
+            embeddableCount: embeddable.length,
+            notReadyCount: notReady.length,
+            degraded,
+            reason: degraded ? `标记数(${markers.length})≠可嵌入图片数(${embeddable.length})` : '',
+            images
+        });
+    }
+    return result;
+}
+
+/**
+ * 将全部聊天编排为整本小说文本（executeSyncAll 与"导出整本 TXT"共用）
+ * 口径：章节号、说话人、章节标题与 buildStructuredNovel 完全一致。
+ */
 function buildNovelText(settings, chatLog) {
     const bookTitle = getBookTitle(settings);
     let novelText = `《${bookTitle}》\n\n`;
@@ -1223,6 +1551,12 @@ function cleanNovelText(rawText, settings = {}) {
     text = text.replace(/<!--[\s\S]*?-->/g, '');
     text = text.replace(/!\[.*?\]\(.*?\)/g, '');
     text = text.replace(/<img[^>]*>/gi, '');
+    // bbi 图像生成标记：形如 `<bbi_image>1boy 1girl, close-up, …`（标记 + prompt 直到行末）。
+    // 必须【连同 prompt 一起】删到行末——只删标签本身会把英文绘图提示词当正文留下（v1.17.8 修复）。
+    // 注意：不能用 `<[^>]*>` 那种通用标签规则，因为 prompt 里可能含 '>'，会只删掉半截。
+    // 例外：图片电子书导出时，调用方已把标记换成【IMGMARK:…】占位符（不会命中本规则），
+    //       并通过 preserve_image_marks 要求保留占位符以便还原原位。
+    text = text.replace(/<bbi_image[^\n]*/gi, '');
 
     // 阶段零【通用前置无头标签与思维链智能清洗】：
     // 应对任何反代、Prefill、插件导致的“开篇无起始标签、仅有闭标签”问题（无论标签名叫什么，均可自动识别并切除）
@@ -1324,11 +1658,17 @@ function cleanNovelText(rawText, settings = {}) {
         .filter(p => p.length > 0);
 
     const shouldIndent = settings.indent_paragraphs !== false;
-    if (shouldIndent) {
-        return paragraphs.map(p => `　　${p}`).join('\n\n');
-    }
+    let result = shouldIndent
+        ? paragraphs.map(p => `　　${p}`).join('\n\n')
+        : paragraphs.join('\n\n');
 
-    return paragraphs.join('\n\n');
+    // 图片电子书导出：保留原位占位符，供调用方 splitParagraphBlocks 还原为图片块。
+    // 默认（普通 TXT 写入）不加 preserve_image_marks，输出与既有行为逐字节一致；
+    // 且即使有占位符残留，也在此统一剥掉，绝不让内部标记漏进用户 TXT。
+    if (settings.preserve_image_marks === true) {
+        return result;
+    }
+    return result.replace(/【IMGMARK:[A-Za-z0-9+/=]+】/g, '');
 }
 
 /**
@@ -1348,7 +1688,10 @@ async function checkServerPluginStatus() {
 
         if (statusResp && statusResp.ok) {
             const data = await statusResp.json().catch(() => ({}));
-            return { ready: true, version: data.version, is404: false };
+            // 能力声明：新服务端会带 capabilities；老服务端没有该字段 → 视为只有基础能力。
+            // 前端据此 feature-detect（比比较版本号更可靠），例如是否显示「导出 EPUB 电子书」。
+            serverCapabilities = (data && typeof data.capabilities === 'object' && data.capabilities) || {};
+            return { ready: true, version: data.version, capabilities: serverCapabilities, is404: false };
         }
 
         if (statusResp && statusResp.status === 404) {
@@ -1393,7 +1736,16 @@ async function postChapterToServer(payload) {
             const errData = await response.json().catch(() => ({}));
             const errMsg = errData.error || `写入失败 (HTTP ${response.status})`;
             console.warn(`[AutoSaveTxt] ${errMsg}`);
-            return { success: false, status: response.status, error: errMsg };
+            // D4：409 冲突是「可诊断的拒绝」而非单纯失败，必须把 conflict/reason 一路带到调用方，
+            // 否则 saveSpecificMessage 只能显示一句笼统的 HTTP 409，用户不知道该去点【同步历史连载】。
+            return {
+                success: false,
+                status: response.status,
+                error: errMsg,
+                conflict: !!errData.conflict,
+                reason: errData.reason || '',
+                chapterNumber: (typeof errData.chapterNumber !== 'undefined') ? errData.chapterNumber : undefined,
+            };
         }
 
         const data = await response.json().catch(() => ({}));
@@ -1406,6 +1758,8 @@ async function postChapterToServer(payload) {
             skipped: data.skipped,
             renamed_from: data.renamed_from,
             kept_name: data.kept_name,
+            conflict: !!data.conflict,
+            reason: data.reason || '',
             is_regenerate: (typeof data.is_regenerate !== 'undefined') ? data.is_regenerate : payload.is_regenerate
         };
     } catch (error) {
@@ -1414,7 +1768,18 @@ async function postChapterToServer(payload) {
     }
 }
 
-function seedLastSavedSignature() {
+/**
+ * 用当前聊天里最后一层可入书内容播种「已保存签名」，用于判断下一次写入是新增还是重生成。
+ *
+ * @param {{skipGreeting?: boolean}} [options]
+ *   D2 修复：boot / refreshContext 必须传 { skipGreeting: true }。
+ *   索引 0、非用户的角色问候语**不是**已入书章节（它由 ensureGreetingSerialized 在用户
+ *   发出第一条消息时补写为第 1 章）。若把它播种成"已保存"，ensureGreetingSerialized 会
+ *   命中同签名 early return，问候语永远写不进文件；同时首条 AI 回复被算成第 2 章。
+ *   默认 false 保持旧行为，避免影响其它调用点。
+ */
+function seedLastSavedSignature(options = {}) {
+    const skipGreeting = !!(options && options.skipGreeting);
     const settings = getSettings();
     const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
     if (!chatLog || chatLog.length === 0) {
@@ -1422,10 +1787,13 @@ function seedLastSavedSignature() {
         lastSettledSavedIndex = -1;
         return;
     }
+    let seeded = false;
     for (let i = chatLog.length - 1; i >= 0; i--) {
         const m = chatLog[i];
         if (!m) continue;
         if (m.is_user && !settings.include_user_dialogue) continue;
+        // 问候语（仅索引 0 且非用户）不登记：它尚未入书，等 ensureGreetingSerialized 补写
+        if (skipGreeting && i === 0 && !m.is_user) continue;
         const clean = getCleanedMessage(m, i, settings);
         if (clean) {
             const speaker = m.name || (m.is_user ? '你' : '旁白');
@@ -1435,8 +1803,15 @@ function seedLastSavedSignature() {
                 mesSnippet: clean.slice(0, 80)
             };
             lastSettledSavedIndex = i;
+            seeded = true;
             break;
         }
+    }
+    // 整个聊天只有问候语（或全部楼层被过滤为空）：明确回到"什么都没保存"的初始态，
+    // 否则刷聊天时会残留上一个聊天的签名，误导重生成判定。
+    if (!seeded) {
+        lastSavedSignature = { messageId: null, characterName: '', mesSnippet: '' };
+        lastSettledSavedIndex = -1;
     }
 }
 
@@ -1514,23 +1889,48 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
     chapterNumber = chapterNumber || 1;
 
     const floor = messageIndex + 1;
+
+    // F6：区分「聊天视角的章节号」与「文件里的定位键」。
+    // is_regenerate 的意图是替换**该楼层已经写进文件的章节**，定位键必须来自
+    // savedChapterMap[messageIndex]（该楼层真实落盘的章号），而不是实时重算的 chapterNumber。
+    // 问候语入书后 AI 首答的聊天视角编号是 2，但文件里此刻只有第 1 章：
+    // 拿 2 当替换目标 → 服务端守卫正确返回 409 chapter_not_found → 用户的第一条 AI 回复被丢弃。
+    // 三条分支：
+    //   a) 该楼层已有落盘章号 → 真正的重生成/swipe，替换它（幂等，文案也反馈真实章号）；
+    //   b) 该楼层没有落盘章号（含页面刷新后 lastWrittenChapterNumber === 0 的状态未知）→
+    //      退化为普通追加，绝不发替换意图：替换必然 409 丢内容，追加最坏只是多一章，宁可重复也不丢；
+    //   c) 其它 → 普通追加。
+    const previousWrittenChapter = (typeof savedChapterMap[messageIndex] === 'number') ? savedChapterMap[messageIndex] : 0;
+    const wantRegenerate = isRegenerate && previousWrittenChapter > 0;
+    if (isRegenerate && previousWrittenChapter <= 0) {
+        console.warn(lastWrittenChapterNumber <= 0
+            ? '[AutoSaveTxt] 替换目标章号未知（页面刷新后状态丢失），本次退化为普通追加以避免 409 丢内容'
+            : `[AutoSaveTxt] 第 ${floor} 楼尚未落盘，本次按新增章节写入（避免替换文件末尾章导致内容错位）`);
+    }
+    // 替换定位键用该楼层真实落盘章号；仍取不到时才回落到文件末尾章号，最后回落到实时重算值
+    const effectiveChapterNumber = wantRegenerate
+        ? previousWrittenChapter
+        : (chapterNumber || lastWrittenChapterNumber || 1);
+
     const isNumberedFloor = (settings.chapter_style === 'numbered_floor' || !settings.chapter_style);
     const sectionLabel = isNumberedFloor ? `第 ${chapterNumber} 章` : ((settings.chapter_style === 'numbered') ? `第 ${chapterNumber} 节` : '新章节');
     const floorLabel = isNumberedFloor ? ` (原楼层: ${floor})` : '';
+    // 实际落盘所在的章节标签（替换时是文件里的章号，可能与聊天视角编号不同）
+    const effectiveChapterLabel = isNumberedFloor ? `第 ${effectiveChapterNumber} 章` : ((settings.chapter_style === 'numbered') ? `第 ${effectiveChapterNumber} 节` : '新章节');
 
     // 1. 设置状态为更新中（顶栏指示灯与面板卡片即时响应）
-    const actionText = isRegenerate ? '正在替换更新' : '正在编排写入';
-    updateRecentStatus('updating', `${actionText}${sectionLabel} · ${speakerName}${floorLabel}...`);
+    const actionText = wantRegenerate ? '正在替换更新' : '正在编排写入';
+    updateRecentStatus('updating', `${actionText}${effectiveChapterLabel} · ${speakerName}${floorLabel}...`);
 
     const payload = {
         name: speakerName,
         mes: novelText,
         is_user: !!message.is_user,
         characterName: bookTitle,
-        chapterNumber: chapterNumber,
+        chapterNumber: effectiveChapterNumber,
         chapterStyle: settings.chapter_style || 'numbered_floor',
         save_dir: settings.save_dir || '',
-        is_regenerate: isRegenerate,
+        is_regenerate: wantRegenerate,
         floor: floor,
         chat_anchor: getChatAnchor(),
         file_name: getBookFileName(settings)
@@ -1544,14 +1944,25 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
             mesSnippet: mesSnippet
         };
         lastSettledSavedIndex = Math.max(lastSettledSavedIndex, messageIndex);
-        recentStatus.chapter = chapterNumber;
+        recentStatus.chapter = effectiveChapterNumber;
+        // F6：只有真的写进文件（非 skipped）才算「文件里的最后一章」，skipped 时文件没变
+        if (!res.skipped) {
+            const ackedChapter = (res && typeof res.chapterNumber === 'number') ? res.chapterNumber : effectiveChapterNumber;
+            lastWrittenChapterNumber = ackedChapter > 0 ? ackedChapter : effectiveChapterNumber;
+        }
 
         const targetFile = res.file || `${bookTitle}.txt`;
+
+        // D3：以下提示全部喂给 toastr（支持 HTML），插值一律出口转义
+        const safeSpeaker = escapeHtml(speakerName);
+        const safeBookTitle = escapeHtml(bookTitle);
+        const safeSnippetSuffix = escapeHtml(snippetSuffix);
+        const safeTargetFile = escapeHtml(targetFile);
 
         // 聊天改名自动跟随：服务端 ID 锚定注册表检测到书名变化，已同步更名小说文件
         const renameSuffix = res.renamed_from ? '（检测到聊天改名，小说文件已同步更名）' : '';
         if (res.renamed_from && settings.show_toast !== false && window.toastr) {
-            window.toastr.info(`小说文件已跟随聊天改名：${res.renamed_from} → ${targetFile}`, '小说连载', { timeOut: 5000 });
+            window.toastr.info(`小说文件已跟随聊天改名：${escapeHtml(res.renamed_from)} → ${safeTargetFile}`, '小说连载', { timeOut: 5000 });
         }
 
         if (res.skipped) {
@@ -1559,10 +1970,11 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
             if (settings.show_toast !== false && window.toastr) {
                 window.toastr.info(`${sectionLabel}内容与前文重复，已略过`, '小说连载', { timeOut: 2500 });
             }
-        } else if (res.is_regenerate || isRegenerate) {
-            updateRecentStatus('success', `${sectionLabel} · ${speakerName}${floorLabel}（重新生成已替换更新）${snippetSuffix}${renameSuffix}`, targetFile);
+        } else if (res.is_regenerate || wantRegenerate) {
+            // 替换分支：文案里显示的必须是**文件里真正被替换的章号**，否则用户看到的章号与文件对不上
+            updateRecentStatus('success', `${effectiveChapterLabel} · ${speakerName}${floorLabel}（重新生成已替换更新）${snippetSuffix}${renameSuffix}`, targetFile);
             if (settings.show_toast !== false && window.toastr) {
-                throttledNovelSuccessToast(`${sectionLabel}${floorLabel}已更新为最新生成版本${snippetSuffix}`, '小说连载', {
+                throttledNovelSuccessToast(`${effectiveChapterLabel}${floorLabel}已更新为最新生成版本${safeSnippetSuffix}`, '小说连载', {
                     timeOut: 3000,
                     preventDuplicates: true
                 });
@@ -1573,7 +1985,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
 
             // 3. 屏幕 Toast 提示通知
             if (settings.show_toast !== false && window.toastr) {
-                throttledNovelSuccessToast(`${sectionLabel} · ${speakerName}${floorLabel} 已自动写入《${bookTitle}》${snippetSuffix}`, '小说连载', {
+                throttledNovelSuccessToast(`${sectionLabel} · ${safeSpeaker}${floorLabel} 已自动写入《${safeBookTitle}》${safeSnippetSuffix}`, '小说连载', {
                     timeOut: 3500,
                     preventDuplicates: true
                 });
@@ -1582,11 +1994,57 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
 
         // ①④ 非跳过的成功写入：登记楼层章节号并重绘"已入书"徽标与最新楼层工具条
         if (!res.skipped) {
-            savedChapterMap[messageIndex] = chapterNumber;
+            savedChapterMap[messageIndex] = effectiveChapterNumber;
             refreshMessageBadges();
             refreshNovelToolbars();
         }
     } else {
+        // D4：服务端 409 冲突专用分支 —— 绝不当作成功，也绝不登记 lastSavedSignature。
+        // 一旦误登记，后续 regenerate 判定会把「其实没写进去的章」当成已保存的末尾章，越写越乱。
+        const conflictReason = res && (res.reason || '');
+        const conflictStatus = res && res.status === 409;
+        if (conflictStatus || (res && res.conflict)) {
+            const failedChapter = (res && typeof res.chapterNumber === 'number') ? res.chapterNumber : chapterNumber;
+            const failedLabel = `第 ${failedChapter} 章`;
+            if (conflictReason === 'not_tail_chapter') {
+                updateRecentStatus('error', `未替换：${failedLabel}不是文件末尾章，已放弃以避免误删后续章节。请用【同步历史连载】重新校准目录后重试。`);
+                if (settings.show_toast !== false && window.toastr) {
+                    window.toastr.warning(
+                        `${failedLabel}不是文件末尾章，为避免误删后续章节已放弃替换。请点【同步历史连载】校准后再试。`,
+                        '小说连载',
+                        { timeOut: 6000, preventDuplicates: true }
+                    );
+                }
+            } else if (conflictReason === 'chapter_exists') {
+                updateRecentStatus('error', `第 ${failedChapter} 章已存在，已拒绝重复追加。请用【同步历史连载】校准目录后重试。`);
+                if (settings.show_toast !== false && window.toastr) {
+                    window.toastr.warning(
+                        `第 ${failedChapter} 章已存在，已拒绝重复追加（避免同一章写两遍）。请点【同步历史连载】校准后再试。`,
+                        '小说连载',
+                        { timeOut: 6000, preventDuplicates: true }
+                    );
+                }
+            } else if (conflictReason === 'chapter_not_found') {
+                // F7：替换目标章在文件里不存在（例如文件被手工编辑/删章、或换过保存目录）。
+                // 与另两条 reason 对齐，必须给明恢复动作，否则用户只知道"被拒绝"却不知道点哪。
+                updateRecentStatus('error', `未替换：文件中未找到${failedLabel}，已放弃以避免内容错位。请用【同步历史连载】重新校准后再试。`);
+                if (settings.show_toast !== false && window.toastr) {
+                    window.toastr.warning(
+                        `文件中未找到${failedLabel}，为避免内容错位已放弃替换。请点【同步历史连载】校准后再试。`,
+                        '小说连载',
+                        { timeOut: 6000, preventDuplicates: true }
+                    );
+                }
+            } else {
+                const conflictErr = (res && res.error) ? res.error : `HTTP ${(res && res.status) || 409}`;
+                updateRecentStatus('error', `${sectionLabel}写入被拒绝: ${conflictErr}`);
+                if (settings.show_toast !== false && window.toastr) {
+                    window.toastr.warning(`${sectionLabel}自动连载被拒绝: ${conflictErr}`, '小说连载', { timeOut: 4500 });
+                }
+            }
+            return;
+        }
+
         const is404 = res && (res.status === 404 || (res.error && String(res.error).includes('404')));
         if (is404) {
             settings.enabled = false;
@@ -1610,7 +2068,7 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
         updateRecentStatus('error', `${sectionLabel}写入失败: ${errMsg}`);
 
         if (settings.show_toast !== false && window.toastr) {
-            window.toastr.warning(`${sectionLabel}自动连载失败: ${errMsg}`, '小说连载', {
+            window.toastr.warning(`${sectionLabel}自动连载失败: ${escapeHtml(errMsg)}`, '小说连载', {
                 timeOut: 4500
             });
         }
@@ -1619,6 +2077,8 @@ async function saveSpecificMessage(messageIndex, settings, chatLog) {
 
 // 已探测的服务端插件版本（问候语补写 is_greeting 需要服务端 ≥ 1.7.8 支持，旧服务端自动降级跳过）
 let serverPluginVersion = null;
+// 服务端能力声明（来自 /status.capabilities）；老服务端为 {}，据此 feature-detect 新功能
+let serverCapabilities = {};
 
 /**
  * 问候语延迟入书：新开聊天时问候语不产生任何文件（看卡/调试零打扰）；
@@ -1658,10 +2118,22 @@ async function ensureGreetingSerialized(settings, chatLog) {
         file_name: getBookFileName(settings)
     });
 
-    if (res && res.success && !res.skipped) {
+    if (res && res.success && res.skipped) {
+        // D2 幂等：服务端因「文件已有内容」跳过问候语时，说明这封信已经在书里了，
+        // 只是不是这次写的。同样要把签名登记为"已对齐"，否则每轮消息都会重发一次补写请求；
+        // 但不弹成功提示、不播报"连载正式开始"。
         lastSavedSignature = { messageId: 0, characterName: bookTitle, mesSnippet };
         lastSettledSavedIndex = Math.max(lastSettledSavedIndex, 0);
         recentStatus.chapter = Math.max(recentStatus.chapter, 1);
+        savedChapterMap[0] = 1;
+        refreshMessageBadges();
+        refreshNovelToolbars();
+    } else if (res && res.success) {
+        lastSavedSignature = { messageId: 0, characterName: bookTitle, mesSnippet };
+        lastSettledSavedIndex = Math.max(lastSettledSavedIndex, 0);
+        recentStatus.chapter = Math.max(recentStatus.chapter, 1);
+        // F6：问候语真的写成第 1 章 → 文件里的末尾章号 = 1（后续替换必须定位到 1，而不是聊天视角的第 2 章）
+        lastWrittenChapterNumber = 1;
         updateRecentStatus('success', `第 1 章 · ${speakerName} (原楼层: 1)（问候语已入书，连载正式开始）`, res.file || `${bookTitle}.txt`);
         // ①④ 问候语入书：登记第 1 章并重绘徽标与工具条
         savedChapterMap[0] = 1;
@@ -1826,6 +2298,8 @@ async function executeSyncAll(isSilent = false) {
             const data = await response.json().catch(() => ({}));
             const targetFile = data.file || `${bookTitle}.txt`;
             recentStatus.chapter = chapterCount;
+            // F6：全书同步后文件里真实存在的末尾章号 = 本次同步的章节总数
+            lastWrittenChapterNumber = chapterCount;
             seedLastSavedSignature();
             // ①④ 全书同步后重算楼层入书映射并重绘徽标与最新楼层工具条
             savedChapterMap = computeChapterMap(settings, chatLog);
@@ -2057,6 +2531,8 @@ function analyzeRemovedContent(raw, settings) {
     patterns.push(/<!--[\s\S]*?-->/g);
     patterns.push(/!\[.*?\]\(.*?\)/g);
     patterns.push(/<img[^>]*>/gi);
+    // bbi 图像生成标记（标记 + prompt 到行末，与 cleanNovelText 前置清洗同规则）
+    patterns.push(/<bbi_image[^\n]*/gi);
 
     const combined = new RegExp(patterns.map(p => `(?:${p.source})`).join('|'), 'gi');
     let html = '';
@@ -2681,6 +3157,147 @@ function refreshNovelAccSummaries(panel) {
     set('novel_acc_summary_write', `已开启 ${checkedCount(['novel_include_user', 'novel_indent_paragraphs', 'novel_buffer_latest'])}/3`);
     set('novel_acc_summary_display', `已开启 ${checkedCount(['novel_show_floating_window', 'novel_show_embedded_toolbar', 'novel_show_toast'])}/3`);
     set('novel_acc_summary_book', recentStatus.text || '暂无记录');
+    set('novel_acc_summary_ebook', ebookEmbedEl && ebookEmbedEl.checked
+        ? `嵌入图片 ${Number(val('novel_ebook_max_image_mb') || 5)}MB/张`
+        : '纯文字（不嵌入图片）');
+}
+
+// ==================== 图片电子书（EPUB）导出与预览 ====================
+/** 把结构化书 + 图片转换成 /ebook 请求体 */
+function buildEbookPayload(settings, chatLog) {
+    const structured = buildStructuredNovel(settings, chatLog);
+    return { structured, payload: {
+        bookTitle: structured.bookTitle,
+        author: getBookTitle(settings),
+        account: (typeof ctx.currentUser !== 'undefined' && ctx.currentUser && (ctx.currentUser.name || ctx.currentUser.handle)) || '',
+        save_dir: settings.save_dir || '',
+        chat_anchor: getChatAnchor(),
+        file_name: getBookFileName(settings),
+        chapters: structured.chapters,
+        options: {
+            maxImageBytes: Math.max(1, Number(settings.ebook_max_image_mb) || 5) * 1024 * 1024,
+            maxTotalBytes: Math.max(1, Number(settings.ebook_max_total_mb) || 80) * 1024 * 1024,
+            stRoot: settings.ebook_st_root || ''
+        }
+    } };
+}
+
+/** 只读图片清单预览（P0.5）：不改任何文件，先看再导 */
+function openEbookPreviewModal() {
+    if (typeof document === 'undefined') return;
+    const settings = getSettings();
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    const scan = scanBookImages(settings, chatLog);
+
+    let overlay = document.getElementById('novel_ebook_modal');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'novel_ebook_modal';
+        overlay.className = 'novel-modal-overlay';
+        overlay.style.display = 'none';
+        overlay.innerHTML = `
+            <div class="novel-modal novel-modal-preview" role="dialog" aria-modal="true" aria-label="图片清单预览">
+                <div class="novel-modal-header">
+                    <b class="novel-modal-title"><i class="fa-solid fa-images"></i>图片清单预览</b>
+                    <button type="button" id="novel_ebook_modal_close" class="novel-icon-btn" title="关闭"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="novel-modal-body" id="novel_ebook_modal_body"></div>
+            </div>`;
+        // 与其它浮层同一约定：必须挂进 top-layer 载体，直接 appendChild 到 body 会被宿主
+        // html transform 劫持 fixed 定位（v1.17.3 踩过的坑，测试对此有守护断言）。
+        mountInTopLayer('novel-tl-ebook', overlay);
+        overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.style.display = 'none'; });
+        const closeBtn = overlay.querySelector('#novel_ebook_modal_close');
+        if (closeBtn) closeBtn.addEventListener('click', () => { overlay.style.display = 'none'; });
+    }
+
+    const body = overlay.querySelector('#novel_ebook_modal_body');
+    if (!body) return;
+    const rows = [];
+    rows.push(`<div class="novel-mv-stat">含图消息 <b>${scan.imageMessages}</b> 条 · 图片共 <b>${scan.totalImages}</b> 张`
+        + `${scan.degradedCount ? ` · <span class="is-warn">原位校验不一致 ${scan.degradedCount} 条（将退化为章尾插图）</span>` : ' · 原位校验全部一致 ✅'}`
+        + `${scan.missingList.length ? ` · <span class="is-warn">${scan.missingList.length} 项缺失</span>` : ''}</div>`);
+    if (!scan.messages.length) {
+        rows.push('<div class="novel-mv-hint">当前会话没有识别到图片。若你在用 bbi 等图像生成扩展，请确认消息里带有 <code>extra.bbiImage</code> 数据。</div>');
+    }
+    for (const m of scan.messages) {
+        rows.push(`<div class="novel-ebook-row"><div class="novel-ebook-row-head"><b>第 ${m.chapter} 章</b> · 楼层 ${m.floor} · ${escapeHtml(m.speaker)} · 标记 ${m.markerCount} / 图 ${m.imageCount}${m.degraded ? ' · <span class="is-warn">降级</span>' : ''}</div>`);
+        for (const im of m.images) {
+            const ok = !im.status || im.status === 'ready';
+            rows.push(`<div class="novel-ebook-img ${ok ? '' : 'is-bad'}"><code>${escapeHtml(im.path.split('/').pop() || im.path)}</code>`
+                + ` <span class="novel-chip-count">slot ${im.slotSeq}</span>`
+                + `${ok ? '' : ` <span class="is-warn">状态 ${escapeHtml(im.status)}</span>`}</div>`);
+        }
+        if (m.degraded && m.reason) rows.push(`<div class="novel-mv-hint is-warn">${escapeHtml(m.reason)}</div>`);
+        rows.push('</div>');
+    }
+    if (scan.missingList.length) {
+        rows.push('<div class="novel-mv-hint is-warn">缺失项：' + scan.missingList.map(escapeHtml).join('；') + '</div>');
+    }
+    body.innerHTML = rows.join('');
+    overlay.style.display = 'flex';
+    if (typeof closeEbookModalOnEsc === 'undefined') { /* 占位，保持结构清晰 */ }
+}
+
+/** 导出 EPUB：调服务端 /ebook 打包，成功后提示文件位置 */
+async function exportEbook(btn) {
+    const settings = getSettings();
+    const chatLog = (Array.isArray(ctx.chat)) ? ctx.chat : (chat_raw || window.chat || []);
+    // 能力门控：老服务端（无 /ebook）直接给可操作提示，不发无效请求
+    if (serverCapabilities.ebook !== true) {
+        updateRecentStatus('error', '当前服务端插件版本过旧（缺少 /ebook 接口），请重新部署 plugins/auto-save 后重启酒馆');
+        if (window.toastr) {
+            window.toastr.warning('EPUB 导出需要更新服务端插件（缺少 /ebook 接口）。请重新部署 plugins/auto-save 并重启酒馆。', '小说连载', { timeOut: 8000 });
+        }
+        return;
+    }
+    if (!chatLog || !chatLog.length) {
+        if (window.toastr) window.toastr.info('当前没有任何聊天内容可供导出。', '小说连载');
+        return;
+    }
+    if (!settings.ebook_embed_images && window.toastr) {
+        window.toastr.info('未开启「嵌入图片」，本次将导出纯文字 EPUB。可在设置里打开。', '小说连载');
+    }
+    if (!confirm('是否导出 EPUB 电子书？\n' + (settings.ebook_embed_images
+        ? '将把识别到的插画按正文原位嵌入。'
+        : '图片嵌入未开启，本次为纯文字。') + '\n后续可在手机阅读器（微信读书/ReadPad/掌阅）中导入。')) {
+        return;
+    }
+
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在打包 EPUB…'; }
+    updateRecentStatus('updating', '正在生成 EPUB 电子书（含图片收集）...');
+
+    try {
+        const { structured, payload } = buildEbookPayload(settings, chatLog);
+        const headers = (typeof getRequestHeaders === 'function') ? getRequestHeaders() : { 'Content-Type': 'application/json' };
+        if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+        const resp = await fetch('/api/plugins/auto-save/ebook', {
+            method: 'POST', headers, body: JSON.stringify(payload)
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data || data.success !== true) {
+            const msg = (data && data.error) || `HTTP ${resp.status}`;
+            updateRecentStatus('error', `EPUB 导出失败：${msg}`);
+            if (window.toastr) window.toastr.error(`EPUB 导出失败：${msg}`, '小说连载');
+            return;
+        }
+        const imgs = data.images || {};
+        const imgMsg = imgs.embedded ? ` 图片 ${imgs.embedded} 张已嵌入` : ' 纯文字';
+        const skipMsg = imgs.skipped ? `（跳过 ${imgs.skipped} 张）` : '';
+        updateRecentStatus('success', `EPUB 已导出：${data.file}${imgMsg}${skipMsg}`);
+        if (window.toastr) {
+            window.toastr.success(`EPUB 电子书已生成：${data.file}${imgMsg}${skipMsg}`, '小说连载', { timeOut: 6000 });
+        }
+        if (imgs.missing && imgs.missing.length && window.toastr) {
+            window.toastr.warning(`有 ${imgs.missing.length} 张图片未找到：${imgs.missing.slice(0, 3).join('；')}`, '小说连载', { timeOut: 8000 });
+        }
+    } catch (e) {
+        updateRecentStatus('error', `EPUB 导出异常：${e.message}`);
+        if (window.toastr) window.toastr.error(`EPUB 导出异常：${e.message}`, '小说连载');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
+    }
 }
 
 /** 创建过滤效果预览弹窗（body 级，全程只建一次） */
@@ -2777,9 +3394,12 @@ async function renderSettingsUI(cachedStatus = null) {
 
     const status = cachedStatus || await checkServerPluginStatus();
 
-    // 记录服务端插件版本（问候语补写等能力按版本门控）
+    // 记录服务端插件版本与能力声明（问候语补写等按版本门控；EPUB 等新功能按能力门控）
     if (status.ready) {
         serverPluginVersion = status.version || serverPluginVersion;
+        if (status.capabilities && typeof status.capabilities === 'object') {
+            serverCapabilities = status.capabilities;
+        }
     }
 
     // 如果服务端已就绪且非用户刻意主动关闭，全自动激活开启连载状态
@@ -2832,32 +3452,32 @@ async function renderSettingsUI(cachedStatus = null) {
                 <div class="novel-acc" data-nv-acc="book">
                     <button type="button" class="novel-acc-head" aria-expanded="false">
                         <span class="novel-acc-title"><i class="fa-solid fa-file-lines"></i> 连载文件</span>
-                        <span class="novel-acc-summary" id="novel_acc_summary_book">${recentStatus.text || initialFileName}</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_book">${escapeHtml(recentStatus.text || initialFileName)}</span>
                         <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
                     </button>
                     <div class="novel-acc-body">
                         <div class="novel-info-row">
                             <span class="novel-info-key">文件名</span>
-                            <span class="novel-info-val novel-book-filename" id="novel_drawer_filename" title="点击复制完整文件路径">${initialFileName}</span>
+                            <span class="novel-info-val novel-book-filename" id="novel_drawer_filename" title="点击复制完整文件路径">${escapeHtml(initialFileName)}</span>
                             <button type="button" id="novel_copy_filepath_btn" class="novel-copy-pill" title="复制完整文件保存路径">
                                 <i class="fa-regular fa-copy"></i> 复制路径
                             </button>
                         </div>
                         <div class="novel-info-row">
                             <span class="novel-info-key">保存路径</span>
-                            <span class="novel-info-val is-wrap"><code id="novel_drawer_filepath">${initialDir}${initialFileName}</code></span>
+                            <span class="novel-info-val is-wrap"><code id="novel_drawer_filepath">${escapeHtml(initialDir)}${escapeHtml(initialFileName)}</code></span>
                         </div>
                         <div id="novel_recent_status" class="novel-status-line ${recentStatus.state === 'updating' ? 'is-updating' : (recentStatus.state === 'success' ? 'is-success' : (recentStatus.state === 'skipped' ? 'is-skipped' : (recentStatus.state === 'error' ? 'is-error' : 'is-idle')))}">
                             <span id="novel_recent_detail">
                                 ${recentStatus.state === 'success'
-                                    ? `<span><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${recentStatus.text}</span>${recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
+                                    ? `<span><i class="fa-solid fa-circle-check"></i> <b>更新完成：</b>${escapeHtml(recentStatus.text)}</span>${recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${escapeHtml(recentStatus.file)}</code></div>` : ''}`
                                     : (recentStatus.state === 'updating'
-                                        ? `<span><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${recentStatus.text}</span>`
+                                        ? `<span><i class="fa-solid fa-spinner fa-spin"></i> <b>更新中：</b>${escapeHtml(recentStatus.text)}</span>`
                                         : (recentStatus.state === 'skipped'
-                                            ? `<span><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${recentStatus.text}</span>${recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${recentStatus.file}</code></div>` : ''}`
+                                            ? `<span><i class="fa-solid fa-circle-info"></i> <b>已跳过：</b>${escapeHtml(recentStatus.text)}</span>${recentStatus.file ? `<div class="novel-status-file">文件路径：<code>${escapeHtml(recentStatus.file)}</code></div>` : ''}`
                                             : (recentStatus.state === 'error'
-                                                ? `<span><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${recentStatus.text}</span>`
-                                                : `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${recentStatus.text}`)))
+                                                ? `<span><i class="fa-solid fa-circle-exclamation"></i> <b>写入失败：</b>${escapeHtml(recentStatus.text)}</span>`
+                                                : `<i class="fa-solid fa-circle-check" style="opacity: 0.7;"></i> ${escapeHtml(recentStatus.text)}`)))
                                 }
                             </span>
                             <span id="novel_recent_time" class="novel-status-time">${recentStatus.time || '--:--:--'}</span>
@@ -2877,11 +3497,11 @@ async function renderSettingsUI(cachedStatus = null) {
                 <div class="novel-acc" data-nv-acc="include">
                     <button type="button" class="novel-acc-head" aria-expanded="false">
                         <span class="novel-acc-title"><i class="fa-solid fa-circle-check"></i> 只保留的标签（白名单）</span>
-                        <span class="novel-acc-summary" id="novel_acc_summary_include">${settings.include_tags ? settings.include_tags : '整篇保留'}</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_include">${settings.include_tags ? escapeHtml(settings.include_tags) : '整篇保留'}</span>
                         <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
                     </button>
                     <div class="novel-acc-body">
-                        <input type="text" id="novel_include_tags" class="text_pole" value="${settings.include_tags || ''}" placeholder="例如: story, response, content" />
+                        <input type="text" id="novel_include_tags" class="text_pole" value="${escapeHtml(settings.include_tags || '')}" placeholder="例如: story, response, content" />
                         <small>留空 = 整篇保留。AI 若把小说写在某个标签内（如 <code>&lt;story&gt;</code>），填入标签名即只提取其中正文，忽略外部元数据。</small>
                     </div>
                 </div>
@@ -2889,11 +3509,11 @@ async function renderSettingsUI(cachedStatus = null) {
                 <div class="novel-acc" data-nv-acc="exclude">
                     <button type="button" class="novel-acc-head" aria-expanded="false">
                         <span class="novel-acc-title"><i class="fa-solid fa-circle-minus"></i> 剔除的标签块（黑名单）</span>
-                        <span class="novel-acc-summary" id="novel_acc_summary_exclude">${settings.exclude_tags ? settings.exclude_tags : '未设置'}</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_exclude">${settings.exclude_tags ? escapeHtml(settings.exclude_tags) : '未设置'}</span>
                         <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
                     </button>
                     <div class="novel-acc-body">
-                        <input type="text" id="novel_exclude_tags" class="text_pole" value="${settings.exclude_tags || ''}" placeholder="例如: status, memory, details, ooc, note" />
+                        <input type="text" id="novel_exclude_tags" class="text_pole" value="${escapeHtml(settings.exclude_tags || '')}" placeholder="例如: status, memory, details, ooc, note" />
                         <small>无论在整篇还是正文标签内部，都会彻底剔除这些干扰块。</small>
                     </div>
                 </div>
@@ -2995,8 +3615,8 @@ async function renderSettingsUI(cachedStatus = null) {
                         <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
                     </button>
                     <div class="novel-acc-body">
-                        <input type="text" id="novel_save_dir" class="text_pole" value="${settings.save_dir || ''}" placeholder="留空默认存至 plugins/auto-save/logs；填写服务端有效目录" />
-                        <small title="若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 D:\），此时建议留空并用【导出整本 TXT】下载">服务端（运行酒馆的机器）目录，留空为默认。当前：<code id="novel_save_dir_preview">${initialDir}${initialFileName}</code></small>
+                        <input type="text" id="novel_save_dir" class="text_pole" value="${escapeHtml(settings.save_dir || '')}" placeholder="留空默认存至 plugins/auto-save/logs；填写服务端有效目录" />
+                        <small title="若酒馆部署在云服务器(Linux)，无法直接填写本地盘符（如 D:\），此时建议留空并用【导出整本 TXT】下载">服务端（运行酒馆的机器）目录，留空为默认。当前：<code id="novel_save_dir_preview">${escapeHtml(initialDir)}${escapeHtml(initialFileName)}</code></small>
                     </div>
                 </div>
 
@@ -3014,6 +3634,43 @@ async function renderSettingsUI(cachedStatus = null) {
                     <button type="button" id="novel_test_btn" class="novel-btn btn-test novel-btn-minor novel-btn-inline" title="测试服务端插件连通性与标签清洗效果">
                         <i class="fa-solid fa-feather-pointed"></i> 试写一章
                     </button>
+                </div>
+
+                <!-- 【图片电子书 EPUB】：默认关闭，开箱不影响 TXT 导出 -->
+                <div class="novel-acc" data-nv-acc="ebook">
+                    <button type="button" class="novel-acc-head" aria-expanded="false">
+                        <span class="novel-acc-title"><i class="fa-solid fa-book-open"></i> 图片电子书（EPUB）</span>
+                        <span class="novel-acc-summary" id="novel_acc_summary_ebook"></span>
+                        <i class="fa-solid fa-chevron-down novel-acc-chev"></i>
+                    </button>
+                    <div class="novel-acc-body">
+                        <label class="novel-switch-row">
+                            <span>导出时嵌入图片</span>
+                            <input type="checkbox" id="novel_ebook_embed_images" ${settings.ebook_embed_images ? 'checked' : ''} />
+                        </label>
+                        <small>关闭时 EPUB 为纯文字；开启后才读取每轮回复携带的插画（<code>extra.bbiImage</code>）并按正文原位嵌入。本功能<b>需要部署服务端插件</b>，且不会影响 TXT 连载。</small>
+                        <div class="novel-btn-row">
+                            <button type="button" id="novel_ebook_preview_btn" class="novel-btn novel-btn-block" title="只读扫描：列出识别到的图片、原位校验结果与将跳过的项">
+                                <i class="fa-solid fa-images"></i> 图片清单预览
+                            </button>
+                            <button type="button" id="novel_ebook_export_btn" class="novel-btn btn-export" title="服务端打包 EPUB 电子书（图片按正文原位嵌入）">
+                                <i class="fa-solid fa-book"></i> 导出 EPUB 电子书
+                            </button>
+                        </div>
+                        <label class="novel-row">
+                            <span>单图上限 (MB)</span>
+                            <input type="number" id="novel_ebook_max_image_mb" class="text_pole" min="1" max="50" step="1" value="${Number(settings.ebook_max_image_mb) || 5}" />
+                        </label>
+                        <label class="novel-row">
+                            <span>图片总量上限 (MB)</span>
+                            <input type="number" id="novel_ebook_max_total_mb" class="text_pole" min="1" max="500" step="1" value="${Number(settings.ebook_max_total_mb) || 80}" />
+                        </label>
+                        <label class="novel-row">
+                            <span>酒馆根目录（可选）</span>
+                            <input type="text" id="novel_ebook_st_root" class="text_pole" value="${escapeHtml(settings.ebook_st_root || '')}" placeholder="留空自动推导；容器/NAS 部署时可填，如 /home/node/app" />
+                        </label>
+                        <small>图片实际路径为 <code>&lt;酒馆根&gt;/data/&lt;账号&gt;/user/images/…</code>。留空时按 ①当前账号 ②default-user ③其它账号 顺序自动查找，找不到的图会在结果里列为 missing（不会静默丢弃）。</small>
+                    </div>
                 </div>
                 </div><!-- /.novel-tabpane file -->
 
@@ -3094,11 +3751,12 @@ async function renderSettingsUI(cachedStatus = null) {
                 }, 1200);
             }
             if (window.toastr) {
-                window.toastr.info(`连载文件路径已复制：<br><code>${fullPath}</code>`, '小说连载', { timeOut: 3500 });
+                // D3：toastr 支持 HTML，文件名派生自书名/聊天名，插入前必须转义
+                window.toastr.info(`连载文件路径已复制：<br><code>${escapeHtml(fullPath)}</code>`, '小说连载', { timeOut: 3500 });
             }
         } catch (err) {
             if (window.toastr) {
-                window.toastr.info(`当前连载文件：${fullPath}`, '小说连载');
+                window.toastr.info(`当前连载文件：${escapeHtml(fullPath)}`, '小说连载');
             }
         }
     };
@@ -3268,6 +3926,55 @@ async function renderSettingsUI(cachedStatus = null) {
     const exportBtn = panel.querySelector('#novel_export_all_btn');
     if (exportBtn) {
         exportBtn.addEventListener('click', () => exportNovelText());
+    }
+
+    // ===== 图片电子书（EPUB）设置项 =====
+    const ebookEmbedEl = panel.querySelector('#novel_ebook_embed_images');
+    if (ebookEmbedEl) {
+        ebookEmbedEl.addEventListener('change', () => {
+            settings.ebook_embed_images = !!ebookEmbedEl.checked;
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            refreshNovelAccSummaries(panel);
+        });
+    }
+    const ebookMaxImgEl = panel.querySelector('#novel_ebook_max_image_mb');
+    if (ebookMaxImgEl) {
+        ebookMaxImgEl.addEventListener('change', () => {
+            const v = Math.max(1, Math.min(50, Number(ebookMaxImgEl.value) || 5));
+            settings.ebook_max_image_mb = v;
+            ebookMaxImgEl.value = String(v);
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+    const ebookMaxTotalEl = panel.querySelector('#novel_ebook_max_total_mb');
+    if (ebookMaxTotalEl) {
+        ebookMaxTotalEl.addEventListener('change', () => {
+            const v = Math.max(1, Math.min(500, Number(ebookMaxTotalEl.value) || 80));
+            settings.ebook_max_total_mb = v;
+            ebookMaxTotalEl.value = String(v);
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        });
+    }
+    const ebookRootEl = panel.querySelector('#novel_ebook_st_root');
+    if (ebookRootEl) {
+        ebookRootEl.addEventListener('change', () => {
+            settings.ebook_st_root = String(ebookRootEl.value || '').trim();
+            if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+            refreshNovelAccSummaries(panel);
+        });
+    }
+    const ebookPreviewBtn = panel.querySelector('#novel_ebook_preview_btn');
+    if (ebookPreviewBtn) {
+        ebookPreviewBtn.addEventListener('click', () => openEbookPreviewModal());
+    }
+    const ebookExportBtn = panel.querySelector('#novel_ebook_export_btn');
+    if (ebookExportBtn) {
+        ebookExportBtn.addEventListener('click', () => exportEbook(ebookExportBtn));
+        // 能力门控：老服务端没有 /ebook，导出前就禁用并给出原因（避免点了才报错）
+        if (serverCapabilities.ebook !== true) {
+            ebookExportBtn.disabled = true;
+            ebookExportBtn.title = '需要更新服务端插件（缺少 /ebook 接口）：重新部署 plugins/auto-save 并重启酒馆';
+        }
     }
 
     // 绑定测试按钮
@@ -3523,6 +4230,75 @@ async function renderSettingsUI(cachedStatus = null) {
     refreshNovelAccSummaries(panel);
 }
 
+// ==================== 测试专用导出（浏览器环境完全无副作用）====================
+// 浏览器里 typeof module === 'undefined'，整块被跳过；Node 下由 test/_helpers/load-index.js
+// 注入 module 桩后取用，让测试锁的是本文件的真实实现，而不是手抄副本。
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        // 清洗引擎
+        cleanNovelText,
+        buildNovelText,
+        getCleanedMessage,
+        getCleanMessageSig,
+        cleanTextCache,
+        // 标签检测器
+        scanChatTags,
+        parseTagList,
+        isAuxiliaryTag,
+        extractTagSample,
+        // 楼层 → 章节映射
+        computeChapterMap,
+        // 排版/命名
+        escapeHtml,
+        compareVersion,
+        sanitizeFilename,
+        getBookTitle,
+        getBookFileName,
+        getChatAnchor,
+        getAccountPrefix,
+        shortBookTitle,
+        // 设置与状态
+        DEFAULT_SETTINGS,
+        getSettings,
+        // 连载写入链路（回归用：问候语入书 / 409 冲突分支 / 签名登记）
+        postChapterToServer,
+        seedLastSavedSignature,
+        saveSpecificMessage,
+        ensureGreetingSerialized,
+        handleMessageSave,
+        updateRecentStatus,
+        // 图片电子书（EPUB）：清单扫描 / 结构化正文 / 原位图片
+        extractBbiImageList,
+        matchBbiImageMarkers,
+        buildImageSlots,
+        splitParagraphBlocks,
+        getCleanedMessageWithImageSlots,
+        buildStructuredNovel,
+        scanBookImages,
+        shortPromptAlt,
+        __testState: {
+            getLastSavedSignature: () => lastSavedSignature,
+            setLastSavedSignature: (v) => { lastSavedSignature = v; },
+            getLastSettledSavedIndex: () => lastSettledSavedIndex,
+            setLastSettledSavedIndex: (v) => { lastSettledSavedIndex = v; },
+            // F6：文件视角的末尾章号（替换定位键）
+            getLastWrittenChapterNumber: () => lastWrittenChapterNumber,
+            setLastWrittenChapterNumber: (v) => { lastWrittenChapterNumber = v; },
+            getRecentStatus: () => recentStatus,
+            setRecentStatus: (v) => { recentStatus = v; },
+            getSavedChapterMap: () => savedChapterMap,
+            getServerPluginVersion: () => serverPluginVersion,
+            setServerPluginVersion: (v) => { serverPluginVersion = v; },
+        },
+        __internals: {
+            INLINE_TAGS,
+            SCAN_IGNORE_TAGS,
+            AUX_TAG_NAME_PATTERN,
+            EXTENSION_NAME,
+        },
+    };
+}
+
 jQuery(async () => {
     console.log('[AutoSaveTxt] 小说连载阅读扩展正在初始化...');
 
@@ -3559,7 +4335,8 @@ jQuery(async () => {
         }
     }, 500);
 
-    seedLastSavedSignature();
+    // D2：boot 播种时跳过角色问候语，否则问候语被误登记为已保存 → 永不入书
+    seedLastSavedSignature({ skipGreeting: true });
 
     // 魔法棒菜单项 + 悬浮窗：立即就位，并用短轮询兜底酒馆慢渲染 / 菜单后置重绘
     refreshNovelToolbars();
@@ -3641,7 +4418,8 @@ jQuery(async () => {
 
         const refreshContext = () => {
             cleanTextCache.map.clear();
-            seedLastSavedSignature();
+            // D2：切聊天同样跳过问候语播种，避免"刚开的新聊天"里问候语又被当成已入书
+            seedLastSavedSignature({ skipGreeting: true });
             renderTagTools();
             updateDrawerHeaderFileBadge();
             // ①④ 切聊天/角色/群后重算楼层入书映射并重绘徽标与最新楼层工具条
