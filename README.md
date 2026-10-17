@@ -308,12 +308,15 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zgy-beep/novel-stream@main/install.sh | b
 
 ## 给开发者：UI 规范与组件复用
 
-本扩展的浮动 UI（弹窗 / 悬浮入口 / 折叠分组 / 胶囊开关 / 提示层等）已整理成一套可复用的 **UI Kit 规范**，放在 [`ui-kit/`](ui-kit/README.md)：
+本扩展的浮动 UI（弹窗 / 悬浮入口 / 折叠分组 / 胶囊开关 / 提示层等）已整理成一套 **独立项目** 的 UI Kit 规范，位于 [`ui-kit/`](ui-kit/README.md)。该目录自带 `package.json` / `LICENSE` / `CHANGELOG.md` / `test/`，**不依赖本仓库的任何其它文件，可整目录复制或移出到任意插件/仓库**：
 
 - [ui-kit/README.md](ui-kit/README.md)：配色语义、设计令牌、组件 DOM 与状态、SillyTavern 宿主兼容红线（top-layer 载体、checkbox 样式隔离等）、命名约定与迁移对照；
-- [ui-kit/tokens.css](ui-kit/tokens.css) / [ui-kit/components.css](ui-kit/components.css)：零依赖、可直接复制到下一个插件；`@import` 两个文件即可使用，支持深/浅主题；
+- [ui-kit/tokens.css](ui-kit/tokens.css) / [ui-kit/components.css](ui-kit/components.css)：零依赖、`@import` 两个文件即可使用，支持深/浅主题；
 - [ui-kit/preview.html](ui-kit/preview.html)：离线组件预览页，双击即可看全部组件与配色；
-- 守护测试 [test/test-ui-kit.js](test/test-ui-kit.js)：自动检查 token 完整、组件三方覆盖、无硬编码颜色、WCAG 对比度、宿主兼容红线，以及与 `style.css` 参考实现的取值漂移。
+- [ui-kit/test/test-ui-kit.js](ui-kit/test/test-ui-kit.js)：项目内自带的规范守护测试（token 完整 / 三方覆盖 / 无硬编码颜色 / WCAG 对比度 / 宿主兼容红线 / 金标准取值），在 `ui-kit/` 目录下执行 `npm test` 即可独立运行；
+- [ui-kit/CHANGELOG.md](ui-kit/CHANGELOG.md)：UI Kit 独立版本历史（当前 v1.1.0，与扩展版本互不影响）。
+
+> 提示：UI Kit 是独立项目。如果你把 `ui-kit/` 移动到别处，本仓库的构建/测试不受影响（根测试套件不再包含它），后续请以该独立目录内的 `README.md` / `CHANGELOG.md` 为准。
 
 ---
 

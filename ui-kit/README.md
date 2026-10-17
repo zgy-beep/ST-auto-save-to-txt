@@ -1,14 +1,18 @@
 # SillyTavern 插件 UI Kit · 设计规范
 
-> 版本：**v1.0.0**（语义化版本；破坏性改名/删 token 升大版本，新增组件/新增 token 升小版本）
-> 来源：从 [novel-stream](../README.md) 扩展的浮动 UI（设置弹窗 / 悬浮入口 / 图片预览 / 提示层）中提炼，已在实际酒馆宿主（深/浅主题、桌面/手机）上验证。
-> 定位：**SillyTavern 插件自有的 body 级浮动 UI**。不接管聊天区、原生抽屉等宿主区域（那些区域必须沿用酒馆主题变量）。
+> 版本：**v1.1.0**（语义化版本；破坏性改名/删 token 升大版本，新增组件/新增 token 升小版本）
+> 来源：从 novel-stream 扩展（另一个 SillyTavern 插件）的浮动 UI（设置弹窗 / 悬浮入口 / 图片预览 / 提示层）中提炼，已在实际酒馆宿主（深/浅主题、桌面/手机）上验证。
+> 定位：**独立项目 + SillyTavern 插件自有的 body 级浮动 UI**。本目录自带 `package.json` / `LICENSE` / `CHANGELOG` / `test/`，**不依赖任何外部仓库或父目录，可整目录复制/移动到任意文件夹或仓库**。不接管聊天区、原生抽屉等宿主区域（那些区域必须沿用酒馆主题变量）。
 
 | 文件 | 作用 |
 | :--- | :--- |
 | [`tokens.css`](tokens.css) | 设计令牌：配色、字号、间距、圆角、阴影、动效、层级、组件尺寸；含深色默认值与 `.nvui-theme-light` 浅色覆盖 |
 | [`components.css`](components.css) | 通用组件样式；全部 `nvui-` 前缀，颜色只引用 token |
 | [`preview.html`](preview.html) | 离线组件预览页（双击即可打开，可切换深/浅主题；桌面与手机两种宽度都要过一眼） |
+| [`test/test-ui-kit.js`](test/test-ui-kit.js) | 规范守护测试（token 完整性 / 三方覆盖 / 无硬编码颜色 / WCAG AA 对比度 / 宿主兼容红线 / 金标准取值）；`npm test` 或 `node test/test-ui-kit.js` |
+| [`package.json`](package.json) | 独立项目元信息与 `npm test` 入口（零依赖，无需 `npm install`） |
+| [`LICENSE`](LICENSE) | MIT 许可 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 变更记录（遵循语义化版本） |
 | `README.md` | 本规范（配色语义、组件用法、宿主兼容红线、命名约定、迁移对照） |
 
 目录
@@ -32,8 +36,9 @@
 **是什么**
 
 - 一套**自包含深色主题**的浮动 UI：弹窗、标签页、折叠分组、胶囊开关、按钮、输入行、提示/告警、状态行、徽标、空态、悬浮面板等。
-- 一套**可复制的实现**：下一个插件把 `ui-kit/` 整个目录拷过去，`@import` 两个 CSS 即可用；无需构建工具、无第三方依赖。
-- 一套**有守护的规范**：`test/test-ui-kit.js` 自动检查 token 是否齐全、组件是否被预览/文档覆盖、是否泄漏裸选择器、是否硬编码颜色、对比度是否达标、是否与 novel-stream 实现漂移。
+- 一套**可复制的实现**：下一个插件把本目录整个拷过去，`@import` 两个 CSS 即可用；无需构建工具、无第三方依赖。
+- 一个**独立项目**：目录内自带元信息、许可、变更记录、预览页与测试，可整体移动到任意文件夹/仓库；`cd` 进目录后 `npm test` 即可独立验证。
+- 一套**有守护的规范**：`test/test-ui-kit.js` 自动检查 token 是否齐全、组件是否被预览/文档覆盖、是否泄漏裸选择器、是否硬编码颜色、对比度是否达标、核心取值是否与金标准一致。
 
 **不是什么**
 
@@ -45,6 +50,29 @@
 
 ## 2. 快速开始
 
+### 2.0 本目录是独立项目
+
+本目录可以直接作为独立项目/仓库使用，不依赖任何外部文件：
+
+```text
+ui-kit/                  <- 可整目录移动到任意位置或仓库
+  tokens.css
+  components.css
+  preview.html
+  README.md              <- 本规范
+  package.json           <- 元信息 + npm test
+  LICENSE
+  CHANGELOG.md
+  .gitignore
+  test/
+    test-ui-kit.js       <- 规范守护测试（零依赖）
+```
+
+- **独立验证**：`cd ui-kit` 后运行 `npm test`（等价于 `node test/test-ui-kit.js`），无需 `npm install`；
+- **独立预览**：双击 `preview.html` 即可（离线可用）；
+- **移动/复用**：整个目录复制到新插件里，或作为独立仓库单独维护；
+- Node.js 要求：>= 16（仅测试需要；`tokens.css` / `components.css` 在浏览器/酒馆中使用，无 Node 依赖）。
+
 ### 2.1 引入
 
 新插件的 `style.css` 顶部（`@import` 必须在所有规则之前）：
@@ -54,18 +82,22 @@
 @import url('./ui-kit/components.css');
 ```
 
-目录结构建议：
+集成到插件时的目录结构建议：
 
 ```text
 your-plugin/
   manifest.json
   style.css          <- @import ./ui-kit/...
   index.js
-  ui-kit/
+  ui-kit/            <- 本目录（可整目录拷入）
     tokens.css
     components.css
-    README.md
     preview.html
+    README.md
+    package.json
+    LICENSE
+    CHANGELOG.md
+    test/
 ```
 
 ### 2.2 作用域
@@ -524,9 +556,9 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay
 - **选择器**：不得出现裸元素选择器（如 `input { ... }`、`button { ... }`）与全局重置；所有规则必须在 `.nvui-` / `dialog.nvui-tl` 作用域下。
 - **图标**：Font Awesome `<i>`；纯 CSS 图形只用于箭头/滑钮/加载环。
 - **无 emoji**：README、CSS、HTML、JS 文案中不使用 emoji。
-- **文件结构**：`ui-kit/` 独立目录，可直接复制；`preview.html` 必须保持离线可打开（无 CDN、无网络请求）。
-- **版本**：kit 版本写在 `tokens.css`/`components.css` 文件头与本 README 标题；对外暴露的插件版本由各插件自己的 manifest 管理（本仓库插件版本见根 `manifest.json`）。
-- **测试**：新增/修改组件后跑 `node test/test-ui-kit.js`；该测试同时守护「token 完整」「组件被预览与文档覆盖」「无硬编码颜色」「对比度」「与 novel-stream 实现不漂移」。
+- **文件结构**：本目录是自包含独立项目（`package.json` / `LICENSE` / `CHANGELOG.md` / `test/` 齐全），可直接整目录复制或移动；`preview.html` 必须保持离线可打开（无 CDN、无网络请求）。
+- **版本**：kit 版本同时写在 `package.json`、`tokens.css` / `components.css` 文件头、本 README 标题、`CHANGELOG.md` 最新条目与 `preview.html`；对外暴露的插件版本由各插件自己的 manifest 独立管理（不要求与 kit 版本一致）。
+- **测试**：新增/修改组件后，在本目录运行 `npm test`（或 `node test/test-ui-kit.js`）；该测试同时守护「token 完整」「组件被预览与文档覆盖」「无硬编码颜色」「WCAG 对比度」「核心 token 金标准取值」「独立项目结构与版本自洽」。
 
 ---
 
@@ -580,17 +612,20 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay
 
 ## 11. 版本管理
 
-- 当前 **v1.0.0**（2026-10-17）：从 novel-stream v1.19.1 的浮动 UI 中提炼；含深/浅双主题、13 个组件族、宿主兼容红线与自动守护测试。
+- 当前 **v1.1.0**（2026-10-17）：独立项目化（自带 `package.json` / `LICENSE` / `CHANGELOG.md` / `test/`，可整目录移动）；含深/浅双主题、13 个组件族、宿主兼容红线与自动守护测试。
 - 变更记录（倒序）：
-  - **v1.0.0**：首个版本。token 体系、组件样式、预览页、规范文档、`test/test-ui-kit.js`（token 完整性 / 组件覆盖 / 无硬编码颜色 / 对比度 / 与参考实现漂移检查）。
+  - **v1.1.0**：独立项目化封装；README 去除对来源仓库的相对链接；守护测试改为项目内自洽（内置核心 token 金标准 + 多处版本一致性），不再读取外部仓库文件。
+  - **v1.0.0**：首个版本。token 体系、组件样式、预览页、规范文档、`test/test-ui-kit.js`。
 - 兼容性约定：
-  - 修 bug / 调整单个 token 值：补丁版本（1.0.x）；
+  - 修 bug / 调整单个 token 值：补丁版本（1.1.x）；
   - 新增组件 / 新增 token：小版本（1.x.0）；
-  - 重命名类/token、删除 token、修改 DOM 契约：大版本（x.0.0），并同步更新本文件的迁移对照表与 `test/test-ui-kit.js`。
-- 升级步骤：覆盖 `ui-kit/` → 看 preview 确认视觉无回归 → 跑 `node test/test-ui-kit.js` → 跑全量测试。
+  - 重命名类/token、删除 token、修改 DOM 契约：大版本（x.0.0），并同步更新本文件的迁移对照表与 `test/test-ui-kit.js` 的金标准/必填清单。
+- 升级步骤：用新版本目录覆盖 `tokens.css` / `components.css` → 打开 `preview.html` 确认视觉无回归 → 在本目录运行 `npm test` →（若集成在插件中）再跑该插件的测试。
+
+> 备注：`ui-kit/` 作为独立项目时，版本号只看本目录内的 `package.json` / `CHANGELOG.md`；它不代表任何宿主插件的版本。
 
 ---
 
 ## 12. 许可
 
-MIT，与 [novel-stream](../LICENSE) 项目一致。复制到其它插件时请保留本目录与版本号，便于后续同步上游修复。
+MIT，见同目录 [LICENSE](LICENSE)。本目录是独立项目，可整体移动/复制到任意位置；复制到其它插件时请保留本目录与版本号，便于后续同步上游修复。

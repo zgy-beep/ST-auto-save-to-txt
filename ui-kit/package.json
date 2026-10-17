@@ -1,0 +1,17 @@
+{
+  "name": "sillytavern-nvui-kit",
+  "version": "1.1.0",
+  "description": "SillyTavern 插件通用 UI Kit：设计令牌、组件样式与设计规范（零依赖，可整目录复制到任意插件或仓库复用）",
+  "license": "MIT",
+  "author": "zgy-beep",
+  "keywords": [
+    "sillytavern",
+    "ui-kit",
+    "design-tokens",
+    "css",
+    "design-system"
+  ],
+  "scripts": {
+    "test": "node test/test-ui-kit.js"
+  }
+}

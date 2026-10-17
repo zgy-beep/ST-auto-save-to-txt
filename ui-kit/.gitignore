@@ -1,0 +1,7 @@
+# 独立项目自身的忽略项（移动到其它仓库后依然有效）
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

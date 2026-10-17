@@ -1,36 +1,36 @@
 /**
- * UI Kit 设计规范守护测试
- * 运行方式: node test/test-ui-kit.js
+ * SillyTavern UI Kit · 规范守护测试（独立项目）
+ * 运行方式（在本目录下）: node test/test-ui-kit.js（或 npm test）
  *
- * 目的：让「规范文档 / 令牌 / 组件样式 / 预览页」四者不漂移，并锁住
- * novel-stream 真实实现（style.css）中提炼出的取值与宿主兼容红线。
+ * 本文件只读取本项目内的文件，不依赖任何外部仓库/父目录，因此
+ * 整个 ui-kit 目录可以被任意移动后直接运行。
  *
  * 覆盖：
- *  1) 文件结构、版本号、kit 版本；
- *  2) token 完整性：必填清单齐全、组件里用到的 token 都有定义、每个 token 都被使用且被文档覆盖、命名合法；
- *  3) 配色规范：组件禁用硬编码颜色、所有颜色属性走 token、深/浅主题对比度达 WCAG AA、
- *     与 novel-stream style.css 的取值一致性（含两处有意升级：text-3 提亮、新增 accent-strong）；
- *  4) 组件清单：components.css / preview.html / README.md 三方覆盖；
- *  5) 关键实现：宿主 checkbox 隔离、top-layer 载体、focus-visible、reduced-motion、响应式；
- *  6) 作用域红线：无裸元素选择器、类名前缀、!important 仅限宿主隔离与降级块；
- *  7) 预览页离线可用、文档小节与可访问性要点齐全；
- *  8) 扩展版本三处一致（manifest / index.js / README 徽章）。
+ *  0) 项目文件结构、版本号（package.json / CSS 头 / README / CHANGELOG / preview 多处一致）；
+ *  1) token 完整性：必填清单齐全、组件里用到的 token 都有定义、每个 token 都被使用且被文档覆盖、命名合法；
+ *  2) 配色规范：组件禁用硬编码颜色、颜色声明走 token、深/浅主题对比度达 WCAG AA、
+ *     核心 token 取值与金标准一致（防止后人静默改色）；
+ *  3) 组件清单：components.css / preview.html / README.md 三方覆盖；
+ *  4) 关键实现：宿主 checkbox 隔离、top-layer 载体、focus-visible、reduced-motion、响应式；
+ *  5) 作用域红线：无裸元素选择器、类名前缀、!important 仅限宿主隔离与降级块；
+ *  6) 预览页离线可用、无外部依赖；
+ *  7) 文档契约：章节完整、宿主兼容与可访问性要点齐全、独立项目说明完整；
+ *  8) 版本与包信息自洽（可独立发布/移动）。
  */
 
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.join(__dirname, '..');
-const KIT = path.join(ROOT, 'ui-kit');
+const KIT = path.join(__dirname, '..'); // 本文件位于 <ui-kit>/test/
 const FILES = {
     tokens: path.join(KIT, 'tokens.css'),
     components: path.join(KIT, 'components.css'),
     readme: path.join(KIT, 'README.md'),
     preview: path.join(KIT, 'preview.html'),
-    style: path.join(ROOT, 'style.css'),
-    index: path.join(ROOT, 'index.js'),
-    manifest: path.join(ROOT, 'manifest.json'),
-    mainReadme: path.join(ROOT, 'README.md'),
+    pkg: path.join(KIT, 'package.json'),
+    license: path.join(KIT, 'LICENSE'),
+    changelog: path.join(KIT, 'CHANGELOG.md'),
+    gitignore: path.join(KIT, '.gitignore'),
     self: __filename,
 };
 
@@ -47,16 +47,14 @@ function check(name, cond, detail = '') {
 }
 const ok = (name, cond, detail) => check(name, !!cond, detail);
 
-function readText(p) {
-    return fs.readFileSync(p, 'utf8');
-}
+const readText = (p) => fs.readFileSync(p, 'utf8');
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '');
+const normalizeValue = (v) => String(v).replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** 取 selector 之后第一个完整 { ... } 块的内容（按大括号配平） */
 function blockAfter(css, selector) {
     const i = css.indexOf(selector);
     if (i < 0) return null;
-    // 从 selector 起始位置找第一个 '{'：兼容调用方传入带 "{"/"," 的 selector 片段
     const open = css.indexOf('{', i);
     if (open < 0) return null;
     let depth = 0;
@@ -76,25 +74,6 @@ function tokenMap(css, selector) {
     const out = {};
     if (!body) return out;
     for (const m of body.matchAll(/(--nvui-[\w-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim();
-    return out;
-}
-
-/** 解析 style.css 里的旧 --nv-* 令牌块（主色板块 + 块级色板块） */
-function legacyTokenMaps(styleCss) {
-    const blocks = [];
-    const first = blockAfter(styleCss, '.novel-modal-overlay,');
-    if (first) blocks.push(first);
-    // 块级色板块：以 --nv-block-bg 定义处为锚点，向前找所在规则块（避免被同名工具提示规则干扰）
-    const anchor = styleCss.indexOf('--nv-block-bg:');
-    if (anchor >= 0) {
-        const open = styleCss.lastIndexOf('{', anchor);
-        const close = styleCss.indexOf('}', anchor);
-        if (open >= 0 && close > open) blocks.push(styleCss.slice(open + 1, close));
-    }
-    const out = {};
-    for (const body of blocks) {
-        for (const m of body.matchAll(/(--nv-[\w-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim();
-    }
     return out;
 }
 
@@ -122,33 +101,69 @@ function contrast(hexA, hexB) {
     return (hi + 0.05) / (lo + 0.05);
 }
 
+/** 解析规则选择器（含 @media 内层），跳过 @keyframes 内部 */
+function collectSelectors(css) {
+    const selectors = [];
+    let depth = 0;
+    let selStart = 0;
+    let inKeyframes = 0;
+    for (let i = 0; i < css.length; i++) {
+        const ch = css[i];
+        if (ch === '{') {
+            const raw = css.slice(selStart, i).trim();
+            if (raw.startsWith('@keyframes')) inKeyframes = depth + 1;
+            else if (raw.startsWith('@')) { /* @media/@supports 等，下一层继续检查 */ }
+            else if (depth > 0 && inKeyframes === depth) { /* keyframe 步骤选择器，跳过 */ }
+            else selectors.push({ selector: raw, depth });
+            depth++;
+            selStart = i + 1;
+        } else if (ch === '}') {
+            depth--;
+            if (inKeyframes === depth + 1) inKeyframes = 0;
+            selStart = i + 1;
+        }
+    }
+    return selectors;
+}
+
 // ==================== 读取 ====================
 const tokensCss = readText(FILES.tokens);
 const componentsCss = readText(FILES.components);
 const readme = readText(FILES.readme);
 const preview = readText(FILES.preview);
-const styleCss = readText(FILES.style);
-const indexJs = readText(FILES.index);
-const manifest = JSON.parse(readText(FILES.manifest));
-const mainReadme = readText(FILES.mainReadme);
+const pkg = JSON.parse(readText(FILES.pkg));
+const license = readText(FILES.license);
+const changelog = readText(FILES.changelog);
+const testSrc = readText(FILES.self);
 
 const tokensClean = stripComments(tokensCss);
 const componentsClean = stripComments(componentsCss);
 const previewClean = stripComments(preview);
 
-// ==================== 0. 文件与版本 ====================
-console.log('\n=== 0. 文件结构与版本 ===');
-for (const [name, p] of [['tokens.css', FILES.tokens], ['components.css', FILES.components],
-    ['README.md', FILES.readme], ['preview.html', FILES.preview]]) {
-    check(`ui-kit/${name} 存在且非空`, fs.existsSync(p) && fs.statSync(p).size > 500, p);
+// ==================== 0. 独立项目结构与版本 ====================
+console.log('\n=== 0. 独立项目结构与版本 ===');
+const REQUIRED_FILES = {
+    'tokens.css': FILES.tokens,
+    'components.css': FILES.components,
+    'preview.html': FILES.preview,
+    'README.md': FILES.readme,
+    'package.json': FILES.pkg,
+    'LICENSE': FILES.license,
+    'CHANGELOG.md': FILES.changelog,
+    'test/test-ui-kit.js': FILES.self,
+    '.gitignore': FILES.gitignore,
+};
+for (const [name, p] of Object.entries(REQUIRED_FILES)) {
+    check(`独立项目文件存在：${name}`, fs.existsSync(p) && fs.statSync(p).size > 10, p);
 }
-const KIT_VERSION = '1.0.0';
-check('tokens.css 文件头声明 kit 版本 v1.0.0',
-    /ui-kit v1\.0\.0/.test(tokensCss));
-check('components.css 文件头声明 kit 版本 v1.0.0',
-    /ui-kit v1\.0\.0/.test(componentsCss));
-check('README 标题声明 kit 版本 v1.0.0',
-    /# SillyTavern 插件 UI Kit · 设计规范/.test(readme) && /版本：\*\*v1\.0\.0\*\*/.test(readme));
+const KIT_VERSION = pkg.version;
+check('package.json 版本为合法 semver（1.1.0）',
+    /^1\.1\.0$/.test(String(KIT_VERSION)), String(KIT_VERSION));
+check('package.json 声明 MIT 许可且与 LICENSE 文件一致',
+    pkg.license === 'MIT' && /^MIT License/.test(license));
+check('package.json scripts.test 指向项目内测试（可 npm test）',
+    pkg.scripts && pkg.scripts.test === 'node test/test-ui-kit.js',
+    JSON.stringify(pkg.scripts));
 
 // ==================== 1. Token 完整性 ====================
 console.log('\n=== 1. Token 完整性 ===');
@@ -208,7 +223,6 @@ const rawColorInComponents = [...componentsClean.matchAll(/#[0-9a-fA-F]{3,8}\b|(
 check('components.css 禁止硬编码颜色（#hex / rgb / hsl 零命中）', rawColorInComponents.length === 0,
     `命中: ${rawColorInComponents.slice(0, 5).map((m) => m[0]).join(', ')}`);
 
-// 颜色相关声明必须走 token（transparent/inherit/none 等关键词除外）
 const colorDeclRe = /(?:^|[;{\n])\s*(?:color|background(?:-color)?|border(?:-(?:top|right|bottom|left))?-color|box-shadow|outline|fill)\s*:\s*([^;{}]+);/g;
 const badColorDecls = [];
 for (const m of componentsClean.matchAll(colorDeclRe)) {
@@ -219,6 +233,59 @@ for (const m of componentsClean.matchAll(colorDeclRe)) {
 }
 check('颜色/背景/边框/阴影声明全部引用 var(--nvui-*)',
     badColorDecls.length === 0, badColorDecls.slice(0, 5).join(' | '));
+
+/** 核心 token 金标准：锁死规范取值，防止静默改色（改这里必须同时升版本并更新 CHANGELOG） */
+const GOLDEN_DARK = {
+    '--nvui-bg': '#161a24',
+    '--nvui-bg-2': '#1c2130',
+    '--nvui-bg-3': '#232939',
+    '--nvui-block-bg': 'rgba(255, 255, 255, 0.05)',
+    '--nvui-block-bg-2': 'rgba(255, 255, 255, 0.078)',
+    '--nvui-line': 'rgba(255, 255, 255, 0.07)',
+    '--nvui-line-2': 'rgba(255, 255, 255, 0.12)',
+    '--nvui-dash': 'rgba(255, 255, 255, 0.17)',
+    '--nvui-block-line': 'rgba(255, 255, 255, 0.06)',
+    '--nvui-block-line-2': 'rgba(255, 255, 255, 0.1)',
+    '--nvui-text': '#e9ecf3',
+    '--nvui-text-2': '#98a1b3',
+    '--nvui-text-3': '#7d879b',
+    '--nvui-accent': '#8b6dff',
+    '--nvui-accent-2': '#a997ff',
+    '--nvui-accent-strong': '#6d4df2',
+    '--nvui-accent-strong-hover': '#5b3fd6',
+    '--nvui-accent-bg': 'rgba(139, 109, 255, 0.14)',
+    '--nvui-accent-line': 'rgba(139, 109, 255, 0.4)',
+    '--nvui-ok': '#4ade80',
+    '--nvui-warn': '#fbbf24',
+    '--nvui-danger': '#f87171',
+    '--nvui-info': '#3498db',
+    '--nvui-radius': '12px',
+};
+const goldenDrift = Object.entries(GOLDEN_DARK)
+    .filter(([token, expected]) => normalizeValue(darkMap[token]) !== normalizeValue(expected))
+    .map(([token, expected]) => `${token}: 期望 ${expected} / 实际 ${darkMap[token]}`);
+check('深色主题核心 token 与金标准逐值一致（防静默改色）',
+    goldenDrift.length === 0, goldenDrift.join(' | '));
+
+const GOLDEN_LIGHT = {
+    '--nvui-bg': '#f7f8fc',
+    '--nvui-text': '#1f2430',
+    '--nvui-text-2': '#4a5365',
+    '--nvui-text-3': '#5f6879',
+    '--nvui-accent': '#6d4df2',
+    '--nvui-accent-2': '#5b3fd6',
+    '--nvui-accent-strong': '#6d4df2',
+    '--nvui-accent-strong-hover': '#5b3fd6',
+    '--nvui-ok': '#15803d',
+    '--nvui-warn': '#b45309',
+    '--nvui-danger': '#dc2626',
+    '--nvui-info': '#1d4ed8',
+};
+const lightDrift = Object.entries(GOLDEN_LIGHT)
+    .filter(([token, expected]) => normalizeValue(lightMap[token]) !== normalizeValue(expected))
+    .map(([token, expected]) => `${token}: 期望 ${expected} / 实际 ${lightMap[token]}`);
+check('浅色主题核心 token 与金标准逐值一致',
+    lightDrift.length === 0, lightDrift.join(' | '));
 
 const darkBg = darkMap['--nvui-bg'];
 const ratioPairs = [
@@ -251,28 +318,10 @@ check('浅色主题主按钮白字对比度 >= 4.5:1',
     contrast('#ffffff', lightMap['--nvui-accent-strong']) >= 4.5,
     `实际 ${contrast('#ffffff', lightMap['--nvui-accent-strong']).toFixed(2)}:1`);
 
-// 与 novel-stream 参考实现（style.css）取值一致，防止 kit 与实现漂移
-const legacy = legacyTokenMaps(styleCss);
-const DRIFT_SUFFIXES = ['bg', 'bg-2', 'bg-3', 'line', 'line-2', 'dash', 'block-bg', 'block-bg-2',
-    'block-line', 'block-line-2', 'text', 'text-2', 'accent', 'accent-2', 'accent-bg', 'accent-line',
-    'ok', 'warn', 'danger', 'radius'];
-const drift = [];
-for (const suffix of DRIFT_SUFFIXES) {
-    const oldVal = legacy[`--nv-${suffix}`];
-    const newVal = darkMap[`--nvui-${suffix}`];
-    if (!oldVal || !newVal) drift.push(`${suffix}(缺值)`);
-    else if (oldVal !== newVal) drift.push(`${suffix}: ${oldVal} != ${newVal}`);
-}
-check('核心配色/圆角与 novel-stream style.css 参考实现逐值一致', drift.length === 0,
-    drift.join(' | '));
-check('text-3 为有意升级：与旧实现不同且对比度 >= 4.5:1',
-    legacy['--nv-text-3'] !== darkMap['--nvui-text-3']
-    && contrast(darkMap['--nvui-text-3'], darkBg) >= 4.5
-    && readme.includes('提亮一档'),
-    `旧 ${legacy['--nv-text-3']} / 新 ${darkMap['--nvui-text-3']}`);
-check('填充按钮主色 accent-strong 为新增令牌且文档说明白字 AA',
-    !legacy['--nv-accent-strong']
-    && readme.includes('--nvui-accent-strong') && readme.includes('白字 5.26:1'));
+check('text-3 为相对旧实现的已记录升级（README 说明提亮一档）',
+    contrast(darkMap['--nvui-text-3'], darkBg) >= 4.5 && readme.includes('提亮一档'));
+check('填充按钮主色 accent-strong 说明白字 AA 对比度',
+    readme.includes('--nvui-accent-strong') && readme.includes('白字 5.26:1'));
 
 // ==================== 3. 组件清单三方覆盖 ====================
 console.log('\n=== 3. 组件清单（样式/预览/文档三方覆盖） ===');
@@ -349,30 +398,6 @@ check('折叠箭头为纯 CSS 且展开旋转 225 度',
 
 // ==================== 5. 作用域与工程红线 ====================
 console.log('\n=== 5. 作用域与工程约定 ===');
-/** 解析规则选择器（含 @media 内层），跳过 @keyframes 内部 */
-function collectSelectors(css) {
-    const selectors = [];
-    let depth = 0;
-    let selStart = 0;
-    let inKeyframes = 0;
-    for (let i = 0; i < css.length; i++) {
-        const ch = css[i];
-        if (ch === '{') {
-            const raw = css.slice(selStart, i).trim();
-            if (raw.startsWith('@keyframes')) inKeyframes = depth + 1;
-            else if (raw.startsWith('@')) { /* @media/@supports 等，下一层继续检查 */ }
-            else if (depth > 0 && inKeyframes === depth) { /* keyframe 步骤选择器，跳过 */ }
-            else selectors.push({ selector: raw, depth });
-            depth++;
-            selStart = i + 1;
-        } else if (ch === '}') {
-            depth--;
-            if (inKeyframes === depth + 1) inKeyframes = 0;
-            selStart = i + 1;
-        }
-    }
-    return selectors;
-}
 const compSelectors = collectSelectors(componentsClean);
 const bareSelectors = compSelectors.filter(({ selector }) => {
     if (!selector) return false;
@@ -435,26 +460,40 @@ check('README 明确「组件禁止硬编码颜色」与「WCAG/对比度」要�
     readme.includes('禁止硬编码颜色') && /WCAG/.test(readme) && readme.includes('对比度'));
 check('README 提供旧实现迁移对照（token 与类名两张映射表）',
     /### 10\.1 Token 映射/.test(readme) && /### 10\.2 组件类名映射/.test(readme));
-check('main README 提供 UI Kit 入口（下个插件可复用）',
-    mainReadme.includes('ui-kit/README.md'));
+check('README 声明本目录是独立项目、可整目录移动/复用',
+    readme.includes('独立项目') && /(?:整目录|整体)/.test(readme) && /(?:移动|复制)/.test(readme));
+check('README 记录独立项目文件结构（package.json / LICENSE / CHANGELOG / test/）',
+    ['package.json', 'LICENSE', 'CHANGELOG.md', 'test/test-ui-kit.js'].every((f) => readme.includes(f)));
+check('项目内文档不依赖父目录相对链接（可整体移动）',
+    !/\]\(\.\.\//.test(readme) && !/href="\.\.\//.test(preview) && !/url\('\.\.\//.test(tokensCss + componentsCss));
+const parentJoinRefs = testSrc.split(/\r?\n/).filter((line) =>
+    /path\.join\([^)]*'\.\.[^']*'/.test(line) && !/parentJoinRefs|const KIT\b/.test(line));
+check('守护测试不读取项目外文件（除项目根外无父目录路径引用）',
+    parentJoinRefs.length === 0, parentJoinRefs.join(' | '));
 
 const emojiRe = /[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF]|\uFE0F/;
-const emojiFiles = [[FILES.tokens, 'tokens.css'], [FILES.components, 'components.css'],
-    [FILES.readme, 'ui-kit/README.md'], [FILES.preview, 'preview.html'], [FILES.self, 'test-ui-kit.js']];
+const emojiFiles = [
+    [FILES.tokens, 'tokens.css'], [FILES.components, 'components.css'],
+    [FILES.readme, 'README.md'], [FILES.preview, 'preview.html'],
+    [FILES.pkg, 'package.json'], [FILES.changelog, 'CHANGELOG.md'], [FILES.self, 'test/test-ui-kit.js'],
+];
 const emojiHits = emojiFiles.filter(([p]) => emojiRe.test(readText(p))).map(([, n]) => n);
-check('kit 文件与测试文件不含 emoji', emojiHits.length === 0, emojiHits.join(', '));
+check('项目文件不含 emoji', emojiHits.length === 0, emojiHits.join(', '));
 
-// ==================== 8. 扩展版本一致性 ====================
-console.log('\n=== 8. 版本一致性 ===');
-const indexVersionMatch = indexJs.match(/version:\s*'([\d.]+)'/);
-const indexVersion = indexVersionMatch ? indexVersionMatch[1] : null;
-const badgeVersionMatch = mainReadme.match(/badge\/Version-([\d.]+)-/);
-const badgeVersion = badgeVersionMatch ? badgeVersionMatch[1] : null;
-check('manifest.json / index.js / README 徽章 三处版本一致',
-    !!manifest.version && manifest.version === indexVersion && indexVersion === badgeVersion,
-    `manifest=${manifest.version} index=${indexVersion} badge=${badgeVersion}`);
-check('UI Kit 版本与扩展版本相互独立且均已声明',
-    KIT_VERSION === '1.0.0' && !!indexVersion && indexVersion !== KIT_VERSION);
+// ==================== 8. 版本一致性 ====================
+console.log('\n=== 8. 版本一致性（独立项目自洽） ===');
+const versionRefs = {
+    'tokens.css 文件头': tokensCss.includes(`ui-kit v${KIT_VERSION}`),
+    'components.css 文件头': componentsCss.includes(`ui-kit v${KIT_VERSION}`),
+    'README 标题版本': readme.includes(`版本：**v${KIT_VERSION}**`),
+    'CHANGELOG 最新条目': new RegExp(`^## v${KIT_VERSION.replace(/\./g, '\\.')}`, 'm').test(changelog),
+    'preview 标题': preview.includes(`UI Kit v${KIT_VERSION}`),
+    'preview 页面徽标': preview.includes(`>v${KIT_VERSION}<`),
+};
+const versionMismatch = Object.entries(versionRefs).filter(([, v]) => !v).map(([k]) => k);
+check(`kit 版本 v${KIT_VERSION} 在 6 处声明一致`, versionMismatch.length === 0, versionMismatch.join(', '));
+check('测试本身位于项目内（test/test-ui-kit.js）',
+    path.resolve(FILES.self) === path.join(KIT, 'test', 'test-ui-kit.js'));
 
 // ==================== 汇总 ====================
 console.log(`\n=== UI Kit 规范测试结果: 通过 ${pass}, 失败 ${fail} ===`);
