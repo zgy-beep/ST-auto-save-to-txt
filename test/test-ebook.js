@@ -259,22 +259,22 @@ async function runTests() {
         // ================= 3. resolveImagePath 四级解析 =================
         console.log('\n--- 3. resolveImagePath 四级解析顺序 ---');
         const CHAT = '柏宝绘_Seraphina'; // 中文聊天目录：磁盘侧不做 URL 编解码
-        writeFixture(path.join('zgy9009', 'user', 'images', CHAT, 'in_account.png'), PNG_1PX);
+        writeFixture(path.join('testuser', 'user', 'images', CHAT, 'in_account.png'), PNG_1PX);
         writeFixture(path.join('default-user', 'user', 'images', CHAT, 'in_default.gif'), GIF_1PX);
         writeFixture(path.join('acc2', 'user', 'images', CHAT, 'only_in_acc2.jpg'), JPEG_1PX);
         writeFixture(path.join('acc2', 'user', 'images', 'chatB', 'shared.webp'), WEBP_1PX);
         writeFixture(path.join('acc3', 'user', 'images', 'chatB', 'shared.webp'), WEBP_1PX);
         fs.mkdirSync(path.join(DATA, 'acc4', 'user', 'images', 'chatB', 'a-directory.png'), { recursive: true });
 
-        const r1 = await plugin.resolveImagePath(`/user/images/${CHAT}/in_account.png`, { account: 'zgy9009', stRoot: ST_ROOT });
-        assert(r1.ok && r1.via === 'account' && r1.absPath === path.join(DATA, 'zgy9009', 'user', 'images', CHAT, 'in_account.png'),
+        const r1 = await plugin.resolveImagePath(`/user/images/${CHAT}/in_account.png`, { account: 'testuser', stRoot: ST_ROOT });
+        assert(r1.ok && r1.via === 'account' && r1.absPath === path.join(DATA, 'testuser', 'user', 'images', CHAT, 'in_account.png'),
             'resolveImagePath: ① 优先命中指定账号（中文路径原样，不做 URL 解码）');
         assert(r1.ok && r1.rel === `${CHAT}/in_account.png`, 'resolveImagePath: rel 等于 /user/images/ 之后的部分');
 
-        const r2 = await plugin.resolveImagePath(`/user/images/${CHAT}/in_default.gif`, { account: 'zgy9009', stRoot: ST_ROOT });
+        const r2 = await plugin.resolveImagePath(`/user/images/${CHAT}/in_default.gif`, { account: 'testuser', stRoot: ST_ROOT });
         assert(r2.ok && r2.via === 'default-user', 'resolveImagePath: ② 指定账号未命中时回落到 default-user');
 
-        const r3 = await plugin.resolveImagePath(`/user/images/${CHAT}/only_in_acc2.jpg`, { account: 'zgy9009', stRoot: ST_ROOT });
+        const r3 = await plugin.resolveImagePath(`/user/images/${CHAT}/only_in_acc2.jpg`, { account: 'testuser', stRoot: ST_ROOT });
         assert(r3.ok && r3.via === 'glob' && r3.account === 'acc2', 'resolveImagePath: ③ 通配 data/* 兜底命中其它账号');
 
         const originalWarn = console.warn;
@@ -289,7 +289,7 @@ async function runTests() {
         assert(r4.ok && r4.via === 'glob' && r4.account === 'acc2', 'resolveImagePath: ③ 多账号命中取第一个（排序后 acc2）');
         assert(warnLogs.length > 0 && warnLogs[0].includes('多账号'), 'resolveImagePath: 多账号命中必须 console.warn（不静默）');
 
-        const r5 = await plugin.resolveImagePath('/user/images/chatB/nope.png', { account: 'zgy9009', stRoot: ST_ROOT });
+        const r5 = await plugin.resolveImagePath('/user/images/chatB/nope.png', { account: 'testuser', stRoot: ST_ROOT });
         assert(!r5.ok && r5.reason === 'missing', 'resolveImagePath: ④ 全部未命中返回 reason=missing');
         const r6 = await plugin.resolveImagePath('/user/images/chatB/a-directory.png', { account: 'acc4', stRoot: ST_ROOT });
         assert(!r6.ok && r6.reason === 'missing', 'resolveImagePath: 目录不算图片文件（按 missing 处理）');
