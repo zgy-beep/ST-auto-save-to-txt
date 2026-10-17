@@ -2,66 +2,15 @@
  * 楼层"已入书"章节映射（computeChapterMap）单元测试
  * 运行方式: node test/test-chapter-map.js
  *
- * 注意：与 test-tag-scanner.js 同模式，以下为从 index.js 复制的纯函数副本，前端模块为 ES module 无法直接 require。
- * cleanNovelText 在此为简化桩（仅驱动占号逻辑的"过滤后为空"分支）——真实清洗引擎由 test-think.js / test-universal-tags.js 锁定测试。
+ * 本测试**不再手抄副本**：computeChapterMap / getCleanedMessage / getCleanMessageSig
+ * 以及清洗缓存 cleanTextCache 全部取自 index.js 真实实现（见 test/_helpers/load-index.js）。
+ * 原先的「简化清洗桩」已删除 —— 占号逻辑依赖的真实清洗行为（注释剔除、黑名单、
+ * 未闭合尾部标签、空段落过滤、缩进）一律由真实 cleanNovelText 决定。
  */
 
-// 清洗结果缓存：同一会话内避免每条消息被 cleanNovelText 重复全量正则清洗（O(n²) 性能优化）
-const cleanTextCache = { sig: '', map: new Map() };
-
-function getCleanMessageSig(settings) {
-    return `${settings.include_tags || ''}|${settings.exclude_tags || ''}|${settings.indent_paragraphs !== false}`;
-}
-
-/**
- * 简化清洗桩：仅保留"注释剔除 + 黑名单成对块剔除 + 标签剥壳 + 段落化"行为，
- * 足够驱动 computeChapterMap 的"被过滤为空的楼层跳过不占号"逻辑
- */
-function cleanNovelText(rawText, settings = {}) {
-    if (!rawText || typeof rawText !== 'string') return '';
-    let text = rawText.replace(/<!--[\s\S]*?-->/g, '');
-    const excludeTags = ['status', 'memory', 'details', 'ooc', 'note'];
-    for (const tag of excludeTags) {
-        const pairReg = new RegExp(`<\\s*(${tag})[^>]*>[\\s\\S]*?<\\/\\s*\\1\\s*>\\s*`, 'gi');
-        text = text.replace(pairReg, '');
-    }
-    text = text.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n').replace(/<[^>]+>/g, '');
-    const paragraphs = text.split(/\r?\n+/).map(p => p.trim()).filter(p => p.length > 0);
-    return paragraphs.join('\n\n');
-}
-
-/**
- * 带缓存的消息清洗（与 index.js 同款签名与缓存语义）
- */
-function getCleanedMessage(msg, index, settings) {
-    if (!msg) return '';
-    const sig = getCleanMessageSig(settings);
-    if (cleanTextCache.sig !== sig) {
-        cleanTextCache.sig = sig;
-        cleanTextCache.map.clear();
-    }
-    const cached = cleanTextCache.map.get(index);
-    if (cached && cached.src === msg && cached.mes === msg.mes) return cached.text;
-    const text = cleanNovelText(msg.mes || '', settings);
-    cleanTextCache.map.set(index, { src: msg, mes: msg.mes, text });
-    return text;
-}
-
-/**
- * 楼层序号 → 已入书章节号（徽标展示用；切换聊天时重算）——与 index.js 逐字一致
- */
-function computeChapterMap(settings, chatLog) {
-    const map = {};
-    if (!Array.isArray(chatLog)) return map;
-    let chapter = 0;
-    for (let i = 0; i < chatLog.length; i++) {
-        const m = chatLog[i];
-        if (!m) continue;
-        if (m.is_user && !settings.include_user_dialogue) continue;
-        if (getCleanedMessage(m, i, settings)) { chapter++; map[i] = chapter; }
-    }
-    return map;
-}
+const { loadIndexModule } = require('./_helpers/load-index.js');
+const api = loadIndexModule();
+const { computeChapterMap, getCleanedMessage, getCleanMessageSig, cleanTextCache } = api;
 
 let passCount = 0;
 let failCount = 0;
@@ -88,6 +37,16 @@ function assertDeepEqual(actual, expected, testName) {
         failCount++;
     }
 }
+
+// 测试 0: 真实实现的缓存对象与签名函数已就位（下面缓存语义用例依赖它们）
+assert(cleanTextCache && cleanTextCache.map instanceof Map && typeof cleanTextCache.sig === 'string',
+    '测试 0.1: cleanTextCache 为真实缓存对象（Map + sig）');
+assertDeepEqual(
+    getCleanMessageSig({ include_tags: 'story', exclude_tags: 'status', indent_paragraphs: false }),
+    'story|status|false',
+    '测试 0.2: getCleanMessageSig 拼装 include|exclude|indent 签名'
+);
+assertDeepEqual(getCleanMessageSig({}), '||true', '测试 0.3: 缺省设置下 indent 视为开启（||true）');
 
 const baseSettings = { include_user_dialogue: false, indent_paragraphs: true };
 
@@ -141,6 +100,31 @@ const baseSettings = { include_user_dialogue: false, indent_paragraphs: true };
 // 测试 5: 空聊天与非数组输入返回空映射
 assertDeepEqual(computeChapterMap(baseSettings, []), {}, '测试 5.1: 空聊天返回空映射');
 assertDeepEqual(computeChapterMap(baseSettings, null), {}, '测试 5.2: 非数组输入返回空映射（循环零次）');
+
+// 测试 6: getCleanedMessage 缓存语义（与 index.js 同款：消息对象/内容/签名变化都要重洗）
+{
+    const settings = { include_tags: '', exclude_tags: 'status', indent_paragraphs: true };
+    cleanTextCache.sig = '';
+    cleanTextCache.map.clear();
+    const a = { is_user: false, mes: '<status>HP:1</status>正文甲' };
+    const b = { is_user: false, mes: '正文乙' };
+    const chatLog = [a, b];
+
+    const first = getCleanedMessage(a, 0, settings);
+    assertDeepEqual(first, '　　正文甲', '测试 6.1: 首次清洗按真实引擎输出');
+
+    // 原地改写 mes（酒馆编辑消息 / 切分支的真实行为）→ 缓存必须失效重洗
+    a.mes = '<status>HP:2</status>正文甲改';
+    assertDeepEqual(getCleanedMessage(a, 0, settings), '　　正文甲改', '测试 6.2: 同一消息对象 mes 原地改写后缓存失效重洗');
+
+    // 换对象（Regenerate / Swipe 会替换消息对象）→ 缓存同样必须失效
+    chatLog[1] = { is_user: false, mes: '正文乙' };
+    assertDeepEqual(getCleanedMessage(chatLog[1], 1, settings), '　　正文乙', '测试 6.3: 消息对象被替换后按新对象清洗');
+
+    // 设置签名变化 → 全量清缓存
+    const otherSettings = { include_tags: '', exclude_tags: '', indent_paragraphs: true };
+    assertDeepEqual(getCleanedMessage(a, 0, otherSettings), '　　HP:2正文甲改', '测试 6.4: 黑名单设置变化后缓存按新签名重洗');
+}
 
 console.log(`\n=== 楼层入书章节映射测试结果: 通过: ${passCount}, 失败: ${failCount} ===`);
 if (failCount > 0) {

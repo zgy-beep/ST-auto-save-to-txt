@@ -65,8 +65,11 @@ async function runTests() {
 
     try {
         // 测试 0: 服务端健康状态探针 (/status)
+        // 版本 1.14.0：新增 /ebook 图片电子书接口 + capabilities 能力声明
         const res0 = await router.dispatch('GET', '/status', {});
-        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.12.0', '测试 0: 服务端状态探针正常响应且版本为 1.12.0');
+        assert(res0.status === 200 && res0.data.ready === true && res0.data.version === '1.14.0', '测试 0: 服务端状态探针正常响应且版本为 1.14.0');
+        assert(res0.data.capabilities && res0.data.capabilities.ebook === true, '测试 0.1: /status 声明 ebook 能力（前端据此 feature-detect）');
+        assert(res0.data.capabilities && res0.data.capabilities.tailGuard === true, '测试 0.2: /status 声明 tailGuard 能力');
 
         const testChar = '我的仙侠传奇';
         const testPayload1 = {
@@ -320,7 +323,13 @@ async function runTests() {
 
         // 清理测试文件
         if (fs.existsSync(filePath1)) fs.unlinkSync(filePath1);
-        console.log('\n临时测试小说文件已清理。');
+        // D18 备份产物：本轮起「替换 / sync-all 覆盖」会生成 ${file}.bak。
+        // 本测试全程在仓库内 logs/ 落盘，所以这些 .bak 必须一并清理，否则 logs/ 会永久残留
+        // 两份被 .gitignore 掩盖的备份文件（test-mobile-overlay.js 那种 tmpdir 方案不受影响）。
+        for (const stale of fs.readdirSync(logsDir)) {
+            if (stale.endsWith('.bak')) fs.unlinkSync(path.join(logsDir, stale));
+        }
+        console.log('\n临时测试小说文件已清理（含 .bak 备份产物）。');
     } catch (err) {
         console.error('测试异常:', err);
         failCount++;

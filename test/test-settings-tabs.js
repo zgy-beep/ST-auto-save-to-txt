@@ -31,7 +31,9 @@ try {
 if (!playwright) {
     console.log('[SKIP] 未安装 playwright-core / playwright，跳过设置弹窗标签页测试');
     console.log('       本地要跑：NODE_PATH=<node_modules 目录> node test/test-settings-tabs.js');
-    process.exit(0);
+    // 退出码 2 = 未执行（区别于 0 的全部通过）。见 T2 审计 P1-1：静默 exit 0 会让 CI 误判为绿灯。
+    console.log('[SKIP] EXIT CODE 2 = 未执行：本条测试的 87 条断言这一次一条都没有跑，不得当作绿灯。');
+    process.exit(2);
 }
 
 const BROWSERS = [
@@ -43,7 +45,8 @@ const BROWSERS = [
 const executablePath = BROWSERS.find((p) => fs.existsSync(p));
 if (!executablePath) {
     console.log('[SKIP] 未找到 Edge / Chrome，跳过设置弹窗标签页测试');
-    process.exit(0);
+    console.log('[SKIP] EXIT CODE 2 = 未执行：本条测试的 87 条断言这一次一条都没有跑，不得当作绿灯。');
+    process.exit(2);
 }
 
 // 本机没有完整酒馆包（FontAwesome 缺失），截图里图标会渲染成空盒子、布局也跟着塌。

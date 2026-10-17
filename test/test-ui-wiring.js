@@ -572,8 +572,9 @@ check('设置弹窗保持居中（overlay 用 flex 居中，且不写死 margin/
 console.log('\n=== ⑪ v1.17 折叠分组（替代卡片）===');
 
 // —— 结构：分组行 + 展开体 ——
-const ACC_KEYS = ['book', 'include', 'exclude', 'scan', 'style', 'naming', 'write', 'dir', 'display'];
-check('折叠分组 9 个', (src.match(/class="novel-acc"|class="novel-acc is-open"/g) || []).length, 9);
+// v1.18 新增「图片电子书（EPUB）」分组（data-nv-acc="ebook"），置于 dir 与 display 之间 → 9 → 10 个。
+const ACC_KEYS = ['book', 'include', 'exclude', 'scan', 'style', 'naming', 'write', 'dir', 'ebook', 'display'];
+check('折叠分组 10 个', (src.match(/class="novel-acc"|class="novel-acc is-open"/g) || []).length, 10);
 ACC_KEYS.forEach((k) => {
     check(`分组 data-nv-acc="${k}" 存在`, src.includes(`data-nv-acc="${k}"`), true);
     check(`分组「${k}」有右侧摘要位`, new RegExp(`data-nv-acc="${k}"[\\s\\S]{0,400}?novel-acc-summary`).test(src), true);
@@ -602,11 +603,30 @@ check('写回后落盘（saveSettingsDebounced）',
 check('点击折叠标题时触发持久化',
     /persistNovelAccOpen\(panel\)/.test(extractFn('bindNovelAccordions') || ''), true);
 check('展开体 aria 语义齐备（aria-expanded）',
-    (src.match(/class="novel-acc-head" aria-expanded="/g) || []).length, 9);
+    (src.match(/class="novel-acc-head" aria-expanded="/g) || []).length, 10);
 check('折叠行标题带箭头图标（.novel-acc-chev）',
-    (src.match(/novel-acc-chev/g) || []).length, 9);
+    (src.match(/novel-acc-chev/g) || []).length, 10);
 check('每个分组都有对应的展开体容器',
-    (src.match(/class="novel-acc-body"/g) || []).length, 9);
+    (src.match(/class="novel-acc-body"/g) || []).length, 10);
+
+// —— 新分组「图片电子书（EPUB）」逐项核对：不是简单把总数 9 改 10 ——
+// 切片：从 ebook 分组头到下一个 display 分组头之间，确保四项结构确实**落在该分组内部**，
+// 而不是"总数够了但新分组其实缺了某一块"。
+const EBOOK_ACC = (() => {
+    const start = src.indexOf('data-nv-acc="ebook"');
+    const end = src.indexOf('data-nv-acc="display"');
+    return (start >= 0 && end > start) ? src.slice(start, end) : '';
+})();
+check('新分组 data-nv-acc="ebook" 存在', !!EBOOK_ACC, true);
+check('新分组标题文案为「图片电子书（EPUB）」', /图片电子书（EPUB）/.test(EBOOK_ACC), true);
+check('新分组自身带 aria-expanded 折叠标题',
+    /class="novel-acc-head" aria-expanded="/.test(EBOOK_ACC), true);
+check('新分组自身带箭头图标 .novel-acc-chev', /novel-acc-chev/.test(EBOOK_ACC), true);
+check('新分组自身带展开体 .novel-acc-body', /class="novel-acc-body"/.test(EBOOK_ACC), true);
+check('新分组有右侧摘要位 novel_acc_summary_ebook',
+    /id="novel_acc_summary_ebook"/.test(EBOOK_ACC), true);
+check('新分组默认关闭（不让 EPUB 影响既有 TXT 导出）',
+    /data-nv-acc="ebook"/.test(src) && /class="novel-acc" data-nv-acc="ebook"/.test(src), true);
 
 // —— 接线：与标签页同一条红线（只切 class，不重建 DOM）——
 const accFn = extractFn('bindNovelAccordions');
@@ -623,7 +643,7 @@ const sumFn = extractFn('refreshNovelAccSummaries');
 check('refreshNovelAccSummaries 定义存在', !!sumFn, true);
 const SUMMARY_IDS = ['novel_acc_summary_include', 'novel_acc_summary_exclude', 'novel_acc_summary_style',
     'novel_acc_summary_naming', 'novel_acc_summary_dir', 'novel_acc_summary_write',
-    'novel_acc_summary_display', 'novel_acc_summary_book'];
+    'novel_acc_summary_display', 'novel_acc_summary_book', 'novel_acc_summary_ebook'];
 SUMMARY_IDS.forEach((id) => {
     check(`摘要 ${id} 有刷新逻辑`, (sumFn || '').includes(id), true);
 });

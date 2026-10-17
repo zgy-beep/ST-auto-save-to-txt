@@ -35,7 +35,9 @@ try {
 if (!playwright) {
     console.log('[SKIP] 未安装 playwright-core / playwright，跳过移动端浮层可见性测试');
     console.log('       本地要跑：NODE_PATH=<node_modules 目录> node test/test-mobile-overlay.js');
-    process.exit(0);
+    // 退出码 2 = 未执行（区别于 0 的全部通过）。见 test/README-EXIT-CODES 约定与 T2 审计 P1-1。
+    console.log('[SKIP] EXIT CODE 2 = 未执行：本条测试的断言这一次一条都没有跑，不得当作绿灯。');
+    process.exit(2);
 }
 
 const BROWSERS = [
@@ -47,7 +49,8 @@ const BROWSERS = [
 const executablePath = BROWSERS.find((p) => fs.existsSync(p));
 if (!executablePath) {
     console.log('[SKIP] 未找到 Edge / Chrome，跳过移动端浮层可见性测试');
-    process.exit(0);
+    console.log('[SKIP] EXIT CODE 2 = 未执行：本条测试的断言这一次一条都没有跑，不得当作绿灯。');
+    process.exit(2);
 }
 
 // —— 从 index.js 抽取真实实现，保证测的是同一份代码 ——

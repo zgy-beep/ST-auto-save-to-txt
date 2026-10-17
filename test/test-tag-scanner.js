@@ -1,70 +1,16 @@
 /**
- * 会话标签检测器（scanChatTags / parseTagList）单元测试
+ * 会话标签检测器（scanChatTags / parseTagList / isAuxiliaryTag）单元测试
  * 运行方式: node test/test-tag-scanner.js
  *
- * 注意：与 test-think.js 同模式，以下为从 index.js 复制的纯函数副本，前端模块为 ES module 无法直接 require。
+ * 本测试**不再手抄副本**：直接加载 index.js 的真实实现（见 test/_helpers/load-index.js）。
+ * 忽略集合（INLINE_TAGS / SCAN_IGNORE_TAGS）也从真实模块取用并做正向断言，
+ * 防止「副本里忽略集合悄悄改小、测试照样绿」。
  */
 
-// 通用行内排版标签（这些标签不作为思考/元数据孤立块处理）
-const INLINE_TAGS = new Set(['b', 'i', 'u', 's', 'em', 'strong', 'span', 'sub', 'sup', 'small', 'del', 'mark']);
-
-// 标签扫描时忽略的 HTML 结构标签（这些不属于"自定义标签"，不展示在检测器中）
-const SCAN_IGNORE_TAGS = new Set([
-    ...INLINE_TAGS,
-    'html', 'head', 'body', 'div', 'p', 'br', 'hr', 'img', 'a',
-    'script', 'style', 'pre', 'code', 'ul', 'ol', 'li',
-    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'table', 'thead', 'tbody', 'tr', 'td', 'th',
-    'font', 'center', 'blockquote', 'video', 'audio', 'source', 'iframe',
-]);
-
-/**
- * 解析标签名单字符串为标签数组（白名单/黑名单输入框与检测器 chips 共用，防止逻辑漂移）
- */
-function parseTagList(str) {
-    if (typeof str !== 'string' || !str.trim()) return [];
-    return str
-        .split(/[,，\s]+/)
-        .map(t => t.trim().replace(/^<|>$/g, ''))
-        .filter(Boolean);
-}
-
-/**
- * 扫描会话中出现过的自定义标签，按出现次数降序返回（供"会话标签检测器"展示）
- * 天然跳过闭标签 </tag>、HTML 注释 <!-- --> 与 DOCTYPE；details/summary 不排除（默认黑名单含 details）
- * 返回 { tags: 全部标签 [{tag, count}]（不截断，展示层限高滚动）, total: 总会话标签种数 }
- */
-function scanChatTags(chatLog) {
-    const counts = new Map();
-    if (!Array.isArray(chatLog)) return { tags: [], total: 0 };
-    const tagRegex = /<\s*([a-zA-Z][a-zA-Z0-9_\-~.:#]*)[^>]*>/g;
-    for (const m of chatLog) {
-        const text = (m && typeof m.mes === 'string') ? m.mes : '';
-        if (!text) continue;
-        tagRegex.lastIndex = 0;
-        let match;
-        while ((match = tagRegex.exec(text)) !== null) {
-            const tag = match[1].toLowerCase();
-            if (SCAN_IGNORE_TAGS.has(tag)) continue;
-            counts.set(tag, (counts.get(tag) || 0) + 1);
-        }
-    }
-    const sorted = [...counts.entries()]
-        .map(([tag, count]) => ({ tag, count }))
-        .sort((a, b) => (b.count - a.count) || a.tag.localeCompare(b.tag));
-    // 全量返回绝不截断：哪怕几十个标签也要全部展示，展示层用限高滚动容器承载
-    return { tags: sorted, total: sorted.length };
-}
-
-// 思维链/草稿类标签的特征模式：与 index.js 中 cleanNovelText 内 genericAuxiliaryPattern 的标签名部分保持一致
-const AUX_TAG_NAME_PATTERN = /[a-zA-Z0-9_\-~.:#]*(?:think|thought|reasoning|cot|scratchpad|reflection|inner_thought|analysis|plan)[a-zA-Z0-9_\-~.:#]*/i;
-
-/**
- * 判断标签是否属于思维链/草稿类（会被清洗引擎全自动剔除，检测器据此打「自动」徽标）
- */
-function isAuxiliaryTag(tag) {
-    return typeof tag === 'string' && AUX_TAG_NAME_PATTERN.test(tag);
-}
+const { loadIndexModule } = require('./_helpers/load-index.js');
+const api = loadIndexModule();
+const { parseTagList, scanChatTags, isAuxiliaryTag, DEFAULT_SETTINGS } = api;
+const { INLINE_TAGS, SCAN_IGNORE_TAGS } = api.__internals;
 
 let passCount = 0;
 let failCount = 0;
@@ -91,6 +37,16 @@ function assertDeepEqual(actual, expected, testName) {
         failCount++;
     }
 }
+
+// 测试 0: 真实实现自带的忽略集合结构（若被改小/改删，下面用例会连带变红）
+assert(SCAN_IGNORE_TAGS instanceof Set && INLINE_TAGS instanceof Set,
+    '测试 0.1: SCAN_IGNORE_TAGS / INLINE_TAGS 为真实 Set 实例');
+assert(INLINE_TAGS.has('b') && INLINE_TAGS.has('mark'),
+    '测试 0.2: INLINE_TAGS 含 b/mark 等行内标签');
+assert([...INLINE_TAGS].every(t => SCAN_IGNORE_TAGS.has(t)) && SCAN_IGNORE_TAGS.size > INLINE_TAGS.size,
+    '测试 0.2b: SCAN_IGNORE_TAGS 以 INLINE_TAGS 为子集并额外扩了结构标签');
+assert(SCAN_IGNORE_TAGS.has('div') && SCAN_IGNORE_TAGS.has('script') && SCAN_IGNORE_TAGS.has('br'),
+    '测试 0.3: SCAN_IGNORE_TAGS 含 div/script/br 等结构标签');
 
 // 测试 1: parseTagList 解析（逗号/中文逗号/空白混用 + 尖括号剥离）
 assertDeepEqual(parseTagList('status, memory, <ooc> note'), ['status', 'memory', 'ooc', 'note'], '测试 1.1: 混合分隔符与尖括号剥离');
@@ -141,6 +97,8 @@ assertDeepEqual(parseTagList('状态，记忆'), ['状态', '记忆'], '测试 1
     const chatLog = [{ mes: '<details>补充设定</details>' }];
     const { tags } = scanChatTags(chatLog);
     assertDeepEqual(tags.map(r => r.tag), ['details'], '测试 5.1: details 可正常被检测器扫出');
+    assert(parseTagList(DEFAULT_SETTINGS.exclude_tags).includes('details'),
+        '测试 5.2: details 确实在真实 DEFAULT_SETTINGS 黑名单里（与上一条语义对齐）');
 }
 
 // 测试 6: 闭标签 </story> 不产生额外计数
