@@ -328,7 +328,7 @@ function syncWandEntryState() {
 // 完全绕开 html 上的 transform。酒馆自己的弹窗就是这么做的
 // （酒馆助手 @types/iframe/exported.sillytavern.d.ts：SillyTavern.Popup → dlg: HTMLDialogElement）。
 //
-// ⚠️⚠️ 但 top layer **只解决定位，不解决层叠**（v1.17.4 实测踩坑，代价是弹窗全体消失）：
+// 但 top layer **只解决定位，不解决层叠**（v1.17.4 实测踩坑，代价是弹窗全体消失）：
 // html 上的 transform 同时让 **html 成为一个层叠上下文**，dialog show() 之后绘制
 // 仍在这个层叠上下文里参与比较 —— 载体 `z-index: auto`（等价 0）直接输给酒馆 UI 的
 // 29999，用户看到的是「弹窗显示在酒馆界面后面」。
@@ -337,21 +337,21 @@ function syncWandEntryState() {
 // 教训：判断层叠顺序只能靠**像素采样**，z-index 数值推理在这个场景里会给出错误结论。
 //
 // 实测（temp/diag-dialog4.js，条件=html劫持 + 文档1.6×高 + scrollTop180 + 锚点整体失效）：
-//     div+fixed（v1.17.2 的做法）    → 药丸 top 550，不贴底 ❌
-//     dialog载体static + 内层fixed   → 药丸 top 224，漂得更远 ❌（载体没铺满视口）
-//     dialog自身fixed:inset:0 + 内层absolute → 药丸 top 730.4，稳稳贴右下 ✅
+//     div+fixed（v1.17.2 的做法）    → 药丸 top 550，不贴底
+//     dialog载体static + 内层fixed   → 药丸 top 224，漂得更远（载体没铺满视口）
+//     dialog自身fixed:inset:0 + 内层absolute → 药丸 top 730.4，稳稳贴右下
 // 所以载体必须**自己铺满视口**（fixed + inset:0），内层才改用 absolute，
 // 解析基准就是载体盒子（=视口），与 html 的 transform 完全无关。
 //
 // 为什么不用 showModal()：模态 dialog 会给整个文档加 inert，
-// 药丸在设置弹窗打开时就点不到了（实测 ❌），而入口必须始终可点。
+// 药丸在设置弹窗打开时就点不到了（实测），而入口必须始终可点。
 // 因此统一用非模态 show()，模态语义（点遮罩关闭、Esc）继续由我们自己实现。
 // ============================================================================
 
 /**
  * 把浮层挂进 top-layer 载体。
  *
- * ⚠️ 这里**必须**留一条「挂不进载体就直接挂 body」的兜底：
+ * 这里**必须**留一条「挂不进载体就直接挂 body」的兜底：
  * 一旦载体建不出来（极老 WebView 没有 <dialog>）而调用方又没有兜底，
  * 浮层元素就**从未被插入 DOM** —— 症状是弹窗彻底消失且毫无报错，
  * 极难定位。挂回 body 时补一个 z-index，保证仍能盖住宿主 UI。
@@ -519,7 +519,7 @@ function isFloatPosUsableForViewport(pos, w, h, vp, gap) {
  * 覆盖「宿主把 fixed 钉在高于可见区的文档盒子上」「文档被顶起」「跨设备旧坐标」
  * 等所有会让药丸跑到屏幕外的情形；手机端同时保证不让常驻输入栏压住。
  *
- * ⚠️ 量之前必须先把上一轮的 transform 清掉：`getBoundingClientRect()` 反映的是
+ * 量之前必须先把上一轮的 transform 清掉：`getBoundingClientRect()` 反映的是
  * 「CSS 锚点 + 已有补偿」之后的矩形，若拿它去算新的补偿再**替换** transform，
  * 残差恰好等于旧值 —— 每调用一次就左右各偏一次、永远收敛不了（实测会看到
  * inlineTransform 在 translate(0,-62) 这类值上来回跳）。
@@ -1292,7 +1292,7 @@ function extractBbiImageList(msg) {
             }
         }
     }
-    // ⚠️ 关键：必须按 slotSeq 升序，不能用存储/遍历顺序（实测消息 #106 存储顺序 [2,1,0]）
+    // 关键：必须按 slotSeq 升序，不能用存储/遍历顺序（实测消息 #106 存储顺序 [2,1,0]）
     out.sort((a, b) => a.slotSeq - b.slotSeq);
     return out;
 }
@@ -1750,7 +1750,7 @@ async function postChapterToServer(payload) {
 
         const data = await response.json().catch(() => ({}));
         if (!data.skipped) {
-            console.log(`[AutoSaveTxt] 📖 新章节已融入小说: ${data.file || ''}`);
+            console.log(`[AutoSaveTxt] 新章节已融入小说: ${data.file || ''}`);
         }
         return {
             success: true,
@@ -2794,7 +2794,7 @@ function getVisibleViewportBox() {
     return { width, height };
 }
 
-/** 文档滚动量（宿主劫持 fixed 后，它是「屏幕坐标 ↔ 宿主坐标」的换算基准） */
+/** 文档滚动量（宿主劫持 fixed 后，它是「屏幕坐标 与 宿主坐标」的换算基准） */
 function getDocScrollTop() {
     if (typeof document === 'undefined') return 0;
     const se = document.scrollingElement || document.documentElement;
@@ -2806,7 +2806,7 @@ function getDocScrollTop() {
  * 正常宿主恒为 (0,0)；酒馆这类被 transform 劫持的宿主在文档滚动后不为 0。
  * 用探针即测即取（同一 tick 内建/测/删），避免缓存过期。
  *
- * ⚠️ v1.17.3：浮层挂进 top-layer 载体后，元素改用 absolute、基准是载体盒子（= 视口），
+ * v1.17.3：浮层挂进 top-layer 载体后，元素改用 absolute、基准是载体盒子（= 视口），
  * **不再需要任何折算**。而探针仍是普通 fixed div，在被劫持的宿主里会量到非 0 值 ——
  * 若继续拿来折算，等于把 top-layer 已经正确的坐标又减掉一个偏移量，药丸反而跑偏。
  * 所以先判断浮层是否在 top layer 里，是则直接返回 (0,0)。
@@ -3215,7 +3215,7 @@ function openEbookPreviewModal() {
     if (!body) return;
     const rows = [];
     rows.push(`<div class="novel-mv-stat">含图消息 <b>${scan.imageMessages}</b> 条 · 图片共 <b>${scan.totalImages}</b> 张`
-        + `${scan.degradedCount ? ` · <span class="is-warn">原位校验不一致 ${scan.degradedCount} 条（将退化为章尾插图）</span>` : ' · 原位校验全部一致 ✅'}`
+        + `${scan.degradedCount ? ` · <span class="is-warn">原位校验不一致 ${scan.degradedCount} 条（将退化为章尾插图）</span>` : ' · 原位校验全部一致'}`
         + `${scan.missingList.length ? ` · <span class="is-warn">${scan.missingList.length} 项缺失</span>` : ''}</div>`);
     if (!scan.messages.length) {
         rows.push('<div class="novel-mv-hint">当前会话没有识别到图片。若你在用 bbi 等图像生成扩展，请确认消息里带有 <code>extra.bbiImage</code> 数据。</div>');
@@ -4129,12 +4129,12 @@ async function renderSettingsUI(cachedStatus = null) {
                         <span class="novel-info-val is-wrap"><code>SillyTavern/plugins/auto-save</code></span>
                     </div>
                     <div class="novel-guide-row">
-                        <small class="novel-guide-text">🐳 <b>Docker 容器内直连手动复制命令：</b></small>
+                        <small class="novel-guide-text"><b>Docker 容器内直连手动复制命令：</b></small>
                         <button type="button" class="novel-copy-btn" id="novel_copy_docker_manual_btn">
                             <i class="fa-solid fa-copy"></i> 复制 Docker 手动命令
                         </button>
                     </div>
-                    <small class="novel-guide-text novel-guide-foot">💡 <b>提示：</b>复制完成后，请确认酒馆 <code>config.yaml</code> 中开启 <code>enableServerPlugins: true</code>，重启酒馆（Docker 执行 <code>docker restart &lt;容器名&gt;</code>），刷新网页即可正常使用。</small>
+                    <small class="novel-guide-text novel-guide-foot"><b>提示：</b>复制完成后，请确认酒馆 <code>config.yaml</code> 中开启 <code>enableServerPlugins: true</code>，重启酒馆（Docker 执行 <code>docker restart &lt;容器名&gt;</code>），刷新网页即可正常使用。</small>
                 </div>
             `;
 

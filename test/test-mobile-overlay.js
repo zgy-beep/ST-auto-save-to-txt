@@ -262,7 +262,7 @@ function measure(win, overlay, pv, done) {
     // 症状是「弹窗显示在酒馆界面后面」。本页已补上 .stui 宿主元素来复现该冲突。
     // 命中测试：命中自己的浮层 = 在最上层；命中 stui-* = 被盖住。
     //
-    // ⚠️ 探针必须打在**设置弹窗独有**的位置，且判定归属要用 closest('#novel_settings_modal')：
+    // 探针必须打在**设置弹窗独有**的位置，且判定归属要用 closest('#novel_settings_modal')：
     // ① 预览弹窗也铺满视口且同样在 top layer，用「视口中心」取点会命中它；
     // ② 两个弹窗都带 .novel-modal-header，直接 contains 会命中「另一个弹窗的同名节点」；
     // ③ 测试页里两个弹窗是同时打开的（真实产品里互斥），所以**只比「浮层 vs 宿主 UI」**，

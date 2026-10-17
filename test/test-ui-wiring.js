@@ -215,7 +215,7 @@ console.log('\n=== ③e 层叠：浮层必须盖过宿主 UI（v1.17.4，修「�
 // 背景：宿主 html 上的 transform 除了劫持 fixed 包含块，还让 html 成为**层叠上下文**。
 // dialog show() 之后绘制仍困在这个上下文里比较，载体 z-index:auto（=0）直接输给
 // 酒馆 UI 的 29999 → 弹窗/药丸全部被盖住。**top layer 只解决定位，不解决层叠。**
-// ⚠️ v1.17.5：这里**不能**再断言 2147483647。顶格是 v1.17.4 的应急写法，
+// v1.17.5：这里**不能**再断言 2147483647。顶格是 v1.17.4 的应急写法，
 // 副作用是药丸压在自己打开的弹窗之上、且盖住酒馆后续 show() 的任何东西。
 // 契约已改为「分档且都高于宿主 29999」，见 ③f 段的量化断言。
 check('载体写死了高于宿主 29999 的 z-index（auto 会输给宿主，实测弹窗被完全遮住）',
@@ -242,7 +242,7 @@ check('移动端浮层测试页复刻了宿主 UI 元素（.stui）——没有�
 console.log('\n=== ③f 层级分档 + 药丸瘦身（v1.17.5）===');
 // 诉求：药丸太大影响感官 + 层级太高（int32 顶格）导致不管开什么都在最上面。
 // 分档：药丸 1000010 < 设置弹窗 1000015 < 预览弹窗 1000025，三者都高于宿主 29999。
-// ⚠️ style.css 是 CRLF 行尾；`\s*` 本身已覆盖 \r\n，不要再叠 `\r?\n` ——
+// style.css 是 CRLF 行尾；`\s*` 本身已覆盖 \r\n，不要再叠 `\r?\n` ——
 // 叠加后 \s* 会先吃掉 \r，\r? 再要求一个 \r 就永远匹配不上（文本肉眼对得上但断言全 false）。
 check('药丸载体 1000010（高于宿主 29999，但让位给自家弹窗）',
     /dialog\.novel-tl > #novel-floating-window,\s*dialog\.novel-tl > #novel-floating-window \{\s*z-index: 1000010;/.test(css), true);
@@ -250,11 +250,11 @@ check('设置弹窗档位高于药丸（点药丸开弹窗后，弹窗必须压�
     /dialog\.novel-tl > #novel_settings_modal \{\s*z-index: 1000015;/.test(css), true);
 check('预览弹窗档位高于设置弹窗（预览可从设置弹窗内唤起）',
     /dialog\.novel-tl > #novel_preview_modal \{\s*z-index: 1000025;/.test(css), true);
-// ⚠️ 必须先剥注释再找：说明文字里会引用这个数字（「v1.17.4 写的是 z-index: 2147483647」），
+// 必须先剥注释再找：说明文字里会引用这个数字（「v1.17.4 写的是 z-index: 2147483647」），
 // 不剥就会把文档本身判成违规 —— 这条断言本身就被这样坑红过一次。
 check('样式表里已没有任何 z-index: 2147483647 声明（顶格会压在任何东西之上）',
     /z-index:\s*2147483647/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')), false);
-// ⚠️ 以下这几条是**文本断言**，理论上会被后面追加的覆盖块掩盖（空转风险）。
+// 以下这几条是**文本断言**，理论上会被后面追加的覆盖块掩盖（空转风险）。
 // 真正的「药丸到底多大、层级到底多少」由 test-mobile-overlay.js 的 computed 值断言
 // （pillCompact / zAboveHost / zNotIntMax / zPillYieldsToSettings）负责 ——
 // 自证时实测过：把这两条文本断言涉及的声明改坏，computed 断言立刻变红，文本断言不会。
@@ -467,8 +467,8 @@ const paneDivs = (src.match(/class="novel-tabpane(?: is-active)?"/g) || []).leng
 check('标签按钮 5 个', tabBtns, 5);
 check('标签面板 5 个', paneDivs, 5);
 TAB_KEYS.forEach((k) => {
-    check(`标签 data-nv-tab="${k}" 存在`, src.includes(`data-nv-tab="${k}"`), true);
-    check(`面板 data-nv-pane="${k}" 存在`, src.includes(`data-nv-pane="${k}"`), true);
+    check(`标签 data-nv-tab="${k}"存在`, src.includes(`data-nv-tab="${k}"`), true);
+    check(`面板 data-nv-pane="${k}"存在`, src.includes(`data-nv-pane="${k}"`), true);
 });
 check('默认只有「连载」面板带 is-active',
     (src.match(/class="novel-tabpane is-active"/g) || []).length, 1);
@@ -576,7 +576,7 @@ console.log('\n=== ⑪ v1.17 折叠分组（替代卡片）===');
 const ACC_KEYS = ['book', 'include', 'exclude', 'scan', 'style', 'naming', 'write', 'dir', 'ebook', 'display'];
 check('折叠分组 10 个', (src.match(/class="novel-acc"|class="novel-acc is-open"/g) || []).length, 10);
 ACC_KEYS.forEach((k) => {
-    check(`分组 data-nv-acc="${k}" 存在`, src.includes(`data-nv-acc="${k}"`), true);
+    check(`分组 data-nv-acc="${k}"存在`, src.includes(`data-nv-acc="${k}"`), true);
     check(`分组「${k}」有右侧摘要位`, new RegExp(`data-nv-acc="${k}"[\\s\\S]{0,400}?novel-acc-summary`).test(src), true);
 });
 check('不折叠的动作行 2 个（过滤预览 / 导出与同步）',
@@ -617,7 +617,7 @@ const EBOOK_ACC = (() => {
     const end = src.indexOf('data-nv-acc="display"');
     return (start >= 0 && end > start) ? src.slice(start, end) : '';
 })();
-check('新分组 data-nv-acc="ebook" 存在', !!EBOOK_ACC, true);
+check('新分组 data-nv-acc="ebook"存在', !!EBOOK_ACC, true);
 check('新分组标题文案为「图片电子书（EPUB）」', /图片电子书（EPUB）/.test(EBOOK_ACC), true);
 check('新分组自身带 aria-expanded 折叠标题',
     /class="novel-acc-head" aria-expanded="/.test(EBOOK_ACC), true);
@@ -724,7 +724,7 @@ console.log('\n=== ⑬ v1.17.6 开关上的「蓝色尖角」= 宿主 checkbox �
 // 21px 高 + overflow:hidden 裁掉大半，右下那截尖角从滑钮左侧探出来 = 用户看到的蓝三角。
 // 实测宿主样式坐标见 temp/st-style.css:4054-4093。
 //
-// ⚠️ 这里必须**逐块定位**、不能用 `[\s\S]*?` 一路跨到文件尾——
+// 这里必须**逐块定位**、不能用 `[\s\S]*?` 一路跨到文件尾——
 // 覆盖块后面还有别的规则，`[\s\S]*?` 会匹配到不相干的那份，断言空转（实测过）。
 // 做法：先切出「最后一个 input[type=checkbox]::before 块的原文」，再在块内做断言。
 const tickBlocks = [];
@@ -742,7 +742,7 @@ checkOk('对勾伪元素连 display 一起关掉（宿主的 scale(1) 动画也�
     tickBlocks.length === 2 && tickBlocks.every(b => /display:\s*none\s*!important/.test(b.body)),
     JSON.stringify(tickBlocks.map(b => b.body.match(/display:[^;]*/)?.[0] || '(无)')));
 // 兜底总闸 = 最后一条 ::before 规则块（v1.17.6 追加在文件末尾）
-// ⚠️ 必须用「最后一条」而不是「任一条」：分档规则里也有 :checked::before，
+// 必须用「最后一条」而不是「任一条」：分档规则里也有 :checked::before，
 // 只查全局有没有 → 把总闸的选择器改废了测试照样绿（实测踩过）。
 const gateBlock = tickBlocks.length ? tickBlocks[tickBlocks.length - 1] : null;
 checkOk('兜底总闸是最后一条对勾规则块（追加在文件末尾）',
@@ -757,7 +757,7 @@ checkOk('总闸挂在设置面板作用域下（不会污染酒馆其它 checkbo
     tickBlocks.some(b => /#auto-save-to-txt-settings/.test(b.sel)));
 
 // 元素级副作用隔离：必须在同一条规则里、且四条声明齐全
-// ⚠️ 这条规则的开括号在「关掉宿主对勾」注释的**上方**（注释写在规则体内部），
+// 这条规则的开括号在「关掉宿主对勾」注释的**上方**（注释写在规则体内部），
 // 所以只能从**选择器**（`.novel-toggle-card .checkbox_label input[type="checkbox"] {`）
 // 往后切块，不能从注释位置往后找 '{'（会命中下一条 ::before 规则 → 断言静默空转）。
 const isoBlock = (() => {
@@ -778,7 +778,7 @@ checkOk('清掉宿主 outline:1px solid var(--grey5020a)（与胶囊圆角打架
     isoBlock !== null && /outline:\s*none;/.test(isoBlock));
 
 // 焦点环：定位到 **checkbox 那条** focus-visible 规则块内部断言
-// ⚠️ 两处坑都踩过：
+// 两处坑都踩过：
 //   ① `outline: 2px solid var(--nv-accent)` 在文件里有 4 处（icon-btn/tab/acc-head/checkbox），
 //      用 indexOf/lastIndexOf 搜声明文本会落到别的规则上 → 断言空转；
 //   ② 正确做法是锚定**选择器**（含 `[type="checkbox"]`）再切块，与 isoBlock 同理。

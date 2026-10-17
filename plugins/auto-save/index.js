@@ -140,7 +140,7 @@ async function resolveAnchoredTargetPath({ chat_anchor, file_name, characterName
     const renamedFrom = path.basename(entry.file);
     novelRegistry[anchor] = { file: desiredPath, title: characterName || '' };
     await saveNovelRegistry();
-    console.log(`[${pluginName}] 📛 聊天改名检测：小说文件已同步更名 ${renamedFrom} -> ${path.basename(desiredPath)}`);
+    console.log(`[${pluginName}] 聊天改名检测：小说文件已同步更名 ${renamedFrom} -> ${path.basename(desiredPath)}`);
     return { targetFilePath: desiredPath, renamedFrom, keptName: false };
 }
 
@@ -1193,7 +1193,7 @@ async function init(router) {
                 }
 
                 const relPath = path.relative(process.cwd(), targetFilePath);
-                console.log(`[${pluginName}] 📖 成功连载新章节 -> ${relPath}${isReplacePath ? ' (重写替换)' : ''}`);
+                console.log(`[${pluginName}] 成功连载新章节 -> ${relPath}${isReplacePath ? ' (重写替换)' : ''}`);
 
                 return {
                     skipped: false,
@@ -1278,7 +1278,7 @@ async function init(router) {
             });
 
             const relPath = path.relative(process.cwd(), targetFilePath);
-            console.log(`[${pluginName}] 📚 成功全量同步历史小说 -> ${relPath}`);
+            console.log(`[${pluginName}] 成功全量同步历史小说 -> ${relPath}`);
 
             return res.json({
                 success: true,
@@ -1402,7 +1402,7 @@ async function init(router) {
             });
 
             const relPath = path.relative(process.cwd(), epubPath);
-            console.log(`[${pluginName}] 📚 成功导出 EPUB 电子书 -> ${relPath}（${normalizedChapters.length} 章 / 嵌入图片 ${assets.length} 张 / 跳过 ${missing.length} 张）`);
+            console.log(`[${pluginName}] 成功导出 EPUB 电子书 -> ${relPath}（${normalizedChapters.length} 章 / 嵌入图片 ${assets.length} 张 / 跳过 ${missing.length} 张）`);
 
             return res.json({
                 success: true,

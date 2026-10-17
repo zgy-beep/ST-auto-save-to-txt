@@ -2455,7 +2455,7 @@
  *   ① 载体必须**自己铺满视口**（position:fixed; inset:0）。
  *      只把浮层塞进一个 static 的 dialog 里没用 —— 实测药丸反而漂到 top 224。
  *   ② 载体必须用**非模态 show()**，不能用 showModal()。
- *      模态会给整个文档加 inert，设置弹窗打开时药丸就点不到了（实测 ❌）。
+ *      模态会给整个文档加 inert，设置弹窗打开时药丸就点不到了（实测）。
  *
  * 内层浮层改用 position:absolute：解析基准是载体盒子（=视口），
  * 与 html 的 transform 完全无关，因此锚点声明整体失效也不会跑偏。
@@ -2503,7 +2503,7 @@ dialog.novel-tl {
 }
 /* 载体若被内容撑高，用 overflow:hidden 钉死（双保险）。
  *
- * ⚠️ 这里**不能**加 `contain: strict`：它含 paint 包含，会裁剪溢出内容。
+ * 这里**不能**加 `contain: strict`：它含 paint 包含，会裁剪溢出内容。
  * 实测（temp/diag-contain.js）设置弹窗的正文滚动区在 contain:strict 的载体里
  * 完全滚不动 —— `body.scrollTop = 300` 写进去读回 0，弹窗正文根本滑不动。
  * 尺寸已经由上面显式的 100dvh 钉住了，不需要 contain 帮忙。 */
@@ -2527,17 +2527,17 @@ dialog.novel-tl {
  * 实测证据（temp/diag-zorder*.js，像素采样不是推理）：
  *   宿主环境 = html transform + 顶栏 29999 / 遮罩 100 / 底栏 29998
  *   弹窗中心像素：
- *     dialog show()，载体 z-index auto   → 被绿色遮罩盖住 ❌
- *     dialog show()，内层 z-index MAX     → 仍被盖住 ❌（哈希与 auto 完全相同）
- *     dialog show()，载体 z-index MAX     → 盖住了 ✅
- *     dialog show()，两层都 MAX           → 盖住且药丸纯色（无半透明叠加）✅
- *   ⚠️ 内层 z-index 完全无效（载体是它的父级，父级输了子级赢不了）。
- *   ⚠️ 只加载体时药丸仍被宿主底栏的半透明背景**透过并叠加**（截图里黄变暗黄），
+ *     dialog show()，载体 z-index auto   → 被绿色遮罩盖住
+ *     dialog show()，内层 z-index MAX     → 仍被盖住（哈希与 auto 完全相同）
+ *     dialog show()，载体 z-index MAX     → 盖住了
+ *     dialog show()，两层都 MAX           → 盖住且药丸纯色（无半透明叠加）
+ *   内层 z-index 完全无效（载体是它的父级，父级输了子级赢不了）。
+ *   只加载体时药丸仍被宿主底栏的半透明背景**透过并叠加**（截图里黄变暗黄），
  *      所以内层那条 z-index 也必须留着。
  *
  * 修法：载体与内层都写死 z-index 顶层值。两处都要，不是一个。
  *
- * ⚠️ 内层这条必须用 `dialog.novel-tl > #novel_settings_modal` 这种带 id 的写法：
+ * 内层这条必须用 `dialog.novel-tl > #novel_settings_modal` 这种带 id 的写法：
  * 前面已存在的 `#novel_settings_modal { z-index: 1000015 }` 特异性是 (1,0,0)，
  * 而 `dialog.novel-tl > .novel-modal-overlay` 只有 (0,1,2) —— 直接被压过去，
  * 实测 computed 仍读回 1000015。**只加类选择器是不够的，必须压过 id 选择器。**
@@ -2563,7 +2563,7 @@ dialog.novel-tl > .novel-modal-overlay {
  *   ③ 顶格 z-index 会盖住酒馆后续 show() 出来的任何东西。
  *
  * 实测（temp/diag-zlevel3.js，**top layer 内部 z-index 依然生效**）：
- *   载体 z=1000010 后 show 的药丸，被先 show 但 z=1000015 的设置弹窗盖住 → 分层可行 ✅
+ *   载体 z=1000010 后 show 的药丸，被先 show 但 z=1000015 的设置弹窗盖住 → 分层可行
  *
  * 分档（沿用这套本来就在用的标度，只把「顶格」换回「有高低之分」）：
  *   宿主 UI 最高 29999（顶栏 29999 / 输入栏 29998 / 抽屉 29997）
@@ -2572,7 +2572,7 @@ dialog.novel-tl > .novel-modal-overlay {
  *   预览弹窗     1000025  ← 可从设置弹窗内唤起，再高一级
  *   chip 提示    1000030
  * 载体与内层必须同档（内层是载体的子级，父级输了子级赢不了）。
- * ⚠️ 选择器仍必须带 id：`#novel_settings_modal` 特异性 (1,0,0)
+ * 选择器仍必须带 id：`#novel_settings_modal` 特异性 (1,0,0)
  *    胜过 `dialog.novel-tl > .novel-modal-overlay` (0,1,2)，只写类会被压过去。
  * ========================================================================== */
 dialog.novel-tl,
@@ -2606,14 +2606,14 @@ dialog.novel-tl > #novel_preview_modal {
  * 否则「变小」会变成「难点」。
  * ========================================================================== */
 .novel-fw-pill {
-    /* ⚠️ 必须显式声明：酒馆的全局 reset（* { box-sizing }）覆盖不到扩展浮层，
+    /* 必须显式声明：酒馆的全局 reset（* { box-sizing }）覆盖不到扩展浮层，
        没有它 min-height 会与 padding **相加** —— 实测 min-height:36 + padding:12
        + border:2 = 50px，比改之前还高。踩过一次，别删。 */
     box-sizing: border-box;
     gap: 5px;
     /* 默认是一枚小圆钮（≈34×34），hover / 聚焦 / 拖动时才横向展开成胶囊。
        实测面积从 129×39.6 降到 ≈34×34 —— 常驻右下的视觉噪音基本清零。 */
-    /* ⚠️ 收起态尺寸必须用 **min-width + max-width 同值** 来锁，不能只用其中一个：
+    /* 收起态尺寸必须用 **min-width + max-width 同值** 来锁，不能只用其中一个：
        · 只写 max-width:34px + padding:0 → 内容宽度归零，圆钮塌成 2px（实测）
        · 只写 width:34px → 展开时 width 不让开，永远展不开（实测 hover 无效）
        · 两者同值 → 收起是正方形；展开时把两者一起放开即可。
@@ -2659,7 +2659,7 @@ dialog.novel-tl > #novel_preview_modal {
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.52);
 }
 /* 装饰图标默认收起，只在拖动中 / 展开态露出来
-   ⚠️ flex 子项的 `min-width: auto` 会让 width:0 收不回去（内容撑住下限），
+   flex 子项的 `min-width: auto` 会让 width:0 收不回去（内容撑住下限），
    必须显式写 min-width:0 + flex-shrink:0，否则药丸根本缩不下去。 */
 .novel-fw-grip,
 .novel-fw-gear {
